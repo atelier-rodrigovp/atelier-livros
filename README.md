@@ -1,91 +1,99 @@
-# Atelier de Livros IA — esqueleto do repositório
+# Atelier de Livros IA
 
-Scaffold inicial para a plataforma descrita em `PROMPT-PLATAFORMA-LIVROS.md`.
-Web (Netlify) + Supabase (dados/auth/storage/fila) + Agent-worker local (IA via
-Claude Code MAX). **Use este esqueleto como base e deixe o Claude Code completá-lo
-seguindo o spec, fase por fase, com `/goal`.**
+Plataforma pessoal que orquestra os agentes de IA do Claude Code (plano MAX) para
+**produzir, traduzir, capear, empacotar e acompanhar livros** de ponta a ponta.
+Fonte de verdade do produto: `PROMPT-PLATAFORMA-LIVROS.md`.
 
-## Estrutura
+- **Web (Netlify):** React + Vite + TypeScript + Tailwind + shadcn/ui — painel de controle.
+- **Supabase:** Postgres (dados + fila de jobs), Auth (single-user), Storage, Realtime, RLS.
+- **Agent-worker (local):** Node/TS que pega jobs na fila e executa a IA (Claude Code
+  headless + `livro_runner.py` + skills). **A web nunca chama o Claude direto.**
+
+## Arquitetura
 ```
-atelier-livros/
-├── README.md                  · este arquivo
-├── netlify.toml               · build/deploy do front
-├── .gitignore
-├── .env.example               · variáveis do FRONT (anon key)
-├── package.json               · front React+Vite+TS+Tailwind+shadcn
-├── supabase/
-│   ├── schema.sql             · tabelas (idempotente)
-│   └── policies.sql           · RLS (owner = auth.uid())
-├── src/                       · front (bootstrap mínimo)
-│   ├── lib/supabase.ts
-│   └── App.tsx
-└── worker/                    · agent-worker LOCAL (NÃO vai para o Netlify)
-    ├── package.json
-    ├── .env.example           · SERVICE ROLE só aqui
-    └── src/
-        ├── supabase.ts
-        ├── index.ts           · loop de polling + lock + dispatch
-        └── jobs.ts            · executores por tipo de job (chamam Claude Code/runner)
+WEB (Netlify)  ──HTTPS──►  SUPABASE (Postgres/Auth/Storage/Realtime/RLS)
+   painel/catálogo            tabelas + fila `jobs`            ▲  │
+                                                    pega job   │  ▼  status/artefatos
+                                            AGENT-WORKER (PC, Claude MAX logado)
+                                            poll → executa skills → sobe ao Storage
 ```
+Segredos: o front só conhece `anon key`; a `service_role` e o login do Claude ficam
+**só no worker** (`worker/.env`, fora do git).
 
-## Setup rápido
+## Fila de jobs (web → worker)
+| tipo | payload | worker faz |
+|---|---|---|
+| `criar_fundacao` | `{project_id}` | `arquiteto-de-enredo` (não interativo) → fundação no disco → Storage; cria edição origem |
+| `escrever_livro` | `{project_id}` | `livro_runner.py --model opus` até CONCLUIDO; capítulos/manuscrito/EPUB → Storage; nota/status por verdade do disco |
+| `gerar_epub` | `{edition_id}` | `edicao-kindle/build_epub.py` (determinístico) + `validate_epub.py` → `artifacts(epub)` |
+| `traduzir` | `{project_id, idiomas:[...]}` | `traducao-editorial` por idioma → `editions` + capítulos traduzidos |
+| `gerar_capa` | `{edition_id}` | `canvas-design` (arte + tipografia) → PNG/PDF KDP → `artifacts(capa)` |
+| `gerar_pacote` | `{edition_id}` | `edicao-kindle` (pacote comercial) → `publishing_packages` |
+| `importar_vendas` | `{import_id, csv_path}` | parse CSV KDP → `sales_rows` (a UI de Vendas também importa direto) |
+| `ping` | `{}` | smoke test ponta a ponta da fila |
+
+## Setup (resumo — detalhes em `SETUP-CREDENCIAIS.md`)
+
 ### 1) Supabase
-1. Crie um projeto no Supabase.
-2. Rode `supabase/schema.sql` e depois `supabase/policies.sql` no SQL Editor.
-3. Crie os buckets de Storage: `manuscritos`, `epubs`, `capas`, `pacotes` (privados).
-4. Em Auth, **desabilite signups** e crie o seu usuário (uso próprio).
+1. Crie um projeto. Em **SQL Editor**, rode em ordem: `supabase/schema.sql`,
+   `supabase/policies.sql`, `supabase/storage.sql` (todos idempotentes).
+2. **Storage:** crie 4 buckets privados — `manuscritos`, `epubs`, `capas`, `pacotes`.
+3. **Auth:** crie seu usuário e **desative signups** (uso próprio). Login por
+   e-mail+senha ou **magic link**.
 
 ### 2) Front (Netlify)
 ```
-cp .env.example .env        # preencha VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY
+cp .env.example .env        # VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY (públicas)
 npm install
-npm run dev                 # local
-npm run build               # produção (Netlify usa isto)
+npm run dev                 # local (http://localhost:5173)
+npm run build               # produção (Netlify: build `npm run build`, publish `dist`)
 ```
-Deploy: conecte o repo no Netlify (build `npm run build`, publish `dist`).
+Deploy: conecte o repo no Netlify e configure as duas variáveis `VITE_*`.
 
-### 3) Worker (na SUA máquina, onde o Claude Code MAX está logado)
+### 3) Worker (na sua máquina, com Claude Code MAX logado)
+Pré-requisitos: **Node 20+**, **Python 3.12+**, **Claude Code** (logado no MAX), e as
+skills instaladas em `~/.claude/skills/`: `arquiteto-de-enredo`,
+`livro-do-zero-ao-epub`, `traducao-editorial`, `edicao-kindle`,
+`book-bestseller-review`, `canvas-design`.
 ```
 cd worker
-cp .env.example .env        # SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, CLAUDE_BIN, RUNNER_PATH...
+cp .env.example .env        # SUPABASE_URL, SERVICE_ROLE, OWNER_USER_ID, RUNNER_PATH...
 npm install
-npm run dev                 # ou: npm run start (produção)
+npm run start
 ```
-Para rodar 24/7: use PM2 (`pm2 start npm --name atelier-worker -- run start`) ou o
-Agendador de Tarefas do Windows. Para independer do PC, migre o worker para uma VM
-(ver Seção 15 do spec).
+> **Windows:** o worker usa `spawn(shell:false)`, que não resolve shims `.cmd` nem
+> nomes do PATH. Aponte `CLAUDE_BIN` e `PY_BIN` para os **.exe reais** (ver
+> `worker/.env.example`).
 
-## Validação da FASE 0 (fundação técnica)
-Critérios de aceite (Seção 12). Tudo abaixo deve passar contra o Supabase **real**:
-1. `npm install` na raiz e em `worker/` sem erros.
-2. `npm run build` (front) e `npm test` (unitários) verdes.
-3. Rodar `supabase/schema.sql` e `supabase/policies.sql` no SQL Editor (idempotentes —
-   podem rodar de novo sem quebrar). Criar os 4 buckets de Storage.
-4. Criar seu usuário em Auth e **desabilitar signups**. Login no painel funciona.
-5. Criar um projeto pelo botão “Novo projeto” → persiste (visível só para você por RLS).
-6. Subir o worker (`cd worker && npm run start`) → ele loga **“conectado”** e o
-   indicador “Worker online” acende no painel.
-7. Em **Configurações → Enfileirar job de teste (ping)** → o job sai de `queued` para
-   `done` (worker pegou o job de teste). É o smoke test ponta a ponta da fila.
+### Rodar o worker 24/7
+- **Windows (Agendador de Tarefas):** crie uma tarefa "Ao iniciar o sistema" que roda
+  `npm run start` em `worker/` (ação: o `node.exe`/`npm` com diretório inicial em `worker/`).
+- **PM2 (multiplataforma):**
+  ```
+  npm i -g pm2
+  pm2 start npm --name atelier-worker -- run start    # dentro de worker/
+  pm2 save && pm2 startup
+  ```
+- Para independer do PC, migre o worker para uma **VM 24/7** (mesmo `.env`).
 
-> **Skills de IA (FASE 1+):** a escrita/tradução/capa/EPUB dependem das skills
-> `arquiteto-de-enredo`, `livro-do-zero-ao-epub` (+ `livro_runner.py`),
-> `traducao-editorial`, `edicao-kindle`, `book-bestseller-review`, `canvas-design`.
-> Elas **ainda não estão instaladas** nesta máquina e serão necessárias a partir da
-> FASE 1. A FASE 0 não depende delas.
+## Telas
+Dashboard (projetos + jobs Realtime) · Novo Projeto (wizard de briefing) · Projeto
+(abas Fundação/Escrita/Edições/Capas/EPUBs/Publicação) · Catálogo (capas filtráveis) ·
+Vendas (import CSV KDP + dashboards) · Configurações (saúde do worker + ping).
 
 ## Testes
 ```
-npm test            # unitários do front (vitest): validações Zod + reducers de status
+npm test                    # front (vitest): parser CSV KDP, validações Zod, reducers de status
 cd worker && npm run typecheck
 ```
 
-## Regras de ouro (do spec)
-- A web NUNCA chama o Claude direto; ela enfileira `jobs`. Quem executa é o worker.
-- `service_role` e o login do Claude Code ficam SÓ no worker (`.env` fora do git).
-- Escrita do livro = `livro_runner.py --model opus` (verdade do disco). `/goal`
-  orquestra fases de desenvolvimento e tarefas macro.
-- Amazon: gerar pacote + importar CSV (sem scraping).
+## Amazon/KDP
+Sem API: a plataforma **gera o pacote** (sinopse, descrição HTML, 7 keywords, 3
+categorias, EPUB, capa) para publicação manual no KDP, e **importa CSV** dos relatórios
+para os dashboards. Nada de scraping/automação de login (respeita os Termos).
 
-> Próximo passo: abra o Claude Code nesta pasta e cole o **Prompt de arranque**
-> (Seção 16 do `PROMPT-PLATAFORMA-LIVROS.md`).
+## Regras de ouro
+- A web NUNCA chama o Claude direto; enfileira `jobs`. Quem executa é o worker.
+- `service_role` e login do Claude só no worker (`.env` fora do git).
+- Escrita = `livro_runner.py --model opus` (verdade do disco).
+- Opus inegociável no escritor; skills baratas mantêm seu frontmatter.
