@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Copy, Download, FileText, Image, Languages, Loader2, Maximize2, PenLine, Play, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, Copy, Download, FileText, Image, Languages, Loader2, Maximize2, Pencil, PenLine, Play, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
 import { signedUrl, deleteProject } from "@/lib/storage";
@@ -72,6 +72,9 @@ export default function Projeto() {
   const [selEpub, setSelEpub] = useState<Record<string, string>>({});
   const [confirmDel, setConfirmDel] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [salvandoEdit, setSalvandoEdit] = useState(false);
+  const [ed, setEd] = useState<Record<string, string>>({});
 
   const carregar = useCallback(async () => {
     if (!id) return;
@@ -125,6 +128,51 @@ export default function Projeto() {
       setCapaIdiomas(editions.map((e) => e.idioma));
     }
   }, [editions, capaIdiomas.length]);
+
+  function abrirEdicao() {
+    if (!proj) return;
+    setEd({
+      titulo: proj.titulo ?? "",
+      autor: (proj.briefing as any)?.autor ?? "",
+      genero: proj.genero ?? "",
+      serie: proj.serie ?? "",
+      volume: String(proj.volume ?? 1),
+      idioma_origem: proj.idioma_origem ?? "pt-BR",
+      total_capitulos: proj.total_capitulos != null ? String(proj.total_capitulos) : "",
+      paginas_alvo: proj.paginas_alvo != null ? String(proj.paginas_alvo) : "",
+      piso_palavras: String(proj.piso_palavras ?? 1400),
+      meta_nota: String(proj.meta_nota ?? 9),
+      skill_escrita: proj.skill_escrita ?? "",
+    });
+    setEditOpen(true);
+  }
+  async function salvarEdicao() {
+    if (!id || !proj) return;
+    if (!ed.titulo?.trim()) { toast.error("Título não pode ficar vazio."); return; }
+    setSalvandoEdit(true);
+    const num = (v: string) => (v === "" || v == null ? null : Number(v));
+    const { error } = await supabase
+      .from("projects")
+      .update({
+        titulo: ed.titulo.trim(),
+        genero: ed.genero || null,
+        serie: ed.serie || null,
+        volume: num(ed.volume) ?? 1,
+        idioma_origem: ed.idioma_origem,
+        total_capitulos: num(ed.total_capitulos),
+        paginas_alvo: num(ed.paginas_alvo),
+        piso_palavras: num(ed.piso_palavras) ?? 1400,
+        meta_nota: num(ed.meta_nota) ?? 9,
+        skill_escrita: ed.skill_escrita || null,
+        briefing: { ...((proj.briefing as any) || {}), autor: ed.autor || null },
+      })
+      .eq("id", id);
+    setSalvandoEdit(false);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Projeto atualizado.");
+    setEditOpen(false);
+    carregar();
+  }
 
   async function excluir() {
     if (!id) return;
@@ -194,6 +242,9 @@ export default function Projeto() {
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={sb.variant}>{sb.label}</Badge>
+          <Button variant="outline" size="sm" onClick={abrirEdicao}>
+            <Pencil className="h-4 w-4" /> Editar
+          </Button>
           <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" title="Excluir projeto" onClick={() => setConfirmDel(true)}>
             <Trash2 className="h-4 w-4" />
           </Button>
@@ -213,20 +264,53 @@ export default function Projeto() {
         {/* FUNDAÇÃO */}
         <TabsContent value="fundacao">
           <Card>
-            <CardHeader><CardTitle className="text-xl">Fundação</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-xl">Fundação</CardTitle>
+              <CardDescription>Documentos gerados pela skill arquiteto-de-enredo.</CardDescription>
+            </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <JobStatus job={jobMaisRecente(jobs, "criar_fundacao")} />
-              <p className="text-muted-foreground">Documentos gerados pela skill arquiteto-de-enredo.</p>
-              <div className="flex flex-wrap gap-2">
-                {["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md"].map((f) => (
-                  <Button key={f} variant="outline" size="sm" onClick={async () => {
-                    const url = await signedUrl("manuscritos", `${proj.owner}/${proj.id}/fundacao/${f}`);
-                    if (url) window.open(url, "_blank"); else toast.error("Ainda não disponível.");
-                  }}>
-                    <FileText className="h-4 w-4" /> {f}
-                  </Button>
-                ))}
-              </div>
+              {(() => {
+                const jf = jobMaisRecente(jobs, "criar_fundacao");
+                const gerando = jf?.status === "queued" || jf?.status === "running";
+                const pronto = jf?.status === "done" || proj.status !== "rascunho";
+                if (gerando) {
+                  return (
+                    <div className="flex flex-col items-center gap-3 py-10 text-center text-muted-foreground">
+                      <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                      <p>Gerando a fundação (Bíblia, Estrutura, Mapa de Personagens, agentes)…<br />Os arquivos ficam disponíveis para download ao concluir.</p>
+                      <JobStatus job={jf} />
+                    </div>
+                  );
+                }
+                if (jf?.status === "error") {
+                  return (
+                    <div className="space-y-3">
+                      <p className="text-destructive">Falha ao gerar a fundação: {jf.erro?.slice(0, 200)}</p>
+                      <Button size="sm" variant="outline" onClick={() => enfileira("criar_fundacao", {})}>Tentar de novo</Button>
+                    </div>
+                  );
+                }
+                if (!pronto) {
+                  return (
+                    <div className="space-y-3">
+                      <p className="text-muted-foreground">A fundação ainda não foi gerada.</p>
+                      <Button size="sm" onClick={() => enfileira("criar_fundacao", {})}>Gerar fundação</Button>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="flex flex-wrap gap-2">
+                    {["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md"].map((f) => (
+                      <Button key={f} variant="outline" size="sm" onClick={async () => {
+                        const url = await signedUrl("manuscritos", `${proj.owner}/${proj.id}/fundacao/${f}`);
+                        if (url) window.open(url, "_blank"); else toast.error("Arquivo não encontrado no Storage.");
+                      }}>
+                        <FileText className="h-4 w-4" /> {f}
+                      </Button>
+                    ))}
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         </TabsContent>
@@ -526,6 +610,76 @@ export default function Projeto() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar projeto</DialogTitle>
+            <DialogDescription>Corrija título, autor, série e parâmetros. Salvar não regera a fundação.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Título</Label>
+              <Input value={ed.titulo ?? ""} onChange={(e) => setEd((s) => ({ ...s, titulo: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Autor</Label>
+              <Input value={ed.autor ?? ""} onChange={(e) => setEd((s) => ({ ...s, autor: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Gênero</Label>
+              <Input value={ed.genero ?? ""} onChange={(e) => setEd((s) => ({ ...s, genero: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Série (vazio = livro único)</Label>
+              <Input value={ed.serie ?? ""} onChange={(e) => setEd((s) => ({ ...s, serie: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Volume</Label>
+              <Input type="number" value={ed.volume ?? ""} onChange={(e) => setEd((s) => ({ ...s, volume: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Idioma de origem</Label>
+              <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                value={ed.idioma_origem ?? "pt-BR"} onChange={(e) => setEd((s) => ({ ...s, idioma_origem: e.target.value }))}>
+                {IDIOMAS.map((i) => <option key={i} value={i}>{i}</option>)}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label>Skill de escrita</Label>
+              <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                value={ed.skill_escrita ?? ""} onChange={(e) => setEd((s) => ({ ...s, skill_escrita: e.target.value }))}>
+                {["", "skill-dan-brown", "hoover-mcfadden", "skill-jk-rowling", "vesper-escritor-de-capitulos"].map((v) => (
+                  <option key={v} value={v}>{v || "Nenhuma"}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label>Capítulos</Label>
+              <Input type="number" value={ed.total_capitulos ?? ""} onChange={(e) => setEd((s) => ({ ...s, total_capitulos: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Páginas-alvo</Label>
+              <Input type="number" value={ed.paginas_alvo ?? ""} onChange={(e) => setEd((s) => ({ ...s, paginas_alvo: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Piso de palavras/cap.</Label>
+              <Input type="number" value={ed.piso_palavras ?? ""} onChange={(e) => setEd((s) => ({ ...s, piso_palavras: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Meta de nota</Label>
+              <Input type="number" step="0.1" value={ed.meta_nota ?? ""} onChange={(e) => setEd((s) => ({ ...s, meta_nota: e.target.value }))} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setEditOpen(false)}>Cancelar</Button>
+            <Button onClick={salvarEdicao} disabled={salvandoEdit}>
+              {salvandoEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />}
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={confirmDel} onOpenChange={(o) => !o && setConfirmDel(false)}>
         <DialogContent>

@@ -180,6 +180,7 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
     "  2) PÁGINAS-ALVO e nº de CAPÍTULOS.\n" +
     "  3) SÉRIE: é livro único, TRILOGIA, ou SAGA de N livros? Se série, qual o NOME da série e QUANTOS livros (N), e qual o volume atual.\n" +
     "  4) SKILL DE ESCRITA (metodologia), opções: skill-dan-brown, hoover-mcfadden, skill-jk-rowling, vesper-escritor-de-capitulos, Nenhuma.\n" +
+    "  5) Nº DE PERSONAGENS NOMEADOS por papel: quantos protagonista(s), antagonista(s) e personagens de APOIO.\n" +
     "Verifique nas respostas acima quais já foram cobertos; só conclua quando os 4 estiverem respondidos.\n\n" +
     "REGRA DE CONVERGÊNCIA: entrevista CURTA, no máximo 4 blocos. Priorize os campos obrigatórios e os " +
     "essenciais de enredo. Fora dos obrigatórios, adote defaults sensatos para o que faltar (registre como suposição).\n\n" +
@@ -193,7 +194,7 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
     "- Só CONCLUA quando os 4 obrigatórios estiverem respondidos.\n\n" +
     "SAÍDA: grave APENAS o arquivo entrevista-out.json, exatamente em UMA destas formas:\n" +
     'CONTINUAR: {"completo": false, "perguntas": [{"campo":"genero","pergunta":"...","opcoes":["A","B"],"recomendada":"A","porque":"...","multipla":false}]}\n' +
-    'CONCLUIR: {"completo": true, "briefing": {"ideia_central":"...","genero":"...","autor":"...","serie":<"Nome da série"|null>,"serie_total":<int,1 se único>,"volume":<int>,"protagonista":{"nome":"...","ferida":"...","segredo":"...","desejo":"..."},"antagonista":"...","tom":"...","pdv":"...","tempo_verbal":"...","num_capitulos":12,"paginas_alvo":200,"meta_palavras":60000,"linha_tempo":"...","final":"...","canone":"...","proibido":"...","skill_escrita":<"..."|null>,"piso_palavras":1400,"meta_nota":9.0,"idioma":"pt-BR"}}\n' +
+    'CONCLUIR: {"completo": true, "briefing": {"ideia_central":"...","genero":"...","autor":"...","serie":<"Nome da série"|null>,"serie_total":<int,1 se único>,"volume":<int>,"protagonista":{"nome":"...","ferida":"...","segredo":"...","desejo":"..."},"antagonista":"...","personagens":{"protagonistas":1,"antagonistas":1,"apoio":4},"tom":"...","pdv":"...","tempo_verbal":"...","num_capitulos":12,"paginas_alvo":200,"meta_palavras":60000,"linha_tempo":"...","final":"...","canone":"...","proibido":"...","skill_escrita":<"..."|null>,"piso_palavras":1400,"meta_nota":9.0,"idioma":"pt-BR"}}\n' +
     "NÃO escreva nada além do JSON nesse arquivo. NÃO rode /goal nem gere a fundação agora.";
   const r = await runClaude(prompt, dir);
 
