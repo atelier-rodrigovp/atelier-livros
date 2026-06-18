@@ -3,6 +3,7 @@
 // Verdade do disco: o worker confere arquivos reais antes de gravar status.
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { sb, OWNER } from "./supabase.js";
 import {
   projDir,
@@ -482,61 +483,112 @@ async function traduzir(job: Job, hb?: Heartbeat) {
   await setProgress(job.id, { fase: "TRADUCAO", concluido: true, idiomas });
 }
 
+// Compositor determinístico (Pillow) — garante layout idêntico entre idiomas.
+const COMPOSER = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "compose_cover.py");
+
 // ===========================================================================
-// gerar_capa — IA de imagem + canvas-design -> PNG/PDF tamanho KDP
+// gerar_capas — UMA arte-mestra (sem texto) + tradução de título/subtítulo +
+// composição DETERMINÍSTICA por idioma (mesma "fotografia", layout padronizado).
+// Aceita payload {idiomas:[...], briefing, subtitulo?, novo_art?} OU edition_id (1 idioma).
 // ===========================================================================
-async function gerarCapa(job: Job, hb?: Heartbeat) {
-  const edicao = await getEdition(job.edition_id!);
-  const proj = await getProject(edicao.project_id);
-  const dir = projDir(edicao.project_id);
-  await mkdir(path.join(dir, "capas"), { recursive: true });
-  await hb?.({ fase: "CAPA", idioma: edicao.idioma });
-
-  const autor = proj.briefing?.autor || "Atelier de Livros IA";
-  const subtitulo = job.payload?.subtitulo || proj.briefing?.subtitulo || "";
-  const premissa = proj.briefing?.ideia_central || "";
-  const brief = (job.payload?.briefing || "").trim();
-
-  const base = `capas/${edicao.idioma}`;
-  const prompt =
-    "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
-    "Você é DIRETOR DE ARTE criando uma CAPA DE LIVRO de nível editorial para o Amazon KDP, usando a skill `canvas-design`.\n\n" +
-    "OBRA:\n" +
-    `- Título: "${proj.titulo}"\n` +
-    `- Subtítulo: "${subtitulo}"\n` +
-    `- Autor: "${autor}"\n` +
-    `- Gênero: "${proj.genero || ""}"  · Idioma: ${edicao.idioma}\n` +
-    (premissa ? `- Premissa (contexto, NÃO imprimir na capa): "${premissa}"\n` : "") +
-    "\nDIREÇÃO DE ARTE DO AUTOR (prioridade máxima — siga à risca):\n" +
-    (brief
-      ? brief + "\n"
-      : "Sem briefing específico — proponha uma direção forte, original e coerente com o gênero e a premissa.\n") +
-    "\nREQUISITOS (qualidade de editora):\n" +
-    "- Formato RETRATO 1600×2560 px (proporção 1:1.6), RGB. NUNCA paisagem.\n" +
-    "- Um foco visual dominante coerente com gênero/premissa + hierarquia tipográfica forte: TÍTULO grande e legível, depois autor, depois subtítulo.\n" +
-    "- Legível em MINIATURA: imagine a 160px de largura — título contrastante, nada de texto minúsculo.\n" +
-    "- Paleta intencional (3–5 cores) coerente com o tom; contraste AA texto/fundo; margens de segurança (texto longe das bordas).\n" +
-    "- Tipografia editorial (use as fontes da canvas-design). EVITE cara de IA: sem texto distorcido/ilegível, sem watermark, sem lorem, sem clip-art genérico, sem moldura aleatória.\n" +
-    "- Respeite restrições/proibições do briefing.\n\n" +
-    `ENTREGA: salve a capa final em "${base}.png" (1600×2560) e também em "${base}.pdf". Não gere mais nada. O runner verifica o arquivo no disco.`;
-  const r = await runClaude(prompt, dir);
-
-  const png = path.join(dir, `${base}.png`);
-  if (!(await exists(png))) throw new Error(`capa não gerada (${base}.png ausente). rc=${r.code} ${r.err.slice(-300)}`);
-  const keyPng = storageKey(edicao.project_id, edicao.idioma, "capa.png");
-  await uploadFile("capas", keyPng, png);
-  const url = await signedUrl("capas", keyPng);
-  const meta: any = { briefing: brief || null };
-  const pdf = path.join(dir, `${base}.pdf`);
-  if (await exists(pdf)) {
-    const keyPdf = storageKey(edicao.project_id, edicao.idioma, "capa.pdf");
-    await uploadFile("capas", keyPdf, pdf);
-    meta.pdf = keyPdf;
+async function gerarCapas(job: Job, hb?: Heartbeat) {
+  let projectId = job.project_id;
+  let idiomas: string[] = Array.isArray(job.payload?.idiomas) ? job.payload.idiomas.filter(Boolean) : [];
+  if (job.edition_id) {
+    const ed = await getEdition(job.edition_id);
+    projectId = ed.project_id;
+    if (!idiomas.length) idiomas = [ed.idioma];
   }
-  // uma capa por edição: limpa a anterior antes de inserir a nova
-  await sb.from("artifacts").delete().eq("edition_id", edicao.id).eq("tipo", "capa");
-  await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "capa", storage_path: keyPng, url_publica: url, meta }));
-  await setProgress(job.id, { fase: "CAPA", concluido: true });
+  if (!projectId) throw new Error("gerar_capas: faltou project_id");
+  const proj = await getProject(projectId);
+  const origem = proj.idioma_origem || "pt-BR";
+  if (!idiomas.length) idiomas = [origem];
+
+  const dir = projDir(projectId);
+  const capasDir = path.join(dir, "capas");
+  await mkdir(capasDir, { recursive: true });
+  const fontsDir = path.join(skillsDir(), "canvas-design", "canvas-fonts");
+  const autor = proj.briefing?.autor || "Atelier de Livros IA";
+  const tituloOrig = proj.titulo;
+  const subOrig = job.payload?.subtitulo || proj.briefing?.subtitulo || "";
+  const premissa = proj.briefing?.ideia_central || "";
+  const brief = String(job.payload?.briefing || "").trim();
+  const masterPng = path.join(capasDir, "master.png");
+  const novoArt = job.payload?.novo_art !== false; // default: (re)gerar arte
+
+  // 1) Arte-mestra SEM TEXTO (uma só, compartilhada por todos os idiomas)
+  if (novoArt || !(await exists(masterPng))) {
+    await hb?.({ fase: "CAPA", etapa: "arte-mestra" });
+    await setProgress(job.id, { fase: "CAPA", etapa: "arte-mestra" });
+    try { await rm(masterPng); } catch {}
+    const promptArt =
+      "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
+      "Crie SOMENTE a ARTE DE FUNDO de uma capa de livro — SEM NENHUM TEXTO, sem letras, sem título, sem nome — " +
+      "usando a skill `canvas-design`.\n" +
+      `- Gênero: "${proj.genero || ""}".` + (premissa ? ` Premissa: "${premissa}".` : "") + "\n" +
+      "- Direção de arte: " + (brief || "proponha algo forte, original e coerente com o gênero.") + "\n" +
+      "- Formato RETRATO 1600×2560 px, RGB, qualidade editorial; FOCO visual dominante. " +
+      "Deixe o TOPO e a BASE mais limpos/respirando (o texto será sobreposto depois pelo sistema).\n" +
+      "- EVITE cara de IA. NÃO escreva NENHUM texto/letra na imagem.\n" +
+      "ENTREGA: salve em capas/master.png (1600×2560). Não gere mais nada.";
+    const r = await runClaude(promptArt, dir);
+    if (!(await exists(masterPng)))
+      throw new Error(`arte-mestra não gerada (capas/master.png). rc=${r.code} ${r.err.slice(-300)}`);
+    await uploadFile("capas", storageKey(projectId, "master.png"), masterPng);
+  }
+
+  // 2) Traduzir título/subtítulo (uma vez) para os idiomas pedidos
+  await hb?.({ fase: "CAPA", etapa: "textos" });
+  const textosFile = path.join(capasDir, "textos.json");
+  try { await rm(textosFile); } catch {}
+  const promptTxt =
+    "Modo headless. Trabalhe SOMENTE nesta pasta.\n" +
+    "Traduza o TÍTULO e o SUBTÍTULO de um livro para os idiomas pedidos, soando nativo e preservando o sentido " +
+    "(como a skill `traducao-editorial` faria para título de capa; preserve nomes próprios).\n" +
+    `Idioma de origem: ${origem}. Título: "${tituloOrig}". Subtítulo: "${subOrig}".\n` +
+    `Idiomas pedidos: ${idiomas.join(", ")}.\n` +
+    'Grave SOMENTE capas/textos.json no formato {"<idioma>": {"titulo":"...","subtitulo":"..."}}, ' +
+    `incluindo ${origem} com o título/subtítulo ORIGINAIS. Nada além do JSON.`;
+  const rt = await runClaude(promptTxt, dir);
+  let textos: Record<string, any> = {};
+  const rawTxt = await readText(textosFile);
+  if (rawTxt) {
+    try { textos = JSON.parse(rawTxt); } catch { const m = rawTxt.match(/\{[\s\S]*\}/); textos = m ? JSON.parse(m[0]) : {}; }
+  }
+  if (!Object.keys(textos).length) throw new Error("tradução de textos falhou (textos.json). rc=" + rt.code);
+
+  // 3) Compor cada idioma DETERMINISTICAMENTE (mesma arte, layout idêntico)
+  for (const idioma of idiomas) {
+    await hb?.({ fase: "CAPA", etapa: "compondo", idioma });
+    const t = textos[idioma] || {};
+    const titulo = String(t.titulo || tituloOrig);
+    const subtitulo = String(t.subtitulo ?? (idioma === origem ? subOrig : ""));
+    const outPng = path.join(capasDir, `${idioma}.png`);
+    const outPdf = path.join(capasDir, `${idioma}.pdf`);
+    const cfgFile = path.join(capasDir, `_cfg-${idioma}.json`);
+    await writeFile(
+      cfgFile,
+      JSON.stringify({ art: masterPng, out: outPng, pdf: outPdf, title: titulo, subtitle: subtitulo, author: autor, fonts_dir: fontsDir }),
+      "utf8"
+    );
+    const rc = await run(PY_BIN, [COMPOSER, "--config", cfgFile], { cwd: dir });
+    if (!(await exists(outPng)))
+      throw new Error(`composição da capa ${idioma} falhou. ${(rc.err || rc.out).slice(-300)}`);
+
+    const ed = await ensureEdition(projectId, idioma, idioma === origem, idioma === origem ? "pronto" : "pendente");
+    const keyPng = storageKey(projectId, idioma, "capa.png");
+    await uploadFile("capas", keyPng, outPng);
+    const url = await signedUrl("capas", keyPng);
+    const meta: any = { briefing: brief || null, titulo, master: true };
+    if (await exists(outPdf)) {
+      const keyPdf = storageKey(projectId, idioma, "capa.pdf");
+      await uploadFile("capas", keyPdf, outPdf);
+      meta.pdf = keyPdf;
+    }
+    await sb.from("artifacts").delete().eq("edition_id", ed.id).eq("tipo", "capa");
+    await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: ed.id, tipo: "capa", storage_path: keyPng, url_publica: url, meta }));
+  }
+  await setProgress(job.id, { fase: "CAPA", concluido: true, idiomas });
 }
 
 // ===========================================================================
@@ -656,7 +708,8 @@ export async function executarJob(job: Job, hb?: Heartbeat): Promise<void> {
     case "escrever_livro": return escreverLivro(job, hb);
     case "gerar_epub": return gerarEpub(job);
     case "traduzir": return traduzir(job, hb);
-    case "gerar_capa": return gerarCapa(job, hb);
+    case "gerar_capa": return gerarCapas(job, hb);
+    case "gerar_capas": return gerarCapas(job, hb);
     case "gerar_pacote": return gerarPacote(job, hb);
     case "importar_vendas": return importarVendas(job);
     default: throw new Error("tipo de job desconhecido: " + job.tipo);

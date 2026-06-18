@@ -4,23 +4,16 @@ import { ArrowLeft, Copy, Download, FileText, Image, Languages, Loader2, Maximiz
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
 import { signedUrl } from "@/lib/storage";
+import { cn } from "@/lib/utils";
 import { IDIOMAS, type Job, type Project } from "@/lib/types";
 import { jobStatusBadge, projectStatusBadge } from "@/lib/status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 
 interface Edition { id: string; idioma: string; status: string; is_origem: boolean; nota_review: number | null; }
 interface Artifact { id: string; edition_id: string | null; tipo: string; storage_path: string; url_publica: string | null; }
@@ -55,9 +48,9 @@ export default function Projeto() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [idiomasSel, setIdiomasSel] = useState<string[]>([]);
   const [capaUrls, setCapaUrls] = useState<Record<string, string | null>>({});
-  const [capaDialog, setCapaDialog] = useState<Edition | null>(null);
   const [capaBrief, setCapaBrief] = useState("");
   const [capaSub, setCapaSub] = useState("");
+  const [capaIdiomas, setCapaIdiomas] = useState<string[]>([]);
 
   const carregar = useCallback(async () => {
     if (!id) return;
@@ -105,16 +98,24 @@ export default function Projeto() {
     return () => { ativo = false; };
   }, [artifacts]);
 
-  function abrirBriefingCapa(e: Edition) {
-    setCapaDialog(e);
-    setCapaBrief("");
-    setCapaSub("");
-  }
-  async function gerarCapaComBrief() {
-    if (!capaDialog) return;
-    const ed = capaDialog;
-    setCapaDialog(null);
-    await enfileira("gerar_capa", { briefing: capaBrief.trim(), subtitulo: capaSub.trim() }, ed.id);
+  // Por padrão, todas as edições selecionadas para gerar capa.
+  useEffect(() => {
+    if (editions.length && capaIdiomas.length === 0) {
+      setCapaIdiomas(editions.map((e) => e.idioma));
+    }
+  }, [editions, capaIdiomas.length]);
+
+  async function gerarCapasBatch() {
+    if (!capaIdiomas.length) {
+      toast.error("Selecione ao menos um idioma.");
+      return;
+    }
+    await enfileira("gerar_capas", {
+      idiomas: capaIdiomas,
+      briefing: capaBrief.trim(),
+      subtitulo: capaSub.trim(),
+      novo_art: true,
+    });
   }
 
   async function enfileira(tipo: any, payload: Record<string, unknown>, edition_id?: string) {
@@ -245,55 +246,102 @@ export default function Projeto() {
 
         {/* CAPAS */}
         <TabsContent value="capas">
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {editions.map((e) => {
-              const capa = capaDe(e.id);
-              const url = capaUrls[e.id] ?? capa?.url_publica ?? null;
-              const job = jobMaisRecente(jobs, "gerar_capa", e.id);
-              const gerando = job?.status === "queued" || job?.status === "running";
-              return (
-                <Card key={e.id} className="overflow-hidden">
-                  <CardHeader className="pb-2"><CardTitle className="text-base">{e.idioma}</CardTitle></CardHeader>
-                  <CardContent className="space-y-3">
-                    {/* Capa de livro = RETRATO (1600×2560 ~ proporção 5:8) */}
-                    {url ? (
-                      <button
-                        type="button"
-                        onClick={() => window.open(url, "_blank")}
-                        className="group relative block w-full overflow-hidden rounded-md border bg-muted"
-                        title="Abrir em tamanho real"
-                      >
-                        <img
-                          src={url}
-                          alt={`Capa ${e.idioma}`}
-                          className="aspect-[5/8] w-full object-contain transition-transform group-hover:scale-[1.02]"
-                        />
-                        <span className="absolute right-2 top-2 rounded bg-background/80 p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-                          <Maximize2 className="h-4 w-4" />
-                        </span>
-                      </button>
-                    ) : (
-                      <div className="flex aspect-[5/8] w-full items-center justify-center rounded-md border border-dashed text-muted-foreground">
-                        {gerando ? <Loader2 className="h-6 w-6 animate-spin" /> : <Image className="h-7 w-7" />}
-                      </div>
-                    )}
-                    <Button
-                      size="sm"
-                      variant={url ? "outline" : "default"}
-                      className="w-full"
-                      disabled={gerando}
-                      onClick={() => abrirBriefingCapa(e)}
-                    >
+          {!editions.length ? (
+            <p className="text-muted-foreground">Crie a edição primeiro (escreva o livro).</p>
+          ) : (
+            <div className="space-y-6">
+              {/* Painel: um briefing -> capas em vários idiomas (mesma arte) */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-xl">Direção de arte</CardTitle>
+                  <CardDescription>
+                    Um briefing só. A IA cria <strong>uma arte-mestra</strong> e o sistema
+                    compõe as capas dos idiomas escolhidos com a <strong>mesma imagem</strong> e
+                    layout padronizado (posição, fontes e autor idênticos) — só o texto muda, traduzido.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
+                    <div className="space-y-2">
+                      <Label htmlFor="brief">Briefing visual</Label>
+                      <Textarea
+                        id="brief"
+                        rows={4}
+                        value={capaBrief}
+                        onChange={(ev) => setCapaBrief(ev.target.value)}
+                        placeholder="Atmosfera, imagem central, paleta, referências, o que evitar. Ex.: farol solitário ao entardecer, azul-petróleo e âmbar, mistério; sem pessoas."
+                      />
+                    </div>
+                    <div className="space-y-2 sm:w-56">
+                      <Label htmlFor="sub">Subtítulo (origem)</Label>
+                      <Input id="sub" value={capaSub} onChange={(ev) => setCapaSub(ev.target.value)} placeholder="Opcional" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Idiomas das capas</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {editions.map((e) => {
+                        const on = capaIdiomas.includes(e.idioma);
+                        return (
+                          <button
+                            key={e.id}
+                            type="button"
+                            onClick={() =>
+                              setCapaIdiomas((s) =>
+                                on ? s.filter((x) => x !== e.idioma) : [...s, e.idioma]
+                              )
+                            }
+                            className={cn(
+                              "rounded-full border px-3 py-1 text-xs transition-colors",
+                              on ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent"
+                            )}
+                          >
+                            {e.idioma}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button onClick={gerarCapasBatch} disabled={!capaIdiomas.length}>
                       <Sparkles className="h-4 w-4" />
-                      {url ? "Regerar com briefing" : "Gerar capa"}
+                      Gerar capas ({capaIdiomas.length})
                     </Button>
-                    <JobStatus job={job} />
-                  </CardContent>
-                </Card>
-              );
-            })}
-            {!editions.length && <p className="text-muted-foreground">Crie a edição primeiro.</p>}
-          </div>
+                    <JobStatus job={jobMaisRecente(jobs, "gerar_capas") ?? jobMaisRecente(jobs, "gerar_capa")} />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Galeria padronizada */}
+              <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
+                {editions.map((e) => {
+                  const url = capaUrls[e.id] ?? capaDe(e.id)?.url_publica ?? null;
+                  return (
+                    <div key={e.id} className="space-y-2">
+                      {url ? (
+                        <button
+                          type="button"
+                          onClick={() => window.open(url, "_blank")}
+                          className="group relative block w-full overflow-hidden rounded-md border bg-muted shadow-sm"
+                          title="Abrir em tamanho real"
+                        >
+                          <img src={url} alt={`Capa ${e.idioma}`} className="aspect-[5/8] w-full object-contain" />
+                          <span className="absolute right-2 top-2 rounded bg-background/80 p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+                            <Maximize2 className="h-4 w-4" />
+                          </span>
+                        </button>
+                      ) : (
+                        <div className="flex aspect-[5/8] w-full items-center justify-center rounded-md border border-dashed text-muted-foreground">
+                          <Image className="h-6 w-6" />
+                        </div>
+                      )}
+                      <p className="text-center text-xs font-medium text-muted-foreground">{e.idioma}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </TabsContent>
 
         {/* EPUBS */}
@@ -356,48 +404,6 @@ export default function Projeto() {
           </div>
         </TabsContent>
       </Tabs>
-
-      {/* Briefing da capa (direção de arte) */}
-      <Dialog open={!!capaDialog} onOpenChange={(o) => !o && setCapaDialog(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Briefing da capa — {capaDialog?.idioma}</DialogTitle>
-            <DialogDescription>
-              Descreva a direção de arte. Quanto mais específico (atmosfera, imagem
-              central, paleta, referências, o que evitar), melhor a capa. Em branco,
-              a IA propõe uma direção coerente com o gênero.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="capa-sub">Subtítulo (opcional)</Label>
-              <Input
-                id="capa-sub"
-                value={capaSub}
-                onChange={(ev) => setCapaSub(ev.target.value)}
-                placeholder="Aparece sob o título na capa"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="capa-brief">Direção de arte</Label>
-              <Textarea
-                id="capa-brief"
-                value={capaBrief}
-                onChange={(ev) => setCapaBrief(ev.target.value)}
-                rows={6}
-                placeholder={"Ex.: atmosfera sombria e marítima; um farol solitário ao entardecer; paleta azul-petróleo e âmbar; tipografia serifada clássica; sensação de mistério; evitar pessoas e clip-art."}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setCapaDialog(null)}>Cancelar</Button>
-            <Button onClick={gerarCapaComBrief}>
-              <Sparkles className="h-4 w-4" />
-              Gerar capa
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

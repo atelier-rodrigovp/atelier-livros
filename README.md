@@ -51,7 +51,8 @@ npm run build               # produção (Netlify: build `npm run build`, publis
 Deploy: conecte o repo no Netlify e configure as duas variáveis `VITE_*`.
 
 ### 3) Worker (na sua máquina, com Claude Code MAX logado)
-Pré-requisitos: **Node 20+**, **Python 3.12+**, **Claude Code** (logado no MAX), e as
+Pré-requisitos: **Node 20+**, **Python 3.12+** (com **Pillow**: `pip install pillow`,
+usado pelo compositor determinístico de capas), **Claude Code** (logado no MAX), e as
 skills instaladas em `~/.claude/skills/`: `arquiteto-de-enredo`,
 `livro-do-zero-ao-epub`, `traducao-editorial`, `edicao-kindle`,
 `book-bestseller-review`, `canvas-design`.
