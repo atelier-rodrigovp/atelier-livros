@@ -299,7 +299,11 @@ export default function NovoProjeto() {
             </Card>
           ))}
           <div className="flex justify-end">
-            <Button size="lg" onClick={responder}>
+            <Button
+              size="lg"
+              onClick={responder}
+              disabled={pendentes.some((p) => !(respostas[p.campo] ?? "").trim())}
+            >
               <Sparkles className="h-4 w-4" />
               Responder e continuar
             </Button>

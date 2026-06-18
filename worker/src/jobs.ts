@@ -159,6 +159,8 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
   const qaText = qa.length
     ? qa.map((x, i) => `${i + 1}. P: ${x.pergunta}\n   R: ${x.resposta}`).join("\n")
     : "nenhuma";
+  const camposRespondidos = [...new Set(qa.map((x) => x.campo).filter(Boolean))];
+  const forcarConclusao = qa.length >= 12; // teto rígido: ~4 blocos
   const outFile = path.join(dir, "entrevista-out.json");
   try { await rm(outFile); } catch {}
 
@@ -168,7 +170,12 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
     "(entrevista em blocos, perguntas com opção recomendada; portão de qualidade antes de gerar).\n\n" +
     `IDEIA DO AUTOR:\n${idea}\n\n` +
     `RESPOSTAS ATÉ AGORA (${qa.length} no total):\n${qaText}\n\n` +
-    "CAMPOS OBRIGATÓRIOS (NUNCA conclua sem ter PERGUNTADO e obtido resposta para TODOS estes):\n" +
+    `CAMPOS JÁ RESPONDIDOS (NÃO pergunte nenhum destes de novo): ${camposRespondidos.join(", ") || "nenhum"}.\n` +
+    (forcarConclusao
+      ? "ATENÇÃO: já houve blocos demais — você DEVE CONCLUIR AGORA (completo:true), sem mais perguntas, " +
+        "usando o que tem e defaults sensatos para o que faltar.\n\n"
+      : "\n") +
+    "CAMPOS OBRIGATÓRIOS (não conclua sem ter PERGUNTADO cada um UMA vez — se já está em 'respondidos', considere coberto):\n" +
     "  1) AUTOR (nome do autor, exatamente como deve aparecer na capa).\n" +
     "  2) PÁGINAS-ALVO e nº de CAPÍTULOS.\n" +
     "  3) SÉRIE: é livro único, TRILOGIA, ou SAGA de N livros? Se série, qual o NOME da série e QUANTOS livros (N), e qual o volume atual.\n" +
@@ -181,6 +188,7 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
     "(priorize os obrigatórios que ainda faltam). Cubra também ao longo dos blocos: gênero/subgênero; protagonista (ferida, segredo, desejo ativo); " +
     "antagonista; tom/PdV/tempo verbal; meta de palavras; final; cânone/proibições/idioma.\n" +
     "- Cada pergunta tem: campo (id curto), pergunta, 2–4 opções, UMA 'recomendada' e 'porque' (1 frase). " +
+    "Para AUTOR, faça pergunta de RESPOSTA LIVRE (opcoes:[] e recomendada:'') — o autor digita o nome; não force opções nem re-pergunte. " +
     "Para SÉRIE use opções como: 'Livro único', 'Trilogia (3 livros)', 'Saga (4+ livros)'. Para skill de escrita use as 5 opções acima.\n" +
     "- Só CONCLUA quando os 4 obrigatórios estiverem respondidos.\n\n" +
     "SAÍDA: grave APENAS o arquivo entrevista-out.json, exatamente em UMA destas formas:\n" +
