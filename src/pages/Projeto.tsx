@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 interface Edition { id: string; idioma: string; status: string; is_origem: boolean; nota_review: number | null; }
 interface Artifact { id: string; edition_id: string | null; tipo: string; storage_path: string; url_publica: string | null; }
@@ -51,6 +52,7 @@ export default function Projeto() {
   const [capaBrief, setCapaBrief] = useState("");
   const [capaSub, setCapaSub] = useState("");
   const [capaIdiomas, setCapaIdiomas] = useState<string[]>([]);
+  const [capaNovaArte, setCapaNovaArte] = useState(true);
 
   const carregar = useCallback(async () => {
     if (!id) return;
@@ -114,7 +116,7 @@ export default function Projeto() {
       idiomas: capaIdiomas,
       briefing: capaBrief.trim(),
       subtitulo: capaSub.trim(),
-      novo_art: true,
+      novo_art: capaNovaArte,
     });
   }
 
@@ -301,6 +303,16 @@ export default function Projeto() {
                         );
                       })}
                     </div>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border p-3">
+                    <div className="pr-4">
+                      <p className="text-sm font-medium">Gerar nova arte-mestra</p>
+                      <p className="text-xs text-muted-foreground">
+                        Desligado, reaproveita a arte atual e só compõe os textos (instantâneo) —
+                        ideal para adicionar um idioma mantendo a mesma imagem.
+                      </p>
+                    </div>
+                    <Switch checked={capaNovaArte} onCheckedChange={setCapaNovaArte} aria-label="Gerar nova arte-mestra" />
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
                     <Button onClick={gerarCapasBatch} disabled={!capaIdiomas.length}>
