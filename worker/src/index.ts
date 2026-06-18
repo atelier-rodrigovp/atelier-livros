@@ -35,6 +35,18 @@ async function recuperarOrfaos() {
     .lt("locked_at", limite);
 }
 
+// Flag de controle (a web liga/pausa o processamento). Default: ativo.
+// Fail-open: erro transitório não derruba o worker.
+async function processamentoAtivo(): Promise<boolean> {
+  const { data, error } = await sb
+    .from("worker_control")
+    .select("enabled")
+    .eq("owner", OWNER)
+    .maybeSingle();
+  if (error) return true;
+  return data ? data.enabled !== false : true;
+}
+
 // Lock: pega 1 job queued e marca running de forma atômica (condicional no status).
 async function pegarProximo(): Promise<Job | null> {
   const { data: cand } = await sb
@@ -91,6 +103,11 @@ async function loop() {
   for (;;) {
     try {
       await recuperarOrfaos();
+      if (!(await processamentoAtivo())) {
+        await heartbeat({ estado: "paused" });
+        await sleep(POLL);
+        continue;
+      }
       const job = await pegarProximo();
       if (!job) {
         await sleep(POLL);

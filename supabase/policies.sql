@@ -6,7 +6,7 @@ declare t text;
 begin
   foreach t in array array[
     'projects','editions','chapters','artifacts','publishing_packages',
-    'jobs','sales_imports','sales_rows','worker_heartbeats'
+    'jobs','sales_imports','sales_rows','worker_heartbeats','worker_control'
   ] loop
     execute format('alter table %I enable row level security;', t);
     execute format('drop policy if exists owner_all on %I;', t);

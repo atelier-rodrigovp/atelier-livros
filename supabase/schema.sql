@@ -133,6 +133,13 @@ create table if not exists worker_heartbeats (
   primary key (owner, worker_id)
 );
 
+-- CONTROLE DO WORKER (liga/pausa o processamento de jobs pela web; um registro por owner)
+create table if not exists worker_control (
+  owner uuid primary key default auth.uid(),
+  enabled boolean not null default true,
+  updated_at timestamptz default now()
+);
+
 -- gatilho updated_at
 create or replace function set_updated_at() returns trigger as $$
 begin new.updated_at = now(); return new; end; $$ language plpgsql;
@@ -140,7 +147,7 @@ begin new.updated_at = now(); return new; end; $$ language plpgsql;
 do $$
 declare t text;
 begin
-  foreach t in array array['projects','editions','publishing_packages','jobs'] loop
+  foreach t in array array['projects','editions','publishing_packages','jobs','worker_control'] loop
     execute format('drop trigger if exists trg_%I_updated on %I;', t, t);
     execute format('create trigger trg_%I_updated before update on %I
                     for each row execute function set_updated_at();', t, t);
@@ -153,7 +160,7 @@ do $$
 declare t text;
 begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    foreach t in array array['jobs','projects'] loop
+    foreach t in array array['jobs','projects','worker_control'] loop
       if not exists (
         select 1 from pg_publication_tables
         where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
