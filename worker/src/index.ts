@@ -61,7 +61,8 @@ async function pegarProximo(): Promise<Job | null> {
 }
 
 async function finalizar(jobId: string, patch: Record<string, unknown>) {
-  await sb.from("jobs").update(patch).eq("id", jobId);
+  const { error } = await sb.from("jobs").update(patch).eq("id", jobId);
+  if (error) console.error(`[job ${jobId}] falha ao gravar status final: ${error.message}`);
 }
 
 async function verificarConexao() {

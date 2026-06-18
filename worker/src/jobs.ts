@@ -40,6 +40,13 @@ function edicaoKindleScript(name: string): string {
 }
 
 // ---- DB helpers -----------------------------------------------------------
+// Falha alto: lança se a escrita no banco retornar erro (evita job "done" divergente).
+async function must<T extends { error: unknown }>(p: PromiseLike<T>): Promise<T> {
+  const r = await p;
+  const err = (r as { error: { message?: string } | null }).error;
+  if (err) throw new Error("erro de escrita no banco: " + (err.message ?? String(err)));
+  return r;
+}
 async function getProject(id: string) {
   const { data, error } = await sb.from("projects").select("*").eq("id", id).single();
   if (error) throw new Error("projeto não encontrado: " + error.message);
@@ -54,14 +61,16 @@ async function setProgress(jobId: string, progresso: Record<string, unknown>) {
   await sb.from("jobs").update({ progresso, locked_at: new Date().toISOString() }).eq("id", jobId);
 }
 async function ensureEdition(projectId: string, idioma: string, isOrigem: boolean, status = "pendente") {
-  const { data } = await sb
-    .from("editions")
-    .upsert(
-      { owner: OWNER, project_id: projectId, idioma, is_origem: isOrigem, status },
-      { onConflict: "project_id,idioma" }
-    )
-    .select()
-    .single();
+  const { data } = await must(
+    sb
+      .from("editions")
+      .upsert(
+        { owner: OWNER, project_id: projectId, idioma, is_origem: isOrigem, status },
+        { onConflict: "project_id,idioma" }
+      )
+      .select()
+      .single()
+  );
   return data;
 }
 
@@ -180,15 +189,17 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
 
   // Edição de origem + status do projeto
   await ensureEdition(job.project_id!, proj.idioma_origem || "pt-BR", true, "pendente");
-  await sb
-    .from("projects")
-    .update({
-      status: "fundacao",
-      titulo: state?.titulo || proj.titulo,
-      total_capitulos: total,
-      paginas_alvo: state?.paginas_alvo ?? proj.paginas_alvo,
-    })
-    .eq("id", job.project_id!);
+  await must(
+    sb
+      .from("projects")
+      .update({
+        status: "fundacao",
+        titulo: state?.titulo || proj.titulo,
+        total_capitulos: total,
+        paginas_alvo: state?.paginas_alvo ?? proj.paginas_alvo,
+      })
+      .eq("id", job.project_id!)
+  );
   await setProgress(job.id, { fase: "ESTRUTURA", total_capitulos: total, concluido: true });
 }
 
@@ -255,17 +266,17 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     const key = storageKey(job.project_id!, "origem", `capitulo-${String(c.numero).padStart(2, "0")}.md`);
     await uploadFile("manuscritos", key, c.file);
     const titulo = (await readText(c.file)).split("\n").find((l) => l.startsWith("#"))?.replace(/^#+\s*/, "").trim() ?? null;
-    await sb.from("chapters").upsert(
+    await must(sb.from("chapters").upsert(
       { owner: OWNER, edition_id: edicao.id, numero: c.numero, titulo, palavras: c.palavras, storage_path: key },
       { onConflict: "edition_id,numero" }
-    );
+    ));
   }
   // Manuscrito-mestre
   const mestre = path.join(dir, "manuscrito", "MANUSCRITO-MESTRE.md");
   if (await exists(mestre)) {
     const key = storageKey(job.project_id!, "origem", "MANUSCRITO-MESTRE.md");
     await uploadFile("manuscritos", key, mestre);
-    await sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "manuscrito", storage_path: key });
+    await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "manuscrito", storage_path: key }));
   }
   // EPUB (se o runner gerou)
   const epubRel = state?.epub_caminho;
@@ -273,12 +284,12 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     const key = storageKey(job.project_id!, "origem", path.basename(epubRel));
     await uploadFile("epubs", key, path.join(dir, epubRel));
     const url = await signedUrl("epubs", key);
-    await sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "epub", storage_path: key, url_publica: url });
+    await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "epub", storage_path: key, url_publica: url }));
   }
 
   const nota = state?.ultima_nota != null ? Number(state.ultima_nota) : null;
-  await sb.from("editions").update({ status: "pronto", nota_review: nota }).eq("id", edicao.id);
-  await sb.from("projects").update({ status: "pronto" }).eq("id", job.project_id!);
+  await must(sb.from("editions").update({ status: "pronto", nota_review: nota }).eq("id", edicao.id));
+  await must(sb.from("projects").update({ status: "pronto" }).eq("id", job.project_id!));
   await setProgress(job.id, { fase: "CONCLUIDO", cap_atual: caps.length, total, nota, palavras: state?.palavras_totais ?? 0 });
 }
 
@@ -336,14 +347,14 @@ async function gerarEpub(job: Job) {
   const key = storageKey(edicao.project_id, edicao.idioma, path.basename(out));
   await uploadFile("epubs", key, out);
   const url = await signedUrl("epubs", key);
-  await sb.from("artifacts").insert({
+  await must(sb.from("artifacts").insert({
     owner: OWNER,
     edition_id: edicao.id,
     tipo: "epub",
     storage_path: key,
     url_publica: url,
     meta: { validacao: v.out.slice(-1500) },
-  });
+  }));
   await setProgress(job.id, { fase: "EPUB", concluido: true, validado: v.code === 0 });
 }
 
@@ -384,16 +395,16 @@ async function traduzir(job: Job, hb?: Heartbeat) {
     for (const c of transCaps) {
       const key = storageKey(job.project_id!, idioma, `capitulo-${String(c.numero).padStart(2, "0")}.md`);
       await uploadFile("manuscritos", key, c.file);
-      await sb.from("chapters").upsert(
+      await must(sb.from("chapters").upsert(
         { owner: OWNER, edition_id: ed.id, numero: c.numero, palavras: c.palavras, storage_path: key },
         { onConflict: "edition_id,numero" }
-      );
+      ));
     }
     const mestre = path.join(destino, "MANUSCRITO-MESTRE.md");
     if (await exists(mestre)) {
       await uploadFile("manuscritos", storageKey(job.project_id!, idioma, "MANUSCRITO-MESTRE.md"), mestre);
     }
-    await sb.from("editions").update({ status: "pronto" }).eq("id", ed.id);
+    await must(sb.from("editions").update({ status: "pronto" }).eq("id", ed.id));
   }
   await setProgress(job.id, { fase: "TRADUCAO", concluido: true, idiomas });
 }
@@ -429,7 +440,7 @@ async function gerarCapa(job: Job, hb?: Heartbeat) {
     await uploadFile("capas", keyPdf, pdf);
     meta.pdf = keyPdf;
   }
-  await sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "capa", storage_path: keyPng, url_publica: url, meta });
+  await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "capa", storage_path: keyPng, url_publica: url, meta }));
   await setProgress(job.id, { fase: "CAPA", concluido: true });
 }
 
@@ -536,7 +547,7 @@ async function importarVendas(job: Job) {
   }
   const rows = parseKdpCsv(text).filter((r) => r.unidades != null || r.royalty != null);
   if (rows.length) {
-    await sb.from("sales_rows").insert(rows.map((r) => ({ owner: OWNER, import_id: importId, ...r })));
+    await must(sb.from("sales_rows").insert(rows.map((r) => ({ owner: OWNER, import_id: importId, ...r }))));
   }
   await setProgress(job.id, { fase: "VENDAS", linhas: rows.length });
 }
