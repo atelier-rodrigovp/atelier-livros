@@ -20,3 +20,6 @@ atelier-work/
 
 # arquivo de skills (instaladas em ~/.claude/skills; não versionar)
 skills-livro.zip
+
+# Local Netlify folder
+.netlify
