@@ -166,9 +166,12 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
     "Conduza a ENTREVISTA de fundação de um livro com a metodologia da skill `arquiteto-de-enredo` " +
     "(entrevista em blocos, perguntas com opção recomendada; portão de qualidade antes de gerar).\n\n" +
     `IDEIA DO AUTOR:\n${idea}\n\n` +
-    `RESPOSTAS ATÉ AGORA:\n${qaText}\n\n` +
+    `RESPOSTAS ATÉ AGORA (${qa.length} no total):\n${qaText}\n\n` +
+    "REGRA DE CONVERGÊNCIA (importante): esta é uma entrevista CURTA, de no máximo 3 blocos. " +
+    `Já foram respondidas ${qa.length} perguntas. Se já houver ${qa.length} >= 6 respostas, CONCLUA AGORA ` +
+    "(não faça mais perguntas), adotando defaults sensatos e coerentes para tudo que faltar (registre como suposição).\n\n" +
     "SUA TAREFA (UMA rodada):\n" +
-    "- Se ainda faltam informações ESSENCIAIS para passar o portão de qualidade, gere o PRÓXIMO BLOCO de NO MÁXIMO 3 perguntas. " +
+    "- Se ainda faltam informações ESSENCIAIS e você ainda não atingiu 3 blocos, gere o PRÓXIMO BLOCO de NO MÁXIMO 3 perguntas. " +
     "Cubra ao longo dos blocos: gênero/subgênero; protagonista (ferida, segredo, desejo ativo); antagonista; tom/PdV/tempo verbal; " +
     "OBRIGATÓRIO nº de capítulos E páginas-alvo; meta de palavras; OBRIGATÓRIO skill de escrita; final; cânone/proibições/idioma; autor.\n" +
     "- Cada pergunta tem: campo (id curto), pergunta, 2–4 opções, UMA 'recomendada' (a mais forte) e 'porque' (1 frase). " +

@@ -47,15 +47,15 @@ async function processamentoAtivo(): Promise<boolean> {
   return data ? data.enabled !== false : true;
 }
 
-// Lock: pega 1 job queued e marca running de forma atômica (condicional no status).
-async function pegarProximo(): Promise<Job | null> {
-  const { data: cand } = await sb
-    .from("jobs")
-    .select("*")
-    .eq("owner", OWNER)
-    .eq("status", "queued")
-    .order("created_at", { ascending: true })
-    .limit(1);
+// Jobs interativos rodam numa faixa PARALELA (não esperam atrás de jobs pesados).
+const INTERATIVOS = ["entrevistar", "ping"];
+
+// Lock: pega 1 job queued (filtrável por tipo) e marca running atomicamente.
+async function pegarProximo(opts: { incluir?: string[]; excluir?: string[] } = {}): Promise<Job | null> {
+  let q = sb.from("jobs").select("*").eq("owner", OWNER).eq("status", "queued");
+  if (opts.incluir) q = q.in("tipo", opts.incluir);
+  if (opts.excluir) q = q.not("tipo", "in", `(${opts.excluir.join(",")})`);
+  const { data: cand } = await q.order("created_at", { ascending: true }).limit(1);
   const job = cand?.[0];
   if (!job) return null;
   // claim condicional: só vence quem ainda vê status='queued'
@@ -100,6 +100,43 @@ async function loop() {
   const hb = setInterval(() => heartbeat({ estado: "idle" }), 30_000);
   hb.unref?.();
 
+  // Duas faixas concorrentes: pesados em série + interativos em paralelo.
+  await Promise.all([loopPesado(), loopInterativo()]);
+}
+
+// Executa um job com keepalive de locked_at (evita recuperação indevida de órfão)
+// e tratamento de erro com backoff/reenfileiramento.
+async function processarJob(job: Job) {
+  console.log(`[job ${job.id}] ${job.tipo} — iniciando`);
+  await heartbeat({ estado: "busy", job: job.id, tipo: job.tipo });
+  const keepalive = setInterval(() => {
+    sb.from("jobs").update({ locked_at: new Date().toISOString() }).eq("id", job.id).then(() => {});
+  }, 60_000);
+  keepalive.unref?.();
+  try {
+    await executarJob(job, heartbeat);
+    await finalizar(job.id, { status: "done", erro: null, locked_by: null, locked_at: null });
+    console.log(`[job ${job.id}] done`);
+  } catch (e: any) {
+    const msg = String(e?.message ?? e).slice(0, 2000);
+    const { data } = await sb.from("jobs").select("attempts,max_attempts").eq("id", job.id).single();
+    const attempts = (data?.attempts ?? 0) + 1;
+    const reenfileira = attempts < (data?.max_attempts ?? 3);
+    await finalizar(job.id, {
+      status: reenfileira ? "queued" : "error",
+      attempts,
+      erro: msg,
+      locked_by: null,
+      locked_at: null,
+    });
+    console.error(`[job ${job.id}] erro (tentativa ${attempts}): ${msg}`);
+  } finally {
+    clearInterval(keepalive);
+  }
+}
+
+// Faixa pesada: 1 job por vez (escrita, tradução, capa, epub, pacote, fundação).
+async function loopPesado() {
   for (;;) {
     try {
       await recuperarOrfaos();
@@ -108,43 +145,36 @@ async function loop() {
         await sleep(POLL);
         continue;
       }
-      const job = await pegarProximo();
+      const job = await pegarProximo({ excluir: INTERATIVOS });
       if (!job) {
         await sleep(POLL);
         continue;
       }
-      console.log(`[job ${job.id}] ${job.tipo} — iniciando`);
-      await heartbeat({ estado: "busy", job: job.id, tipo: job.tipo });
-      try {
-        await executarJob(job, heartbeat);
-        await finalizar(job.id, {
-          status: "done",
-          erro: null,
-          locked_by: null,
-          locked_at: null,
-        });
-        console.log(`[job ${job.id}] done`);
-      } catch (e: any) {
-        const msg = String(e?.message ?? e).slice(0, 2000);
-        const { data } = await sb
-          .from("jobs")
-          .select("attempts,max_attempts")
-          .eq("id", job.id)
-          .single();
-        const attempts = (data?.attempts ?? 0) + 1;
-        const reenfileira = attempts < (data?.max_attempts ?? 3);
-        await finalizar(job.id, {
-          status: reenfileira ? "queued" : "error",
-          attempts,
-          erro: msg,
-          locked_by: null,
-          locked_at: null,
-        });
-        console.error(`[job ${job.id}] erro (tentativa ${attempts}): ${msg}`);
-      }
+      await processarJob(job);
     } catch (outer) {
-      console.error("[worker] erro no loop:", outer);
+      console.error("[worker] erro no loop pesado:", outer);
       await sleep(POLL);
+    }
+  }
+}
+
+// Faixa interativa: entrevista/ping rodam em paralelo, sem esperar jobs pesados.
+async function loopInterativo() {
+  for (;;) {
+    try {
+      if (!(await processamentoAtivo())) {
+        await sleep(POLL);
+        continue;
+      }
+      const job = await pegarProximo({ incluir: INTERATIVOS });
+      if (!job) {
+        await sleep(2000);
+        continue;
+      }
+      await processarJob(job);
+    } catch (outer) {
+      console.error("[worker] erro no loop interativo:", outer);
+      await sleep(2000);
     }
   }
 }
