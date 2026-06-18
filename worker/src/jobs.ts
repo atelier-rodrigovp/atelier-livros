@@ -1,7 +1,7 @@
 // Executores por tipo de job. Cada um ORQUESTRA uma skill do Claude Code (ou um
 // script determinístico da skill) — NÃO reimplementa a lógica das skills.
 // Verdade do disco: o worker confere arquivos reais antes de gravar status.
-import { mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdir, writeFile, rm, cp } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sb, OWNER } from "./supabase.js";
@@ -338,6 +338,83 @@ async function refinarFundacao(job: Job, hb?: Heartbeat) {
   }
   if (total > 0) await must(sb.from("projects").update({ total_capitulos: total }).eq("id", job.project_id!));
   await setProgress(job.id, { fase: "REFINO", concluido: true, total_capitulos: total });
+}
+
+// ===========================================================================
+// criar_volumes — cria os volumes 2..N da SAGA como projetos encadeados,
+// herdando a fundação (mundo/elenco/voz) e gerando a Estrutura de cada volume.
+// ===========================================================================
+async function criarVolumes(job: Job, hb?: Heartbeat) {
+  const proj = await getProject(job.project_id!);
+  const b = proj.briefing || {};
+  const serie = proj.serie || b.serie;
+  if (!serie) throw new Error("este projeto não é uma série/saga.");
+  const total = Number(b.serie_total || job.payload?.total || 0);
+  const volBase = Number(proj.volume || 1);
+  if (!(total > volBase)) throw new Error(`nada a criar: total de volumes (${total}) <= volume atual (${volBase}).`);
+  const srcDir = projDir(job.project_id!);
+  if (!(await exists(path.join(srcDir, "Biblia-da-Obra.md"))))
+    throw new Error("gere (e refine) a fundação deste volume antes de criar a saga.");
+
+  // idempotência: não recriar volumes já existentes
+  const { data: existentes } = await sb.from("projects").select("volume").eq("owner", OWNER).eq("serie", serie);
+  const volsExist = new Set((existentes || []).map((x: any) => x.volume));
+
+  const criados: number[] = [];
+  for (let k = volBase + 1; k <= total; k++) {
+    if (volsExist.has(k)) continue;
+    await hb?.({ fase: "VOLUMES", volume: k });
+    await setProgress(job.id, { fase: "VOLUMES", volume: k, criados });
+
+    const titulo = `${serie} — Vol. ${k}`;
+    const briefingVol = { ...b, volume: k, serie, serie_total: total, _saga: { origem: job.project_id, volume: k }, _herdado: true, _interview: { completo: true } };
+    const ins = await must(
+      sb.from("projects").insert({
+        owner: OWNER, titulo, serie, volume: k, genero: proj.genero, idioma_origem: proj.idioma_origem,
+        skill_escrita: proj.skill_escrita, piso_palavras: proj.piso_palavras, meta_nota: proj.meta_nota,
+        total_capitulos: proj.total_capitulos, paginas_alvo: proj.paginas_alvo, status: "rascunho", briefing: briefingVol,
+      }).select().single()
+    );
+    const novo = ins.data as any;
+    const dstDir = projDir(novo.id);
+    await mkdir(dstDir, { recursive: true });
+
+    // herda mundo/elenco/voz/agentes/estado do volume base
+    for (const f of ["Biblia-da-Obra.md", "Mapa-de-Personagens.md", "perfil-de-voz.md", "CLAUDE.md"]) {
+      if (await exists(path.join(srcDir, f))) await cp(path.join(srcDir, f), path.join(dstDir, f));
+    }
+    for (const d of [".claude", "estado", "specs"]) {
+      if (await exists(path.join(srcDir, d))) await cp(path.join(srcDir, d), path.join(dstDir, d), { recursive: true });
+    }
+    await writeFile(
+      path.join(dstDir, "briefing.md"),
+      renderBriefing(novo) +
+        `\n\n## SAGA\nVolume ${k} de ${total} da série "${serie}". Mundo, elenco e voz são HERDADOS do vol. 1 (ver Biblia/Mapa nesta pasta). ` +
+        "Avance os arcos e subtramas plantados; novo conflito central deste volume; deixe ganchos para o próximo.\n",
+      "utf8"
+    );
+
+    // gera SOMENTE a Estrutura deste volume (não recria a fundação herdada)
+    const prompt =
+      "Modo headless. Trabalhe SOMENTE nesta pasta. Use a metodologia da skill `arquiteto-de-enredo`.\n" +
+      "A FUNDAÇÃO HERDADA já existe nesta pasta (Biblia-da-Obra.md, Mapa-de-Personagens.md, perfil-de-voz.md, agentes em .claude/agents/, estado/) — NÃO a recrie nem sobrescreva o mundo/elenco.\n" +
+      `Gere a Estrutura-do-Livro.md DESTE volume (vol ${k} de ${total} da série "${serie}"): novo conflito central do volume, avançando os arcos/subtramas plantados (use o Mapa de Entrelaçamento), com ganchos para o próximo volume.\n` +
+      `Grave/atualize ESTADO_LIVRO.json com titulo="${titulo}", total_capitulos_previstos (nº de capítulos da nova Estrutura), skill_escrita, fase_atual='ESCRITA', gerar_epub=true, meta_nota, piso_palavras_cap.\n` +
+      "NÃO escreva capítulos. NÃO dispare /goal.";
+    const r = await runClaude(prompt, dstDir);
+    const okE = await exists(path.join(dstDir, "Estrutura-do-Livro.md"));
+    const state = await readState(dstDir);
+    const tot = Number(state?.total_capitulos_previstos ?? proj.total_capitulos ?? 0);
+
+    for (const f of ["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md", "ESTADO_LIVRO.json", "briefing.md"]) {
+      if (await exists(path.join(dstDir, f))) await uploadFile("manuscritos", storageKey(novo.id, "fundacao", f), path.join(dstDir, f));
+    }
+    await ensureEdition(novo.id, proj.idioma_origem || "pt-BR", true, "pendente");
+    await must(sb.from("projects").update({ status: okE ? "fundacao" : "rascunho", total_capitulos: tot || proj.total_capitulos }).eq("id", novo.id));
+    if (!okE) console.error(`[volume ${k}] estrutura não gerada. rc=${r.code}`);
+    criados.push(k);
+  }
+  await setProgress(job.id, { fase: "VOLUMES", concluido: true, criados });
 }
 
 // ===========================================================================
@@ -824,6 +901,7 @@ export async function executarJob(job: Job, hb?: Heartbeat): Promise<void> {
     case "entrevistar": return entrevistar(job, hb);
     case "criar_fundacao": return criarFundacao(job, hb);
     case "refinar_fundacao": return refinarFundacao(job, hb);
+    case "criar_volumes": return criarVolumes(job, hb);
     case "escrever_livro": return escreverLivro(job, hb);
     case "gerar_epub": return gerarEpub(job);
     case "traduzir": return traduzir(job, hb);

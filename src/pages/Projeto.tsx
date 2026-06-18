@@ -252,6 +252,34 @@ export default function Projeto() {
         </div>
       </div>
 
+      {(() => {
+        const serieTotal = Number((proj.briefing as any)?.serie_total ?? 0);
+        if (!proj.serie || serieTotal <= (proj.volume ?? 1)) return null;
+        const jv = jobMaisRecente(jobs, "criar_volumes");
+        const criando = jv?.status === "queued" || jv?.status === "running";
+        const faltam = serieTotal - (proj.volume ?? 1);
+        return (
+          <Card className="border-primary/30 bg-primary/5">
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+              <div>
+                <p className="text-sm font-medium">Saga “{proj.serie}” — {serieTotal} volumes</p>
+                <p className="text-xs text-muted-foreground">
+                  Crie os {faltam} volume(s) restante(s) como projetos encadeados, herdando a fundação
+                  (mundo, elenco, voz) e com estrutura própria que avança os arcos.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button size="sm" disabled={criando} onClick={() => enfileira("criar_volumes", {})}>
+                  {criando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  Criar volumes da saga ({faltam})
+                </Button>
+                <JobStatus job={jv} />
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       <Tabs defaultValue="escrita">
         <TabsList className="flex-wrap">
           <TabsTrigger value="fundacao">Fundação</TabsTrigger>

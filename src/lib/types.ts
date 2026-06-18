@@ -36,6 +36,7 @@ export const JOB_TIPOS = [
   "entrevistar",
   "criar_fundacao",
   "refinar_fundacao",
+  "criar_volumes",
   "escrever_livro",
   "gerar_epub",
   "traduzir",
