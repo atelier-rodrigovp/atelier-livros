@@ -65,22 +65,17 @@ npm run start
 > nomes do PATH. Aponte `CLAUDE_BIN` e `PY_BIN` para os **.exe reais** (ver
 > `worker/.env.example`).
 
-### Deploy contínuo (GitHub → Netlify)
-O repositório usa **GitHub Actions** (`.github/workflows/deploy.yml`): a cada `git push`
-no `master` (exceto mudanças só em `worker/`, `supabase/` ou `*.md`), o CI builda o
-front e faz deploy de produção no Netlify. Site no ar: **https://atelier-livros-vp.netlify.app**.
+### Deploy contínuo (Netlify ↔ GitHub, integração nativa)
+O site usa a **integração nativa do Netlify com o GitHub** (GitHub App): a cada
+`git push` no `master`, o Netlify builda (`npm run build`, via `netlify.toml`) e
+publica em produção automaticamente. **Sem token que expira.** Site no ar:
+**https://atelier-livros-vp.netlify.app**.
 
-Secrets do repositório (Settings → Secrets and variables → Actions):
-`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `NETLIFY_AUTH_TOKEN`, `NETLIFY_SITE_ID`.
+As chaves públicas do front ficam como **env vars no Netlify** (Site config →
+Environment variables): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Para trocar,
+atualize lá (ou `netlify env:set NAME valor`) e refaça um deploy.
 
-> O `NETLIFY_AUTH_TOKEN` é um Personal Access Token do Netlify. No plano free ele
-> **expira em 7 dias**. Para renovar: gere um novo em Netlify → User settings →
-> Applications → New access token e atualize o secret:
-> `gh secret set NETLIFY_AUTH_TOKEN --repo <owner>/atelier-livros` (cole o token).
-> Alternativa sem token: conectar o repo direto no Netlify (integração nativa) para
-> deploy contínuo sem secret.
-
-Deploy manual (sem CI), se precisar: `npm run build && netlify deploy --prod --dir=dist`.
+Deploy manual (se precisar): `npm run build && netlify deploy --prod --dir=dist`.
 
 ### Rodar o worker 24/7
 - **Windows (Agendador de Tarefas):** crie uma tarefa "Ao iniciar o sistema" que roda
