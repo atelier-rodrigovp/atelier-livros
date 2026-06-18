@@ -97,6 +97,12 @@ ${L(b.genero ?? proj.genero)}
 ## Antagonista
 ${L(b.antagonista)}
 
+## Elenco (nº de personagens nomeados por papel)
+${(() => { const pe = b.personagens || {}; const parts = []; if (pe.protagonistas) parts.push(`protagonistas: ${pe.protagonistas}`); if (pe.antagonistas) parts.push(`antagonistas: ${pe.antagonistas}`); if (pe.apoio) parts.push(`apoio: ${pe.apoio}`); return parts.length ? parts.join("; ") + ". Cada personagem de apoio deve carregar um FIO/subtrama próprio (densidade por entrelaçamento)." : L(b.personagens); })()}
+
+## Série / saga
+${b.serie ? `Série "${b.serie}" — ${L(b.serie_total) || "?"} livros no total; este é o volume ${L(b.volume) || proj.volume || 1}. IMPORTANTE: planeje arcos e subtramas que ATRAVESSEM os ${L(b.serie_total) || "N"} livros (não resolva tudo neste volume); cast e fios devem sustentar a saga inteira.` : "Livro único."}
+
 ## Tom / voz / ponto de vista / tempo verbal
 - **Tom e voz:** ${L(b.tom)}
 - **Ponto de vista (PdV):** ${L(b.pdv)}
@@ -291,6 +297,47 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
       .eq("id", job.project_id!)
   );
   await setProgress(job.id, { fase: "ESTRUTURA", total_capitulos: total, concluido: true });
+}
+
+// ===========================================================================
+// refinar_fundacao — melhora a fundação EXISTENTE conforme instruções do autor
+// (ex.: mais personagens, subtramas, arcos de série), sem reescrever do zero.
+// ===========================================================================
+async function refinarFundacao(job: Job, hb?: Heartbeat) {
+  const proj = await getProject(job.project_id!);
+  const dir = projDir(job.project_id!);
+  if (!(await exists(path.join(dir, "Biblia-da-Obra.md"))))
+    throw new Error("não há fundação para refinar — gere a fundação primeiro.");
+  const instrucoes = String(job.payload?.instrucoes || "").trim();
+  if (!instrucoes) throw new Error("informe as instruções de melhoria.");
+  await setProgress(job.id, { fase: "REFINO", etapa: "ajustando fundação" });
+  await hb?.({ fase: "REFINO" });
+
+  const prompt =
+    "Modo headless. Trabalhe SOMENTE nesta pasta de projeto. Use a metodologia da skill `arquiteto-de-enredo`.\n" +
+    "REFINE a fundação EXISTENTE (não recomece do zero; preserve o que está bom) aplicando as instruções do autor abaixo.\n\n" +
+    "INSTRUÇÕES DO AUTOR:\n" + instrucoes + "\n\n" +
+    "DIRETRIZES:\n" +
+    "- Atualize Biblia-da-Obra.md, Mapa-de-Personagens.md e Estrutura-do-Livro.md de forma COERENTE entre si.\n" +
+    "- Se ampliar o elenco: cada personagem novo precisa de FUNÇÃO NARRATIVA distinta e um FIO/subtrama próprio que entrelaça (densidade por entrelaçamento; evite redundância).\n" +
+    "- Se for série/trilogia/saga: distribua arcos e subtramas pelos volumes; não resolva tudo neste; deixe ganchos.\n" +
+    "- Atualize estado/ (ledger, Mapa de Entrelaçamento) e o ESTADO_LIVRO.json se total_capitulos_previstos mudar. Mantenha a fase ESCRITA.\n" +
+    "- NÃO escreva capítulos. NÃO dispare /goal.";
+  const r = await runClaude(prompt, dir);
+
+  const okBiblia = await exists(path.join(dir, "Biblia-da-Obra.md"));
+  const okEstrutura = await exists(path.join(dir, "Estrutura-do-Livro.md"));
+  const state = await readState(dir);
+  const total = Number(state?.total_capitulos_previstos ?? proj.total_capitulos ?? 0);
+  if (!okBiblia || !okEstrutura) throw new Error(`refino falhou (docs ausentes). rc=${r.code} ${r.err.slice(-300)}`);
+
+  for (const f of ["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md", "ESTADO_LIVRO.json"]) {
+    if (await exists(path.join(dir, f))) {
+      await uploadFile("manuscritos", storageKey(job.project_id!, "fundacao", f), path.join(dir, f));
+    }
+  }
+  if (total > 0) await must(sb.from("projects").update({ total_capitulos: total }).eq("id", job.project_id!));
+  await setProgress(job.id, { fase: "REFINO", concluido: true, total_capitulos: total });
 }
 
 // ===========================================================================
@@ -776,6 +823,7 @@ export async function executarJob(job: Job, hb?: Heartbeat): Promise<void> {
     case "ping": return ping(job);
     case "entrevistar": return entrevistar(job, hb);
     case "criar_fundacao": return criarFundacao(job, hb);
+    case "refinar_fundacao": return refinarFundacao(job, hb);
     case "escrever_livro": return escreverLivro(job, hb);
     case "gerar_epub": return gerarEpub(job);
     case "traduzir": return traduzir(job, hb);

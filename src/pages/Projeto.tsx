@@ -72,6 +72,7 @@ export default function Projeto() {
   const [selEpub, setSelEpub] = useState<Record<string, string>>({});
   const [confirmDel, setConfirmDel] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
+  const [refino, setRefino] = useState("");
   const [editOpen, setEditOpen] = useState(false);
   const [salvandoEdit, setSalvandoEdit] = useState(false);
   const [ed, setEd] = useState<Record<string, string>>({});
@@ -298,16 +299,49 @@ export default function Projeto() {
                     </div>
                   );
                 }
+                const jr = jobMaisRecente(jobs, "refinar_fundacao");
+                const refinando = jr?.status === "queued" || jr?.status === "running";
                 return (
-                  <div className="flex flex-wrap gap-2">
-                    {["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md"].map((f) => (
-                      <Button key={f} variant="outline" size="sm" onClick={async () => {
-                        const url = await signedUrl("manuscritos", `${proj.owner}/${proj.id}/fundacao/${f}`);
-                        if (url) window.open(url, "_blank"); else toast.error("Arquivo não encontrado no Storage.");
-                      }}>
-                        <FileText className="h-4 w-4" /> {f}
-                      </Button>
-                    ))}
+                  <div className="space-y-5">
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">Documentos</p>
+                      <div className="flex flex-wrap gap-2">
+                        {["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md"].map((f) => (
+                          <Button key={f} variant="outline" size="sm" onClick={async () => {
+                            const url = await signedUrl("manuscritos", `${proj.owner}/${proj.id}/fundacao/${f}`);
+                            if (url) window.open(url, "_blank"); else toast.error("Arquivo não encontrado no Storage.");
+                          }}>
+                            <FileText className="h-4 w-4" /> {f}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 rounded-lg border p-4">
+                      <p className="text-sm font-medium">Melhorar a fundação</p>
+                      <p className="text-xs text-muted-foreground">
+                        Diga o que aprofundar — mais personagens (com função e fio próprios),
+                        subtramas, arcos de série/trilogia. A IA reescreve Bíblia/Mapa/Estrutura
+                        coerentemente, sem recomeçar do zero.
+                      </p>
+                      <Textarea
+                        rows={3}
+                        value={refino}
+                        onChange={(e) => setRefino(e.target.value)}
+                        placeholder="Ex.: É o vol. 1 de uma trilogia — quero 12–15 personagens nomeados, cada um com função distinta e uma subtrama própria; crie arcos que atravessam os 3 livros e deixe ganchos; expanda as subtramas para sustentar a densidade."
+                      />
+                      <div className="flex items-center gap-3">
+                        <Button
+                          size="sm"
+                          disabled={refinando || !refino.trim()}
+                          onClick={async () => { await enfileira("refinar_fundacao", { instrucoes: refino.trim() }); }}
+                        >
+                          {refinando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                          Refinar fundação
+                        </Button>
+                        <JobStatus job={jr} />
+                      </div>
+                    </div>
                   </div>
                 );
               })()}
