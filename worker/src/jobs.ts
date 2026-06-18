@@ -168,19 +168,24 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
     "(entrevista em blocos, perguntas com opção recomendada; portão de qualidade antes de gerar).\n\n" +
     `IDEIA DO AUTOR:\n${idea}\n\n` +
     `RESPOSTAS ATÉ AGORA (${qa.length} no total):\n${qaText}\n\n` +
-    "REGRA DE CONVERGÊNCIA (importante): esta é uma entrevista CURTA, de no máximo 3 blocos. " +
-    `Já foram respondidas ${qa.length} perguntas. Se já houver ${qa.length} >= 6 respostas, CONCLUA AGORA ` +
-    "(não faça mais perguntas), adotando defaults sensatos e coerentes para tudo que faltar (registre como suposição).\n\n" +
+    "CAMPOS OBRIGATÓRIOS (NUNCA conclua sem ter PERGUNTADO e obtido resposta para TODOS estes):\n" +
+    "  1) AUTOR (nome do autor, exatamente como deve aparecer na capa).\n" +
+    "  2) PÁGINAS-ALVO e nº de CAPÍTULOS.\n" +
+    "  3) SÉRIE: é livro único, TRILOGIA, ou SAGA de N livros? Se série, qual o NOME da série e QUANTOS livros (N), e qual o volume atual.\n" +
+    "  4) SKILL DE ESCRITA (metodologia), opções: skill-dan-brown, hoover-mcfadden, skill-jk-rowling, vesper-escritor-de-capitulos, Nenhuma.\n" +
+    "Verifique nas respostas acima quais já foram cobertos; só conclua quando os 4 estiverem respondidos.\n\n" +
+    "REGRA DE CONVERGÊNCIA: entrevista CURTA, no máximo 4 blocos. Priorize os campos obrigatórios e os " +
+    "essenciais de enredo. Fora dos obrigatórios, adote defaults sensatos para o que faltar (registre como suposição).\n\n" +
     "SUA TAREFA (UMA rodada):\n" +
-    "- Se ainda faltam informações ESSENCIAIS e você ainda não atingiu 3 blocos, gere o PRÓXIMO BLOCO de NO MÁXIMO 3 perguntas. " +
-    "Cubra ao longo dos blocos: gênero/subgênero; protagonista (ferida, segredo, desejo ativo); antagonista; tom/PdV/tempo verbal; " +
-    "OBRIGATÓRIO nº de capítulos E páginas-alvo; meta de palavras; OBRIGATÓRIO skill de escrita; final; cânone/proibições/idioma; autor.\n" +
-    "- Cada pergunta tem: campo (id curto), pergunta, 2–4 opções, UMA 'recomendada' (a mais forte) e 'porque' (1 frase). " +
-    "Para skill de escrita as opções devem ser: skill-dan-brown, hoover-mcfadden, skill-jk-rowling, vesper-escritor-de-capitulos, Nenhuma.\n" +
-    "- Se já há o suficiente (adotando defaults razoáveis para o que faltar), CONCLUA.\n\n" +
+    "- Se ainda falta QUALQUER campo obrigatório OU informação essencial (e você não atingiu 4 blocos), gere o PRÓXIMO BLOCO de NO MÁXIMO 3 perguntas " +
+    "(priorize os obrigatórios que ainda faltam). Cubra também ao longo dos blocos: gênero/subgênero; protagonista (ferida, segredo, desejo ativo); " +
+    "antagonista; tom/PdV/tempo verbal; meta de palavras; final; cânone/proibições/idioma.\n" +
+    "- Cada pergunta tem: campo (id curto), pergunta, 2–4 opções, UMA 'recomendada' e 'porque' (1 frase). " +
+    "Para SÉRIE use opções como: 'Livro único', 'Trilogia (3 livros)', 'Saga (4+ livros)'. Para skill de escrita use as 5 opções acima.\n" +
+    "- Só CONCLUA quando os 4 obrigatórios estiverem respondidos.\n\n" +
     "SAÍDA: grave APENAS o arquivo entrevista-out.json, exatamente em UMA destas formas:\n" +
     'CONTINUAR: {"completo": false, "perguntas": [{"campo":"genero","pergunta":"...","opcoes":["A","B"],"recomendada":"A","porque":"...","multipla":false}]}\n' +
-    'CONCLUIR: {"completo": true, "briefing": {"ideia_central":"...","genero":"...","protagonista":{"nome":"...","ferida":"...","segredo":"...","desejo":"..."},"antagonista":"...","tom":"...","pdv":"...","tempo_verbal":"...","num_capitulos":12,"paginas_alvo":200,"meta_palavras":60000,"linha_tempo":"...","final":"...","canone":"...","proibido":"...","autor":"...","skill_escrita":null,"piso_palavras":1400,"meta_nota":9.0,"idioma":"pt-BR"}}\n' +
+    'CONCLUIR: {"completo": true, "briefing": {"ideia_central":"...","genero":"...","autor":"...","serie":<"Nome da série"|null>,"serie_total":<int,1 se único>,"volume":<int>,"protagonista":{"nome":"...","ferida":"...","segredo":"...","desejo":"..."},"antagonista":"...","tom":"...","pdv":"...","tempo_verbal":"...","num_capitulos":12,"paginas_alvo":200,"meta_palavras":60000,"linha_tempo":"...","final":"...","canone":"...","proibido":"...","skill_escrita":<"..."|null>,"piso_palavras":1400,"meta_nota":9.0,"idioma":"pt-BR"}}\n' +
     "NÃO escreva nada além do JSON nesse arquivo. NÃO rode /goal nem gere a fundação agora.";
   const r = await runClaude(prompt, dir);
 
@@ -197,6 +202,8 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
       sb.from("projects").update({
         briefing: merged,
         genero: b.genero ?? proj.genero ?? null,
+        serie: b.serie ?? proj.serie ?? null,
+        volume: b.volume ?? proj.volume ?? 1,
         total_capitulos: b.num_capitulos ?? proj.total_capitulos ?? null,
         paginas_alvo: b.paginas_alvo ?? proj.paginas_alvo ?? null,
         piso_palavras: b.piso_palavras ?? proj.piso_palavras ?? 1400,

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { BookOpen, ListChecks, Plus } from "lucide-react";
+import { BookOpen, ListChecks, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
+import { deleteProject } from "@/lib/storage";
 import type { Job, Project } from "@/lib/types";
 import { jobStatusBadge, projectStatusBadge } from "@/lib/status";
 import { Badge } from "@/components/ui/badge";
@@ -111,10 +113,27 @@ export default function Dashboard() {
                       >
                         {p.titulo}
                       </Link>
-                      <span className="text-sm text-muted-foreground">
+                      <span className="hidden text-sm text-muted-foreground sm:inline">
                         {p.genero ?? "—"}
                       </span>
                       <Badge variant={b.variant}>{b.label}</Badge>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        title="Excluir projeto"
+                        onClick={async () => {
+                          if (!confirm(`Excluir "${p.titulo}" e tudo dele? Não dá para desfazer.`)) return;
+                          try {
+                            await deleteProject(p.id);
+                            setProjects((cur) => cur.filter((x) => x.id !== p.id));
+                          } catch (e) {
+                            toast.error((e as Error).message);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </li>
                   );
                 })}

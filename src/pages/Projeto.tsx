@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Copy, Download, FileText, Image, Languages, Loader2, Maximize2, PenLine, Play, Sparkles } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft, Copy, Download, FileText, Image, Languages, Loader2, Maximize2, PenLine, Play, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
-import { signedUrl } from "@/lib/storage";
+import { signedUrl, deleteProject } from "@/lib/storage";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -48,6 +56,7 @@ function JobStatus({ job }: { job?: Job }) {
 
 export default function Projeto() {
   const { id } = useParams<{ id: string }>();
+  const nav = useNavigate();
   const [proj, setProj] = useState<Project | null>(null);
   const [editions, setEditions] = useState<Edition[]>([]);
   const [chapters, setChapters] = useState<Record<string, number>>({});
@@ -61,6 +70,8 @@ export default function Projeto() {
   const [capaIdiomas, setCapaIdiomas] = useState<string[]>([]);
   const [capaNovaArte, setCapaNovaArte] = useState(true);
   const [selEpub, setSelEpub] = useState<Record<string, string>>({});
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
 
   const carregar = useCallback(async () => {
     if (!id) return;
@@ -115,6 +126,19 @@ export default function Projeto() {
     }
   }, [editions, capaIdiomas.length]);
 
+  async function excluir() {
+    if (!id) return;
+    setExcluindo(true);
+    try {
+      await deleteProject(id);
+      toast.success("Projeto excluído.");
+      nav("/");
+    } catch (e) {
+      toast.error((e as Error).message);
+      setExcluindo(false);
+    }
+  }
+
   async function gerarCapasBatch() {
     if (!capaIdiomas.length) {
       toast.error("Selecione ao menos um idioma.");
@@ -163,9 +187,17 @@ export default function Projeto() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">{proj.titulo}</h1>
-          <p className="mt-1 text-muted-foreground">{proj.genero ?? "—"} · {proj.idioma_origem}</p>
+          <p className="mt-1 text-muted-foreground">
+            {proj.genero ?? "—"} · {proj.idioma_origem}
+            {proj.serie ? ` · ${proj.serie}${proj.volume ? ` (vol. ${proj.volume})` : ""}` : ""}
+          </p>
         </div>
-        <Badge variant={sb.variant}>{sb.label}</Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant={sb.variant}>{sb.label}</Badge>
+          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" title="Excluir projeto" onClick={() => setConfirmDel(true)}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="escrita">
@@ -494,6 +526,25 @@ export default function Projeto() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={confirmDel} onOpenChange={(o) => !o && setConfirmDel(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir “{proj.titulo}”?</DialogTitle>
+            <DialogDescription>
+              Isto apaga em definitivo o projeto, todas as edições/idiomas, capítulos,
+              capas, EPUBs, pacotes e arquivos no Storage. Não dá para desfazer.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmDel(false)}>Cancelar</Button>
+            <Button variant="destructive" disabled={excluindo} onClick={excluir}>
+              {excluindo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Excluir definitivamente
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
