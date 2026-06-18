@@ -13,5 +13,7 @@ worker/.env
 *.log
 .DS_Store
 .vscode/
+# snapshots/saídas do navegador automatizado (podem conter dados sensíveis)
+.playwright-mcp/
 # pastas de trabalho do agent-worker (livros em produção)
 atelier-work/
