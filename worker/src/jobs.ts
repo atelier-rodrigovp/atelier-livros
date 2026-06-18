@@ -467,7 +467,7 @@ async function gerarPacote(job: Job, hb?: Heartbeat) {
   }
   if (!pkg) throw new Error("pacote-kdp.json inválido");
 
-  await sb.from("publishing_packages").upsert(
+  const { error: pkgErr } = await sb.from("publishing_packages").upsert(
     {
       owner: OWNER,
       edition_id: edicao.id,
@@ -482,6 +482,7 @@ async function gerarPacote(job: Job, hb?: Heartbeat) {
     },
     { onConflict: "edition_id" }
   );
+  if (pkgErr) throw new Error("falha ao gravar publishing_packages: " + pkgErr.message);
   // sobe o JSON também
   await uploadFile("pacotes", storageKey(edicao.project_id, edicao.idioma, "pacote-kdp.json"), outJson);
   await setProgress(job.id, { fase: "PACOTE", concluido: true });

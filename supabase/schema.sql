@@ -78,6 +78,9 @@ create table if not exists publishing_packages (
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+-- um pacote por edição (permite upsert por edition_id)
+create unique index if not exists publishing_packages_edition_uniq
+  on publishing_packages (edition_id);
 
 -- FILA DE JOBS (ponte web <-> worker)
 create table if not exists jobs (
