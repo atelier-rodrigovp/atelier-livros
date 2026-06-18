@@ -45,7 +45,12 @@ export default function Login() {
     setEnviando(true);
     const { error } = await supabase.auth.signInWithOtp({
       email: parsed.data,
-      options: { emailRedirectTo: window.location.origin },
+      // single-user: signups desativados. Não criar usuário — só enviar OTP a
+      // usuários existentes (evita "Signups not allowed for this instance").
+      options: {
+        emailRedirectTo: window.location.origin,
+        shouldCreateUser: false,
+      },
     });
     setEnviando(false);
     if (error) toast.error(error.message);
