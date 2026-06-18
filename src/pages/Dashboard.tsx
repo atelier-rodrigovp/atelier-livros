@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { BookOpen, ListChecks } from "lucide-react";
+import { BookOpen, ListChecks, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
 import type { Job, Project } from "@/lib/types";
 import { jobStatusBadge, projectStatusBadge } from "@/lib/status";
@@ -12,7 +13,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { NewProjectDialog } from "@/components/NewProjectDialog";
 
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -74,7 +74,12 @@ export default function Dashboard() {
             Visão geral da produção editorial.
           </p>
         </div>
-        <NewProjectDialog onCreated={carregarProjetos} />
+        <Button asChild>
+          <Link to="/novo-projeto">
+            <Plus className="h-4 w-4" />
+            Novo projeto
+          </Link>
+        </Button>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">

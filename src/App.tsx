@@ -5,7 +5,10 @@ import AppLayout from "@/components/layout/AppLayout";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Configuracoes from "@/pages/Configuracoes";
-import { Placeholder } from "@/pages/Placeholder";
+import NovoProjeto from "@/pages/NovoProjeto";
+import Projeto from "@/pages/Projeto";
+import Catalogo from "@/pages/Catalogo";
+import Vendas from "@/pages/Vendas";
 
 function Carregando() {
   return (
@@ -30,23 +33,11 @@ export default function App() {
         <Routes>
           <Route element={<AppLayout />}>
             <Route index element={<Dashboard />} />
-            <Route
-              path="catalogo"
-              element={<Placeholder titulo="Catálogo" fase="FASE 3" />}
-            />
-            <Route
-              path="vendas"
-              element={<Placeholder titulo="Vendas" fase="FASE 4" />}
-            />
+            <Route path="catalogo" element={<Catalogo />} />
+            <Route path="vendas" element={<Vendas />} />
             <Route path="configuracoes" element={<Configuracoes />} />
-            <Route
-              path="novo-projeto"
-              element={<Placeholder titulo="Novo projeto" fase="FASE 1" />}
-            />
-            <Route
-              path="projeto/:id"
-              element={<Placeholder titulo="Projeto" fase="FASE 1" />}
-            />
+            <Route path="novo-projeto" element={<NovoProjeto />} />
+            <Route path="projeto/:id" element={<Projeto />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

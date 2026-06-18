@@ -17,3 +17,6 @@ worker/.env
 .playwright-mcp/
 # pastas de trabalho do agent-worker (livros em produção)
 atelier-work/
+
+# arquivo de skills (instaladas em ~/.claude/skills; não versionar)
+skills-livro.zip
