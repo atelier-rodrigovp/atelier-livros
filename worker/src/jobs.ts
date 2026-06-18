@@ -410,8 +410,9 @@ async function criarVolumes(job: Job, hb?: Heartbeat) {
       `Grave/atualize ESTADO_LIVRO.json com titulo="${titulo}", total_capitulos_previstos (nº de capítulos da nova Estrutura), skill_escrita, fase_atual='ESCRITA', gerar_epub=true, meta_nota, piso_palavras_cap.\n` +
       "NÃO escreva capítulos. NÃO dispare /goal.";
     let okE = await exists(path.join(dstDir, "Estrutura-do-Livro.md"));
+    let ultimo: any = null;
     for (let tentativa = 0; tentativa < 2 && !okE; tentativa++) {
-      await runClaude(prompt, dstDir);
+      ultimo = await runClaude(prompt, dstDir);
       okE = await exists(path.join(dstDir, "Estrutura-do-Livro.md"));
     }
     const state = await readState(dstDir);
@@ -422,7 +423,15 @@ async function criarVolumes(job: Job, hb?: Heartbeat) {
     }
     await ensureEdition(novoId, proj.idioma_origem || "pt-BR", true, "pendente");
     await must(sb.from("projects").update({ status: okE ? "fundacao" : "rascunho", total_capitulos: tot || proj.total_capitulos }).eq("id", novoId));
-    if (!okE) console.error(`[volume ${k}] estrutura não gerada após retry.`);
+    // falha-alto: não esconder que a IA não gerou a estrutura (ex.: saldo Claude esgotado)
+    if (!okE) {
+      const err = String(ultimo?.err || ultimo?.out || "");
+      const semSaldo = /credit balance is too low/i.test(err);
+      throw new Error(
+        `vol ${k}: Estrutura-do-Livro.md não gerada (rc=${ultimo?.code}).` +
+          (semSaldo ? " Saldo da conta Claude esgotado — recarregue os créditos e rode 'Criar volumes' de novo." : ` ${err.slice(-300)}`)
+      );
+    }
     criados.push(k);
   }
   await setProgress(job.id, { fase: "VOLUMES", concluido: true, criados });
