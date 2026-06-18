@@ -1,0 +1,68 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/fraunces";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Editorial: papel/tinta + 1 acento (bronze) */
+    --background: 40 33% 98%;
+    --foreground: 30 10% 12%;
+    --card: 40 33% 99%;
+    --card-foreground: 30 10% 12%;
+    --popover: 40 33% 99%;
+    --popover-foreground: 30 10% 12%;
+    --primary: 22 64% 42%;
+    --primary-foreground: 40 40% 98%;
+    --secondary: 36 20% 92%;
+    --secondary-foreground: 30 10% 20%;
+    --muted: 36 20% 94%;
+    --muted-foreground: 30 8% 38%;
+    --accent: 36 26% 89%;
+    --accent-foreground: 30 10% 18%;
+    --destructive: 0 72% 42%;
+    --destructive-foreground: 40 40% 98%;
+    --border: 34 18% 85%;
+    --input: 34 18% 85%;
+    --ring: 22 64% 42%;
+    --radius: 0.65rem;
+  }
+
+  .dark {
+    --background: 28 12% 9%;
+    --foreground: 40 25% 92%;
+    --card: 28 12% 11%;
+    --card-foreground: 40 25% 92%;
+    --popover: 28 12% 11%;
+    --popover-foreground: 40 25% 92%;
+    --primary: 28 76% 58%;
+    --primary-foreground: 28 30% 10%;
+    --secondary: 28 8% 18%;
+    --secondary-foreground: 40 20% 90%;
+    --muted: 28 8% 18%;
+    --muted-foreground: 36 12% 64%;
+    --accent: 28 10% 20%;
+    --accent-foreground: 40 20% 90%;
+    --destructive: 0 62% 52%;
+    --destructive-foreground: 40 25% 95%;
+    --border: 28 8% 22%;
+    --input: 28 8% 22%;
+    --ring: 28 76% 58%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "ss01", "cv01";
+  }
+  h1, h2, h3, h4 {
+    @apply font-serif;
+    font-optical-sizing: auto;
+  }
+}

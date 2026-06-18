@@ -1,0 +1,17 @@
+node_modules/
+dist/
+# artefatos gerados pelo tsc -b
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+.env
+.env.*
+!.env.example
+worker/node_modules/
+worker/dist/
+worker/.env
+*.log
+.DS_Store
+.vscode/
+# pastas de trabalho do agent-worker (livros em produção)
+atelier-work/
