@@ -1,7 +1,7 @@
 // Executores por tipo de job. Cada um ORQUESTRA uma skill do Claude Code (ou um
 // script determinístico da skill) — NÃO reimplementa a lógica das skills.
 // Verdade do disco: o worker confere arquivos reais antes de gravar status.
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { sb, OWNER } from "./supabase.js";
 import {
@@ -140,6 +140,76 @@ async function readState(dir: string): Promise<any | null> {
 // ===========================================================================
 async function ping(job: Job) {
   await setProgress(job.id, { fase: "PING", recebido_em: new Date().toISOString(), payload: job.payload ?? {} });
+}
+
+// ===========================================================================
+// entrevistar — 1 turno da entrevista do arquiteto-de-enredo (perguntas com
+// recomendação) a partir de uma ideia única; valida e, ao fim, dispara criar_fundacao.
+// ===========================================================================
+async function entrevistar(job: Job, hb?: Heartbeat) {
+  const proj = await getProject(job.project_id!);
+  const dir = projDir(job.project_id!);
+  await mkdir(dir, { recursive: true });
+  const briefing = proj.briefing || {};
+  const idea = briefing.ideia_central || briefing.idea || proj.titulo || "";
+  const qa: any[] = Array.isArray(briefing.qa) ? briefing.qa : [];
+  await hb?.({ fase: "ENTREVISTA", turnos: qa.length });
+
+  const qaText = qa.length
+    ? qa.map((x, i) => `${i + 1}. P: ${x.pergunta}\n   R: ${x.resposta}`).join("\n")
+    : "nenhuma";
+  const outFile = path.join(dir, "entrevista-out.json");
+  try { await rm(outFile); } catch {}
+
+  const prompt =
+    "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
+    "Conduza a ENTREVISTA de fundação de um livro com a metodologia da skill `arquiteto-de-enredo` " +
+    "(entrevista em blocos, perguntas com opção recomendada; portão de qualidade antes de gerar).\n\n" +
+    `IDEIA DO AUTOR:\n${idea}\n\n` +
+    `RESPOSTAS ATÉ AGORA:\n${qaText}\n\n` +
+    "SUA TAREFA (UMA rodada):\n" +
+    "- Se ainda faltam informações ESSENCIAIS para passar o portão de qualidade, gere o PRÓXIMO BLOCO de NO MÁXIMO 3 perguntas. " +
+    "Cubra ao longo dos blocos: gênero/subgênero; protagonista (ferida, segredo, desejo ativo); antagonista; tom/PdV/tempo verbal; " +
+    "OBRIGATÓRIO nº de capítulos E páginas-alvo; meta de palavras; OBRIGATÓRIO skill de escrita; final; cânone/proibições/idioma; autor.\n" +
+    "- Cada pergunta tem: campo (id curto), pergunta, 2–4 opções, UMA 'recomendada' (a mais forte) e 'porque' (1 frase). " +
+    "Para skill de escrita as opções devem ser: skill-dan-brown, hoover-mcfadden, skill-jk-rowling, vesper-escritor-de-capitulos, Nenhuma.\n" +
+    "- Se já há o suficiente (adotando defaults razoáveis para o que faltar), CONCLUA.\n\n" +
+    "SAÍDA: grave APENAS o arquivo entrevista-out.json, exatamente em UMA destas formas:\n" +
+    'CONTINUAR: {"completo": false, "perguntas": [{"campo":"genero","pergunta":"...","opcoes":["A","B"],"recomendada":"A","porque":"...","multipla":false}]}\n' +
+    'CONCLUIR: {"completo": true, "briefing": {"ideia_central":"...","genero":"...","protagonista":{"nome":"...","ferida":"...","segredo":"...","desejo":"..."},"antagonista":"...","tom":"...","pdv":"...","tempo_verbal":"...","num_capitulos":12,"paginas_alvo":200,"meta_palavras":60000,"linha_tempo":"...","final":"...","canone":"...","proibido":"...","autor":"...","skill_escrita":null,"piso_palavras":1400,"meta_nota":9.0,"idioma":"pt-BR"}}\n' +
+    "NÃO escreva nada além do JSON nesse arquivo. NÃO rode /goal nem gere a fundação agora.";
+  const r = await runClaude(prompt, dir);
+
+  const raw = await readText(outFile);
+  if (!raw) throw new Error("entrevista sem saída (entrevista-out.json). rc=" + r.code + " " + r.err.slice(-300));
+  let out: any;
+  try { out = JSON.parse(raw); } catch { const m = raw.match(/\{[\s\S]*\}/); out = m ? JSON.parse(m[0]) : null; }
+  if (!out) throw new Error("entrevista-out.json inválido");
+
+  if (out.completo && out.briefing) {
+    const b = out.briefing;
+    const merged = { ...b, idea, qa, _interview: { completo: true } };
+    await must(
+      sb.from("projects").update({
+        briefing: merged,
+        genero: b.genero ?? proj.genero ?? null,
+        total_capitulos: b.num_capitulos ?? proj.total_capitulos ?? null,
+        paginas_alvo: b.paginas_alvo ?? proj.paginas_alvo ?? null,
+        piso_palavras: b.piso_palavras ?? proj.piso_palavras ?? 1400,
+        meta_nota: b.meta_nota ?? proj.meta_nota ?? 9.0,
+        skill_escrita: b.skill_escrita ?? proj.skill_escrita ?? null,
+        idioma_origem: b.idioma ?? proj.idioma_origem ?? "pt-BR",
+      }).eq("id", job.project_id!)
+    );
+    // entrevista validada -> dispara a fundação automaticamente
+    await must(sb.from("jobs").insert({ owner: OWNER, tipo: "criar_fundacao", project_id: job.project_id }));
+    await setProgress(job.id, { fase: "ENTREVISTA", completo: true });
+  } else {
+    const perguntas = Array.isArray(out.perguntas) ? out.perguntas : [];
+    const merged = { ...briefing, idea, qa, _interview: { completo: false, pending: perguntas } };
+    await must(sb.from("projects").update({ briefing: merged }).eq("id", job.project_id!));
+    await setProgress(job.id, { fase: "ENTREVISTA", perguntas: perguntas.length });
+  }
 }
 
 // ===========================================================================
@@ -578,6 +648,7 @@ async function importarVendas(job: Job) {
 export async function executarJob(job: Job, hb?: Heartbeat): Promise<void> {
   switch (job.tipo) {
     case "ping": return ping(job);
+    case "entrevistar": return entrevistar(job, hb);
     case "criar_fundacao": return criarFundacao(job, hb);
     case "escrever_livro": return escreverLivro(job, hb);
     case "gerar_epub": return gerarEpub(job);

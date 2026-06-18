@@ -33,6 +33,7 @@ export type JobStatus = (typeof JOB_STATUS)[number];
 
 export const JOB_TIPOS = [
   "ping",
+  "entrevistar",
   "criar_fundacao",
   "escrever_livro",
   "gerar_epub",
