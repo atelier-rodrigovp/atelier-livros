@@ -523,6 +523,26 @@ async function traduzir(job: Job, hb?: Heartbeat) {
 // Compositor determinístico (Pillow) — garante layout idêntico entre idiomas.
 const COMPOSER = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "compose_cover.py");
 
+// Arte-mestra por IA de imagem (Pollinations.ai — Flux, grátis, sem chave).
+async function baixarPollinations(prompt: string, outPath: string): Promise<boolean> {
+  const seed = Math.floor(Math.random() * 1_000_000);
+  const u = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1600&height=2560&model=flux&nologo=true&seed=${seed}`;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 120_000);
+    const res = await fetch(u, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!res.ok) return false;
+    if (!(res.headers.get("content-type") || "").startsWith("image/")) return false;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 15_000) return false; // imagem pequena demais => provável erro
+    await writeFile(outPath, buf);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ===========================================================================
 // gerar_capas — UMA arte-mestra (sem texto) + tradução de título/subtítulo +
 // composição DETERMINÍSTICA por idioma (mesma "fotografia", layout padronizado).
@@ -558,19 +578,33 @@ async function gerarCapas(job: Job, hb?: Heartbeat) {
     await hb?.({ fase: "CAPA", etapa: "arte-mestra" });
     await setProgress(job.id, { fase: "CAPA", etapa: "arte-mestra" });
     try { await rm(masterPng); } catch {}
-    const promptArt =
-      "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
-      "Crie SOMENTE a ARTE DE FUNDO de uma capa de livro — SEM NENHUM TEXTO, sem letras, sem título, sem nome — " +
-      "usando a skill `canvas-design`.\n" +
-      `- Gênero: "${proj.genero || ""}".` + (premissa ? ` Premissa: "${premissa}".` : "") + "\n" +
-      "- Direção de arte: " + (brief || "proponha algo forte, original e coerente com o gênero.") + "\n" +
-      "- Formato RETRATO 1600×2560 px, RGB, qualidade editorial; FOCO visual dominante. " +
-      "Deixe o TOPO e a BASE mais limpos/respirando (o texto será sobreposto depois pelo sistema).\n" +
-      "- EVITE cara de IA. NÃO escreva NENHUM texto/letra na imagem.\n" +
-      "ENTREGA: salve em capas/master.png (1600×2560). Não gere mais nada.";
-    const r = await runClaude(promptArt, dir);
-    if (!(await exists(masterPng)))
-      throw new Error(`arte-mestra não gerada (capas/master.png). rc=${r.code} ${r.err.slice(-300)}`);
+
+    // 1ª opção: IA de imagem (Pollinations/Flux) — arte fotorrealista, sem texto.
+    const artPrompt =
+      `Book cover background art, portrait orientation, genre: ${proj.genero || "literary fiction"}. ` +
+      (brief ? `Art direction: ${brief}. ` : "Strong, original direction fitting the genre. ") +
+      (premissa ? `Mood/context: ${premissa}. ` : "") +
+      "Cinematic, atmospheric, richly detailed, professional illustration, dramatic lighting. " +
+      "Absolutely NO text, no letters, no title, no typography, no watermark, no frame. " +
+      "Keep the top and bottom areas cleaner for text overlay.";
+    let ok = await baixarPollinations(artPrompt, masterPng);
+
+    // Fallback: canvas-design (Claude) se a IA de imagem falhar.
+    if (!ok) {
+      const promptArt =
+        "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
+        "Crie SOMENTE a ARTE DE FUNDO de uma capa de livro — SEM NENHUM TEXTO, sem letras, sem título, sem nome — " +
+        "usando a skill `canvas-design`.\n" +
+        `- Gênero: "${proj.genero || ""}".` + (premissa ? ` Premissa: "${premissa}".` : "") + "\n" +
+        "- Direção de arte: " + (brief || "proponha algo forte, original e coerente com o gênero.") + "\n" +
+        "- Formato RETRATO 1600×2560 px, RGB, qualidade editorial; FOCO visual dominante. " +
+        "Deixe o TOPO e a BASE mais limpos/respirando (o texto será sobreposto depois pelo sistema).\n" +
+        "- EVITE cara de IA. NÃO escreva NENHUM texto/letra na imagem.\n" +
+        "ENTREGA: salve em capas/master.png (1600×2560). Não gere mais nada.";
+      const r = await runClaude(promptArt, dir);
+      ok = await exists(masterPng);
+      if (!ok) throw new Error(`arte-mestra não gerada (Pollinations e canvas-design falharam). rc=${r.code} ${r.err.slice(-300)}`);
+    }
     await uploadFile("capas", storageKey(projectId, "master.png"), masterPng);
   }
 
