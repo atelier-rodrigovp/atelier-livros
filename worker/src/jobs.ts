@@ -356,62 +356,73 @@ async function criarVolumes(job: Job, hb?: Heartbeat) {
   if (!(await exists(path.join(srcDir, "Biblia-da-Obra.md"))))
     throw new Error("gere (e refine) a fundação deste volume antes de criar a saga.");
 
-  // idempotência: não recriar volumes já existentes
-  const { data: existentes } = await sb.from("projects").select("volume").eq("owner", OWNER).eq("serie", serie);
-  const volsExist = new Set((existentes || []).map((x: any) => x.volume));
+  // idempotência: pula só volumes COMPLETOS (status 'fundacao'); incompletos são retomados.
+  const { data: existentes } = await sb.from("projects").select("id,volume,status").eq("owner", OWNER).eq("serie", serie);
+  const porVol = new Map<number, any>((existentes || []).map((x: any) => [x.volume, x]));
 
   const criados: number[] = [];
   for (let k = volBase + 1; k <= total; k++) {
-    if (volsExist.has(k)) continue;
+    const exist = porVol.get(k);
+    if (exist && exist.status === "fundacao") continue; // já completo
     await hb?.({ fase: "VOLUMES", volume: k });
     await setProgress(job.id, { fase: "VOLUMES", volume: k, criados });
 
     const titulo = `${serie} — Vol. ${k}`;
-    const briefingVol = { ...b, volume: k, serie, serie_total: total, _saga: { origem: job.project_id, volume: k }, _herdado: true, _interview: { completo: true } };
-    const ins = await must(
-      sb.from("projects").insert({
-        owner: OWNER, titulo, serie, volume: k, genero: proj.genero, idioma_origem: proj.idioma_origem,
-        skill_escrita: proj.skill_escrita, piso_palavras: proj.piso_palavras, meta_nota: proj.meta_nota,
-        total_capitulos: proj.total_capitulos, paginas_alvo: proj.paginas_alvo, status: "rascunho", briefing: briefingVol,
-      }).select().single()
-    );
-    const novo = ins.data as any;
-    const dstDir = projDir(novo.id);
+    let novoId: string;
+    if (exist) {
+      novoId = exist.id; // retoma volume incompleto
+    } else {
+      const briefingVol = { ...b, volume: k, serie, serie_total: total, _saga: { origem: job.project_id, volume: k }, _herdado: true, _interview: { completo: true } };
+      const ins = await must(
+        sb.from("projects").insert({
+          owner: OWNER, titulo, serie, volume: k, genero: proj.genero, idioma_origem: proj.idioma_origem,
+          skill_escrita: proj.skill_escrita, piso_palavras: proj.piso_palavras, meta_nota: proj.meta_nota,
+          total_capitulos: proj.total_capitulos, paginas_alvo: proj.paginas_alvo, status: "rascunho", briefing: briefingVol,
+        }).select().single()
+      );
+      novoId = (ins.data as any).id;
+    }
+    const dstDir = projDir(novoId);
     await mkdir(dstDir, { recursive: true });
 
-    // herda mundo/elenco/voz/agentes/estado do volume base
+    // herda (ou re-herda, se faltar) mundo/elenco/voz/agentes/estado do volume base
     for (const f of ["Biblia-da-Obra.md", "Mapa-de-Personagens.md", "perfil-de-voz.md", "CLAUDE.md"]) {
-      if (await exists(path.join(srcDir, f))) await cp(path.join(srcDir, f), path.join(dstDir, f));
+      if ((await exists(path.join(srcDir, f))) && !(await exists(path.join(dstDir, f)))) await cp(path.join(srcDir, f), path.join(dstDir, f));
     }
     for (const d of [".claude", "estado", "specs"]) {
-      if (await exists(path.join(srcDir, d))) await cp(path.join(srcDir, d), path.join(dstDir, d), { recursive: true });
+      if ((await exists(path.join(srcDir, d))) && !(await exists(path.join(dstDir, d)))) await cp(path.join(srcDir, d), path.join(dstDir, d), { recursive: true });
     }
-    await writeFile(
-      path.join(dstDir, "briefing.md"),
-      renderBriefing(novo) +
-        `\n\n## SAGA\nVolume ${k} de ${total} da série "${serie}". Mundo, elenco e voz são HERDADOS do vol. 1 (ver Biblia/Mapa nesta pasta). ` +
-        "Avance os arcos e subtramas plantados; novo conflito central deste volume; deixe ganchos para o próximo.\n",
-      "utf8"
-    );
+    if (!(await exists(path.join(dstDir, "briefing.md")))) {
+      await writeFile(
+        path.join(dstDir, "briefing.md"),
+        renderBriefing({ ...proj, titulo, volume: k, briefing: { ...b, serie, serie_total: total } }) +
+          `\n\n## SAGA\nVolume ${k} de ${total} da série "${serie}". Mundo, elenco e voz são HERDADOS do vol. 1 (ver Biblia/Mapa nesta pasta). ` +
+          "Avance os arcos e subtramas plantados; novo conflito central deste volume; deixe ganchos para o próximo.\n",
+        "utf8"
+      );
+    }
 
-    // gera SOMENTE a Estrutura deste volume (não recria a fundação herdada)
+    // gera SOMENTE a Estrutura deste volume (com 1 retry), sem recriar a fundação herdada
     const prompt =
       "Modo headless. Trabalhe SOMENTE nesta pasta. Use a metodologia da skill `arquiteto-de-enredo`.\n" +
       "A FUNDAÇÃO HERDADA já existe nesta pasta (Biblia-da-Obra.md, Mapa-de-Personagens.md, perfil-de-voz.md, agentes em .claude/agents/, estado/) — NÃO a recrie nem sobrescreva o mundo/elenco.\n" +
       `Gere a Estrutura-do-Livro.md DESTE volume (vol ${k} de ${total} da série "${serie}"): novo conflito central do volume, avançando os arcos/subtramas plantados (use o Mapa de Entrelaçamento), com ganchos para o próximo volume.\n` +
       `Grave/atualize ESTADO_LIVRO.json com titulo="${titulo}", total_capitulos_previstos (nº de capítulos da nova Estrutura), skill_escrita, fase_atual='ESCRITA', gerar_epub=true, meta_nota, piso_palavras_cap.\n` +
       "NÃO escreva capítulos. NÃO dispare /goal.";
-    const r = await runClaude(prompt, dstDir);
-    const okE = await exists(path.join(dstDir, "Estrutura-do-Livro.md"));
+    let okE = await exists(path.join(dstDir, "Estrutura-do-Livro.md"));
+    for (let tentativa = 0; tentativa < 2 && !okE; tentativa++) {
+      await runClaude(prompt, dstDir);
+      okE = await exists(path.join(dstDir, "Estrutura-do-Livro.md"));
+    }
     const state = await readState(dstDir);
     const tot = Number(state?.total_capitulos_previstos ?? proj.total_capitulos ?? 0);
 
     for (const f of ["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md", "ESTADO_LIVRO.json", "briefing.md"]) {
-      if (await exists(path.join(dstDir, f))) await uploadFile("manuscritos", storageKey(novo.id, "fundacao", f), path.join(dstDir, f));
+      if (await exists(path.join(dstDir, f))) await uploadFile("manuscritos", storageKey(novoId, "fundacao", f), path.join(dstDir, f));
     }
-    await ensureEdition(novo.id, proj.idioma_origem || "pt-BR", true, "pendente");
-    await must(sb.from("projects").update({ status: okE ? "fundacao" : "rascunho", total_capitulos: tot || proj.total_capitulos }).eq("id", novo.id));
-    if (!okE) console.error(`[volume ${k}] estrutura não gerada. rc=${r.code}`);
+    await ensureEdition(novoId, proj.idioma_origem || "pt-BR", true, "pendente");
+    await must(sb.from("projects").update({ status: okE ? "fundacao" : "rascunho", total_capitulos: tot || proj.total_capitulos }).eq("id", novoId));
+    if (!okE) console.error(`[volume ${k}] estrutura não gerada após retry.`);
     criados.push(k);
   }
   await setProgress(job.id, { fase: "VOLUMES", concluido: true, criados });
