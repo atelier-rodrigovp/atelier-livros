@@ -419,13 +419,33 @@ async function gerarCapa(job: Job, hb?: Heartbeat) {
   await mkdir(path.join(dir, "capas"), { recursive: true });
   await hb?.({ fase: "CAPA", idioma: edicao.idioma });
 
+  const autor = proj.briefing?.autor || "Atelier de Livros IA";
+  const subtitulo = job.payload?.subtitulo || proj.briefing?.subtitulo || "";
+  const premissa = proj.briefing?.ideia_central || "";
+  const brief = (job.payload?.briefing || "").trim();
+
   const base = `capas/${edicao.idioma}`;
   const prompt =
-    "Modo headless. Trabalhe SOMENTE nesta pasta.\n" +
-    "Gere uma CAPA de livro pronta para o Amazon KDP usando a skill `canvas-design`.\n" +
-    `- Título: "${proj.titulo}". Autor: "${proj.briefing?.autor || "Atelier de Livros IA"}". Gênero: "${proj.genero || ""}". Idioma: ${edicao.idioma}.\n` +
-    "- Crie arte de fundo coerente com o gênero e componha título/subtítulo/autor com tipografia elegante.\n" +
-    `- Tamanho KDP: 2560×1600 px (proporção 1.6:1), RGB. Salve em ${base}.png e ${base}.pdf.`;
+    "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
+    "Você é DIRETOR DE ARTE criando uma CAPA DE LIVRO de nível editorial para o Amazon KDP, usando a skill `canvas-design`.\n\n" +
+    "OBRA:\n" +
+    `- Título: "${proj.titulo}"\n` +
+    `- Subtítulo: "${subtitulo}"\n` +
+    `- Autor: "${autor}"\n` +
+    `- Gênero: "${proj.genero || ""}"  · Idioma: ${edicao.idioma}\n` +
+    (premissa ? `- Premissa (contexto, NÃO imprimir na capa): "${premissa}"\n` : "") +
+    "\nDIREÇÃO DE ARTE DO AUTOR (prioridade máxima — siga à risca):\n" +
+    (brief
+      ? brief + "\n"
+      : "Sem briefing específico — proponha uma direção forte, original e coerente com o gênero e a premissa.\n") +
+    "\nREQUISITOS (qualidade de editora):\n" +
+    "- Formato RETRATO 1600×2560 px (proporção 1:1.6), RGB. NUNCA paisagem.\n" +
+    "- Um foco visual dominante coerente com gênero/premissa + hierarquia tipográfica forte: TÍTULO grande e legível, depois autor, depois subtítulo.\n" +
+    "- Legível em MINIATURA: imagine a 160px de largura — título contrastante, nada de texto minúsculo.\n" +
+    "- Paleta intencional (3–5 cores) coerente com o tom; contraste AA texto/fundo; margens de segurança (texto longe das bordas).\n" +
+    "- Tipografia editorial (use as fontes da canvas-design). EVITE cara de IA: sem texto distorcido/ilegível, sem watermark, sem lorem, sem clip-art genérico, sem moldura aleatória.\n" +
+    "- Respeite restrições/proibições do briefing.\n\n" +
+    `ENTREGA: salve a capa final em "${base}.png" (1600×2560) e também em "${base}.pdf". Não gere mais nada. O runner verifica o arquivo no disco.`;
   const r = await runClaude(prompt, dir);
 
   const png = path.join(dir, `${base}.png`);
@@ -433,13 +453,15 @@ async function gerarCapa(job: Job, hb?: Heartbeat) {
   const keyPng = storageKey(edicao.project_id, edicao.idioma, "capa.png");
   await uploadFile("capas", keyPng, png);
   const url = await signedUrl("capas", keyPng);
-  const meta: any = {};
+  const meta: any = { briefing: brief || null };
   const pdf = path.join(dir, `${base}.pdf`);
   if (await exists(pdf)) {
     const keyPdf = storageKey(edicao.project_id, edicao.idioma, "capa.pdf");
     await uploadFile("capas", keyPdf, pdf);
     meta.pdf = keyPdf;
   }
+  // uma capa por edição: limpa a anterior antes de inserir a nova
+  await sb.from("artifacts").delete().eq("edition_id", edicao.id).eq("tipo", "capa");
   await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "capa", storage_path: keyPng, url_publica: url, meta }));
   await setProgress(job.id, { fase: "CAPA", concluido: true });
 }

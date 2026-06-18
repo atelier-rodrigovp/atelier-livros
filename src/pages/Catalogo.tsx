@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { BookImage } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { signedUrl } from "@/lib/storage";
 import { IDIOMAS } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -28,10 +29,14 @@ export default function Catalogo() {
     const [{ data: projs }, { data: eds }, { data: arts }] = await Promise.all([
       supabase.from("projects").select("id,titulo,serie"),
       supabase.from("editions").select("id,project_id,idioma,status"),
-      supabase.from("artifacts").select("edition_id,tipo,url_publica").eq("tipo", "capa"),
+      supabase.from("artifacts").select("edition_id,tipo,url_publica,storage_path").eq("tipo", "capa"),
     ]);
     const pmap = new Map((projs ?? []).map((p: any) => [p.id, p]));
-    const capaMap = new Map((arts ?? []).map((a: any) => [a.edition_id, a.url_publica]));
+    // Assina URLs frescas (não depende da url_publica de 7 dias).
+    const capaEntries = await Promise.all(
+      (arts ?? []).map(async (a: any) => [a.edition_id, (await signedUrl("capas", a.storage_path, 3600)) ?? a.url_publica] as const)
+    );
+    const capaMap = new Map(capaEntries);
     setItens(
       (eds ?? []).map((e: any) => ({
         edition_id: e.id,
@@ -82,9 +87,9 @@ export default function Catalogo() {
             <Link key={i.edition_id} to={`/projeto/${i.project_id}`}>
               <Card className="overflow-hidden transition-shadow hover:shadow-md">
                 {i.capa ? (
-                  <img src={i.capa} alt={i.titulo} className="aspect-[1.6/1] w-full object-cover" />
+                  <img src={i.capa} alt={i.titulo} className="aspect-[5/8] w-full object-contain bg-muted" />
                 ) : (
-                  <div className="flex aspect-[1.6/1] w-full items-center justify-center bg-muted text-muted-foreground">
+                  <div className="flex aspect-[5/8] w-full items-center justify-center bg-muted text-muted-foreground">
                     <BookImage className="h-7 w-7" />
                   </div>
                 )}
