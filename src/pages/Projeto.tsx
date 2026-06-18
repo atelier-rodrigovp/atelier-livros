@@ -5,6 +5,13 @@ import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
 import { signedUrl } from "@/lib/storage";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ChevronDown } from "lucide-react";
 import { IDIOMAS, type Job, type Project } from "@/lib/types";
 import { jobStatusBadge, projectStatusBadge } from "@/lib/status";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 
 interface Edition { id: string; idioma: string; status: string; is_origem: boolean; nota_review: number | null; }
-interface Artifact { id: string; edition_id: string | null; tipo: string; storage_path: string; url_publica: string | null; }
+interface Artifact { id: string; edition_id: string | null; tipo: string; storage_path: string; url_publica: string | null; created_at?: string; meta?: any; }
 interface Pkg { id: string; edition_id: string; sinopse: string | null; descricao_html: string | null; keywords: string[] | null; categorias: string[] | null; subtitulo: string | null; preco_sugerido: number | null; }
 
 function jobMaisRecente(jobs: Job[], tipo: string, editionId?: string) {
@@ -53,6 +60,7 @@ export default function Projeto() {
   const [capaSub, setCapaSub] = useState("");
   const [capaIdiomas, setCapaIdiomas] = useState<string[]>([]);
   const [capaNovaArte, setCapaNovaArte] = useState(true);
+  const [selEpub, setSelEpub] = useState<Record<string, string>>({});
 
   const carregar = useCallback(async () => {
     if (!id) return;
@@ -139,7 +147,12 @@ export default function Projeto() {
   if (!proj) return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   const sb = projectStatusBadge(proj.status);
   const capaDe = (ed: string) => artifacts.find((a) => a.edition_id === ed && a.tipo === "capa");
-  const epubsDe = (ed: string) => artifacts.filter((a) => a.edition_id === ed && a.tipo === "epub");
+  // EPUBs de uma edição, ordenados por criação, com nº de versão (v1, v2, ...).
+  const epubVersoes = (ed: string) =>
+    artifacts
+      .filter((a) => a.edition_id === ed && a.tipo === "epub")
+      .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
+      .map((a, i) => ({ art: a, versao: (a.meta?.versao as number) ?? i + 1 }));
   const pkgDe = (ed: string) => pkgs.find((p) => p.edition_id === ed);
 
   return (
@@ -359,27 +372,92 @@ export default function Projeto() {
         {/* EPUBS */}
         <TabsContent value="epubs">
           <Card>
-            <CardHeader><CardTitle className="text-xl">EPUBs por idioma</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <ul className="divide-y">
-                {editions.map((e) => (
-                  <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
-                    <span className="font-medium">{e.idioma}</span>
-                    <div className="flex items-center gap-2">
-                      {epubsDe(e.id).map((a) => (
-                        <Button key={a.id} size="sm" variant="ghost" onClick={() => baixar(a, "epubs")}>
-                          <Download className="h-4 w-4" /> EPUB
-                        </Button>
-                      ))}
-                      <Button size="sm" variant="outline" onClick={() => enfileira("gerar_epub", {}, e.id)}>
-                        <Play className="h-4 w-4" /> Gerar EPUB
-                      </Button>
-                    </div>
-                    <JobStatus job={jobMaisRecente(jobs, "gerar_epub", e.id)} />
-                  </li>
-                ))}
-                {!editions.length && <li className="py-4 text-center text-muted-foreground">Nenhuma edição.</li>}
-              </ul>
+            <CardHeader>
+              <CardTitle className="text-xl">EPUBs por idioma</CardTitle>
+              <CardDescription>
+                Cada EPUB sai com a <strong>capa aprovada</strong> do idioma. Versões ficam
+                guardadas — escolha no menu e baixe.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!editions.length ? (
+                <p className="py-4 text-center text-muted-foreground">Nenhuma edição.</p>
+              ) : (
+                <ul className="divide-y">
+                  {editions.map((e) => {
+                    const versoes = epubVersoes(e.id);
+                    const ultima = versoes[versoes.length - 1];
+                    const selId = selEpub[e.id] ?? ultima?.art.id;
+                    const sel = versoes.find((v) => v.art.id === selId) ?? ultima;
+                    const job = jobMaisRecente(jobs, "gerar_epub", e.id);
+                    const gerando = job?.status === "queued" || job?.status === "running";
+                    const temCapa = !!capaDe(e.id);
+                    return (
+                      <li key={e.id} className="flex flex-wrap items-center gap-3 py-3">
+                        <span className="w-16 font-medium">{e.idioma}</span>
+
+                        {versoes.length > 0 ? (
+                          <>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="outline" size="sm" className="min-w-[150px] justify-between">
+                                  EPUB v{sel?.versao} · {e.idioma}
+                                  <ChevronDown className="h-4 w-4 opacity-60" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start">
+                                {[...versoes].reverse().map((v) => (
+                                  <DropdownMenuItem
+                                    key={v.art.id}
+                                    onClick={() => setSelEpub((s) => ({ ...s, [e.id]: v.art.id }))}
+                                  >
+                                    <span className="flex-1">EPUB v{v.versao} · {e.idioma}</span>
+                                    {v.art.meta?.validado === false && (
+                                      <span className="text-[10px] text-amber-600">sem validar</span>
+                                    )}
+                                    {v.art.created_at && (
+                                      <span className="ml-2 text-[10px] text-muted-foreground">
+                                        {new Date(v.art.created_at).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            <Button size="sm" disabled={!sel} onClick={() => sel && baixar(sel.art, "epubs")}>
+                              <Download className="h-4 w-4" /> Baixar
+                            </Button>
+                            <span className="text-xs text-muted-foreground">
+                              {versoes.length} {versoes.length === 1 ? "versão" : "versões"}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">Nenhum EPUB ainda.</span>
+                        )}
+
+                        <div className="ml-auto flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={gerando || !temCapa}
+                            title={temCapa ? "Gerar nova versão (com a capa aprovada)" : "Gere a capa deste idioma primeiro"}
+                            onClick={() => enfileira("gerar_epub", {}, e.id)}
+                          >
+                            {gerando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                            Gerar nova versão
+                          </Button>
+                        </div>
+                        {!temCapa && (
+                          <p className="w-full text-xs text-amber-600">
+                            ⚠ Gere a capa de {e.idioma} na aba Capas — o EPUB exige a capa aprovada.
+                          </p>
+                        )}
+                        <div className="w-full"><JobStatus job={job} /></div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

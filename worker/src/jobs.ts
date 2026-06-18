@@ -378,15 +378,36 @@ async function gerarEpub(job: Job) {
   const manuscrito = path.join(sub, "MANUSCRITO-MESTRE.md");
   if (!(await exists(manuscrito))) throw new Error("MANUSCRITO-MESTRE.md ausente para a edição " + edicao.idioma);
 
-  // Capa, se houver artefato local
+  // CAPA OBRIGATÓRIA: o EPUB sai sempre com a capa aprovada do idioma.
   const capaPng = path.join(dir, "capas", `${edicao.idioma}.png`);
-  const temCapa = await exists(capaPng);
+  if (!(await exists(capaPng)))
+    throw new Error(`Gere e aprove a capa do idioma ${edicao.idioma} antes (o EPUB exige a capa aprovada).`);
+
+  // Título/subtítulo do idioma (usa o texto traduzido da capa, se houver)
+  let titulo = proj.titulo;
+  let subtitulo = proj.briefing?.subtitulo || "";
+  const textos = await readText(path.join(dir, "capas", "textos.json"));
+  if (textos) {
+    try {
+      const t = JSON.parse(textos)[edicao.idioma];
+      if (t?.titulo) titulo = t.titulo;
+      if (t?.subtitulo) subtitulo = t.subtitulo;
+    } catch {}
+  }
+
+  // versão sequencial por edição (mantém histórico de versões)
+  const { count } = await sb
+    .from("artifacts")
+    .select("id", { count: "exact", head: true })
+    .eq("edition_id", edicao.id)
+    .eq("tipo", "epub");
+  const versao = (count ?? 0) + 1;
 
   // config.json (sem comentários)
   const langShort = (edicao.idioma || "pt-BR").split("-")[0];
   const config = {
-    title: proj.titulo,
-    subtitle: "",
+    title: titulo,
+    subtitle: subtitulo,
     authors: [proj.briefing?.autor || "Atelier de Livros IA"],
     language: edicao.idioma || "pt-BR",
     publisher: "",
@@ -406,12 +427,12 @@ async function gerarEpub(job: Job) {
     embed_font: "",
   };
   await mkdir(path.join(dir, "epub"), { recursive: true });
-  const cfgPath = path.join(dir, "epub", `config-${edicao.idioma}.json`);
+  const cfgPath = path.join(dir, "epub", `config-${edicao.idioma}-v${versao}.json`);
   await writeFile(cfgPath, JSON.stringify(config, null, 2), "utf8");
-  const out = path.join(dir, "epub", `${proj.titulo || "livro"}-${edicao.idioma}.epub`);
+  const out = path.join(dir, "epub", `${proj.titulo || "livro"}-${edicao.idioma}-v${versao}.epub`);
 
-  const args = [edicaoKindleScript("build_epub.py"), "--manuscript", manuscrito, "--config", cfgPath, "--output", out];
-  if (temCapa) args.push("--cover", capaPng);
+  // capa SEMPRE embutida (obrigatória)
+  const args = [edicaoKindleScript("build_epub.py"), "--manuscript", manuscrito, "--config", cfgPath, "--output", out, "--cover", capaPng];
   const r = await run(PY_BIN, args, { cwd: dir });
   if (!(await exists(out))) throw new Error(`build_epub falhou (rc=${r.code}): ${(r.err || r.out).slice(-400)}`);
 
@@ -427,9 +448,9 @@ async function gerarEpub(job: Job) {
     tipo: "epub",
     storage_path: key,
     url_publica: url,
-    meta: { validacao: v.out.slice(-1500) },
+    meta: { versao, idioma: edicao.idioma, com_capa: true, validado: v.code === 0, validacao: v.out.slice(-1200) },
   }));
-  await setProgress(job.id, { fase: "EPUB", concluido: true, validado: v.code === 0 });
+  await setProgress(job.id, { fase: "EPUB", concluido: true, versao, validado: v.code === 0 });
 }
 
 // ===========================================================================
