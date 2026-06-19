@@ -450,6 +450,8 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   const piso = Number(proj.piso_palavras ?? 1400);
   const meta = Number(proj.meta_nota ?? 9.0);
   await sb.from("projects").update({ status: "escrevendo" }).eq("id", job.project_id!);
+  // baseline para detectar progresso (escrita longa é retomável do disco)
+  const capsAntes = (await chaptersOnDisk(path.join(dir, "manuscrito"), piso)).length;
 
   // Poller de progresso (verdade do disco) enquanto o runner roda
   const poll = setInterval(async () => {
@@ -487,15 +489,10 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   const state = await readState(dir);
   const total = Number(state?.total_capitulos_previstos ?? proj.total_capitulos ?? 0);
   const caps = await chaptersOnDisk(path.join(dir, "manuscrito"), piso);
-  if (total > 0 && caps.length < total) {
-    const log = (await readText(path.join(dir, "runner.log"))).slice(-600);
-    throw new Error(`livro incompleto: ${caps.length}/${total} capítulos >= piso. rc=${r.code}. ${log}`);
-  }
+  const completo = total > 0 && caps.length >= total;
 
-  // Edição de origem
-  const edicao = await ensureEdition(job.project_id!, proj.idioma_origem || "pt-BR", true, "revisao");
-
-  // Sync capítulos -> Storage + tabela chapters
+  // Edição de origem + sync dos capítulos JÁ existentes (mesmo parcial: a UI mostra progresso real)
+  const edicao = await ensureEdition(job.project_id!, proj.idioma_origem || "pt-BR", true, completo ? "revisao" : "escrevendo");
   for (const c of caps) {
     const key = storageKey(job.project_id!, "origem", `capitulo-${String(c.numero).padStart(2, "0")}.md`);
     await uploadFile("manuscritos", key, c.file);
@@ -505,6 +502,20 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
       { onConflict: "edition_id,numero" }
     ));
   }
+
+  // Incompleto: escrita longa é retomável (verdade do disco). Se ESTA execução avançou,
+  // re-enfileira para continuar (interrupção/limite de sessão não mata o livro). Só falha
+  // de verdade se não escreveu NENHUM capítulo novo (travamento real).
+  if (!completo) {
+    if (caps.length > capsAntes) {
+      await must(sb.from("jobs").insert({ owner: OWNER, tipo: "escrever_livro", project_id: job.project_id, status: "queued" }));
+      await setProgress(job.id, { fase: "ESCRITA", cap_atual: caps.length, total, continua: true });
+      return;
+    }
+    const log = (await readText(path.join(dir, "runner.log"))).slice(-400);
+    throw new Error(`escrita não avançou em ${caps.length}/${total} (rc=${r.code}). ${log}`);
+  }
+
   // Manuscrito-mestre
   const mestre = path.join(dir, "manuscrito", "MANUSCRITO-MESTRE.md");
   if (await exists(mestre)) {
