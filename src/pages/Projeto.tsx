@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Copy, Download, FileText, Image, Languages, Loader2, Maximize2, Pencil, PenLine, Play, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, ClipboardCheck, Copy, Download, FileText, Gauge, Image, Languages, Loader2, Maximize2, Pencil, PenLine, Play, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
-import { signedUrl, deleteProject } from "@/lib/storage";
+import { signedUrl, downloadText, deleteProject } from "@/lib/storage";
 import {
   Dialog,
   DialogContent,
@@ -47,6 +47,7 @@ function JobStatus({ job }: { job?: Job }) {
     <span className="flex items-center gap-2 text-xs text-muted-foreground">
       <Badge variant={b.variant}>{b.label}</Badge>
       {p.fase ? <span>{String(p.fase)}</span> : null}
+      {p.etapa ? <span>· {String(p.etapa)}</span> : null}
       {p.cap_atual != null && p.total != null ? <span>· cap {String(p.cap_atual)}/{String(p.total)}</span> : null}
       {p.nota != null ? <span>· nota {String(p.nota)}</span> : null}
       {job.erro ? <span className="text-destructive">· {job.erro.slice(0, 80)}</span> : null}
@@ -76,6 +77,15 @@ export default function Projeto() {
   const [editOpen, setEditOpen] = useState(false);
   const [salvandoEdit, setSalvandoEdit] = useState(false);
   const [ed, setEd] = useState<Record<string, string>>({});
+  const [tab, setTab] = useState("escrita");
+  const [relOpen, setRelOpen] = useState(false);
+  const [relTitulo, setRelTitulo] = useState("");
+  const [relTxt, setRelTxt] = useState("");
+  const [relCarregando, setRelCarregando] = useState(false);
+  const [melhOpen, setMelhOpen] = useState(false);
+  const [melhEd, setMelhEd] = useState<Edition | null>(null);
+  const [melhTxt, setMelhTxt] = useState("");
+  const [enviandoMelh, setEnviandoMelh] = useState(false);
 
   const carregar = useCallback(async () => {
     if (!id) return;
@@ -227,6 +237,72 @@ export default function Projeto() {
       .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
       .map((a, i) => ({ art: a, versao: (a.meta?.versao as number) ?? i + 1 }));
   const pkgDe = (ed: string) => pkgs.find((p) => p.edition_id === ed);
+  const reviewDe = (edId: string) => artifacts.find((a) => a.edition_id === edId && a.tipo === "review");
+
+  async function abrirRelatorio(e: Edition) {
+    const rev = reviewDe(e.id);
+    if (!rev) return;
+    setRelTitulo(`Avaliação best-seller · ${e.idioma}`);
+    setRelTxt("");
+    setRelCarregando(true);
+    setRelOpen(true);
+    const txt = await downloadText("manuscritos", rev.storage_path);
+    setRelTxt(txt || "Não consegui carregar o relatório.");
+    setRelCarregando(false);
+  }
+  async function enviarMelhorias() {
+    if (!melhEd) return;
+    setEnviandoMelh(true);
+    await enfileira("revisar", { instrucoes: melhTxt.trim() }, melhEd.id);
+    setEnviandoMelh(false);
+    setMelhOpen(false);
+  }
+
+  // Painel reutilizável: nota best-seller + avaliar/relatório/pedir melhorias de UMA edição.
+  function painelAvaliacao(e: Edition) {
+    const rev = reviewDe(e.id);
+    const jAval = jobMaisRecente(jobs, "avaliar", e.id);
+    const jRev = jobMaisRecente(jobs, "revisar", e.id);
+    const ocupado = [jAval, jRev].some((j) => j?.status === "queued" || j?.status === "running");
+    const temManuscrito = (chapters[e.id] ?? 0) > 0;
+    return (
+      <div className="space-y-3 rounded-lg border p-3">
+        <div className="flex items-center gap-2">
+          <Gauge className="h-4 w-4 text-primary" />
+          <span className="text-sm font-medium">Avaliação best-seller</span>
+          {e.nota_review != null ? (
+            <Badge variant="secondary">nota {e.nota_review}/10</Badge>
+          ) : (
+            <span className="text-xs text-muted-foreground">ainda não avaliado</span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={ocupado || !temManuscrito}
+            title={temManuscrito ? "" : "Escreva/traduza esta edição primeiro"}
+            onClick={() => enfileira("avaliar", {}, e.id)}
+          >
+            {jAval?.status === "running" || jAval?.status === "queued" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardCheck className="h-4 w-4" />}
+            {e.nota_review != null ? "Reavaliar" : "Avaliar"}
+          </Button>
+          <Button size="sm" variant="ghost" disabled={!rev} onClick={() => abrirRelatorio(e)}>
+            <FileText className="h-4 w-4" /> Ler relatório
+          </Button>
+          <Button
+            size="sm"
+            disabled={ocupado || !rev}
+            title={rev ? "" : "Avalie a edição antes de pedir melhorias"}
+            onClick={() => { setMelhEd(e); setMelhTxt(""); setMelhOpen(true); }}
+          >
+            <Wand2 className="h-4 w-4" /> Pedir melhorias
+          </Button>
+        </div>
+        {(jRev || jAval) && <JobStatus job={jRev ?? jAval} />}
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -280,7 +356,7 @@ export default function Projeto() {
         );
       })()}
 
-      <Tabs defaultValue="escrita">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="fundacao">Fundação</TabsTrigger>
           <TabsTrigger value="escrita">Escrita</TabsTrigger>
@@ -380,19 +456,68 @@ export default function Projeto() {
         {/* ESCRITA */}
         <TabsContent value="escrita">
           <Card>
-            <CardHeader><CardTitle className="text-xl">Escrita do livro</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-3">
-                <Button onClick={() => enfileira("escrever_livro", {})}>
-                  <PenLine className="h-4 w-4" /> Escrever livro
-                </Button>
-                <JobStatus job={jobMaisRecente(jobs, "escrever_livro")} />
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Roda o livro_runner.py (Opus) capítulo a capítulo até a meta de nota, com verdade do disco.
-                {origem ? ` Capítulos (origem): ${chapters[origem.id] ?? 0}.` : ""}
-                {origem?.nota_review != null ? ` Nota: ${origem.nota_review}.` : ""}
-              </p>
+            <CardHeader>
+              <CardTitle className="text-xl">Escrita do livro</CardTitle>
+              <CardDescription>
+                {proj.titulo} · idioma {proj.idioma_origem}
+                {proj.serie ? ` · ${proj.serie} (vol. ${proj.volume})` : ""}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {(() => {
+                const j = jobMaisRecente(jobs, "escrever_livro");
+                const escrevendo = j?.status === "queued" || j?.status === "running";
+                const p: any = j?.progresso || {};
+                const total = Number(p.total ?? proj.total_capitulos ?? 0);
+                const feitos = escrevendo ? Number(p.cap_atual ?? 0) : origem ? chapters[origem.id] ?? 0 : 0;
+                const pct = total > 0 ? Math.min(100, Math.round((feitos / total) * 100)) : 0;
+                const nota = origem?.nota_review ?? (p.nota != null ? Number(p.nota) : null);
+                const palavras = Number(p.palavras ?? 0);
+                return (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+                      <span><span className="text-muted-foreground">Capítulos:</span> <strong>{feitos}{total ? `/${total}` : ""}</strong></span>
+                      {palavras > 0 && <span><span className="text-muted-foreground">Palavras:</span> <strong>{palavras.toLocaleString("pt-BR")}</strong></span>}
+                      {nota != null && <span><span className="text-muted-foreground">Nota:</span> <strong>{nota}/10</strong></span>}
+                      <span className="text-muted-foreground">
+                        {escrevendo ? (p.fase ? String(p.fase) : "escrevendo…") : feitos > 0 ? "concluído" : "não iniciado"}
+                      </span>
+                    </div>
+                    {total > 0 && (
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                        <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+                      </div>
+                    )}
+                    <div className="flex items-center gap-3">
+                      <Button disabled={escrevendo} onClick={() => enfileira("escrever_livro", {})}>
+                        {escrevendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenLine className="h-4 w-4" />}
+                        {feitos > 0 && !escrevendo ? "Reescrever livro" : "Escrever livro"}
+                      </Button>
+                      <JobStatus job={j} />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Roda o livro_runner.py (Opus) capítulo a capítulo até a meta de nota, com verdade do disco.
+                    </p>
+                  </div>
+                );
+              })()}
+
+              {origem && (chapters[origem.id] ?? 0) > 0 && (
+                <>
+                  {painelAvaliacao(origem)}
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed p-3">
+                    <div>
+                      <p className="text-sm font-medium">Versões em outros idiomas</p>
+                      <p className="text-xs text-muted-foreground">
+                        Traduza o livro pronto para en-US, en-GB, es-ES e outros (skill traducao-editorial).
+                      </p>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => setTab("edicoes")}>
+                      <Languages className="h-4 w-4" /> Traduzir
+                    </Button>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -425,10 +550,13 @@ export default function Projeto() {
               </div>
               <ul className="divide-y">
                 {editions.map((e) => (
-                  <li key={e.id} className="flex items-center justify-between py-2 text-sm">
-                    <span className="font-medium">{e.idioma} {e.is_origem && <span className="text-muted-foreground">(origem)</span>}</span>
-                    <span className="text-muted-foreground">{chapters[e.id] ?? 0} caps{e.nota_review != null ? ` · nota ${e.nota_review}` : ""}</span>
-                    <Badge variant="outline">{e.status}</Badge>
+                  <li key={e.id} className="space-y-3 py-3">
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="font-medium">{e.idioma} {e.is_origem && <span className="text-muted-foreground">(origem)</span>}</span>
+                      <span className="text-muted-foreground">{chapters[e.id] ?? 0} caps{e.nota_review != null ? ` · nota ${e.nota_review}` : ""}</span>
+                      <Badge variant="outline">{e.status}</Badge>
+                    </div>
+                    {painelAvaliacao(e)}
                   </li>
                 ))}
                 {!editions.length && <li className="py-4 text-center text-muted-foreground">Nenhuma edição ainda.</li>}
@@ -757,6 +885,49 @@ export default function Projeto() {
             <Button variant="destructive" disabled={excluindo} onClick={excluir}>
               {excluindo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               Excluir definitivamente
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={relOpen} onOpenChange={setRelOpen}>
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{relTitulo}</DialogTitle>
+            <DialogDescription>Relatório da skill book-bestseller-review (pontos fortes, fracos e nota).</DialogDescription>
+          </DialogHeader>
+          {relCarregando ? (
+            <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          ) : (
+            <pre className="whitespace-pre-wrap break-words rounded border bg-muted/30 p-3 text-sm leading-relaxed">{relTxt}</pre>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={melhOpen} onOpenChange={setMelhOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pedir melhorias {melhEd ? `· ${melhEd.idioma}` : ""}</DialogTitle>
+            <DialogDescription>
+              A IA reescreve <strong>só os pontos fracos</strong> apontados no último relatório de avaliação,
+              preservando o resto. Use o campo abaixo para priorizar focos específicos (opcional).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="melh">Instruções de foco (opcional)</Label>
+            <Textarea
+              id="melh"
+              rows={4}
+              value={melhTxt}
+              onChange={(e) => setMelhTxt(e.target.value)}
+              placeholder="Ex.: deixe o clímax do capítulo 18 mais tenso; aprofunde a motivação do antagonista; corte exposição no início."
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setMelhOpen(false)}>Cancelar</Button>
+            <Button onClick={enviarMelhorias} disabled={enviandoMelh}>
+              {enviandoMelh ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+              Pedir melhorias
             </Button>
           </DialogFooter>
         </DialogContent>

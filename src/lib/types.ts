@@ -40,6 +40,8 @@ export const JOB_TIPOS = [
   "escrever_livro",
   "gerar_epub",
   "traduzir",
+  "avaliar",
+  "revisar",
   "gerar_capa",
   "gerar_capas",
   "gerar_pacote",

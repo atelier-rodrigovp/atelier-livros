@@ -664,6 +664,107 @@ async function traduzir(job: Job, hb?: Heartbeat) {
   await setProgress(job.id, { fase: "TRADUCAO", concluido: true, idiomas });
 }
 
+// ===========================================================================
+// avaliar — book-bestseller-review numa edição (origem OU tradução).
+// Gera relatório legível (review/REVIEW-<idioma>.md) + grava nota_review.
+// ===========================================================================
+// Pasta do manuscrito de uma edição (mesma regra do gerar_epub).
+function edicaoDir(dir: string, edicao: any): string {
+  return edicao.is_origem ? path.join(dir, "manuscrito") : path.join(dir, "traducoes", edicao.idioma);
+}
+
+async function avaliarEdicao(projectId: string, edicao: any, jobId?: string): Promise<number | null> {
+  const dir = projDir(projectId);
+  const sub = edicaoDir(dir, edicao);
+  const mestre = path.join(sub, "MANUSCRITO-MESTRE.md");
+  if (!(await exists(mestre))) throw new Error(`MANUSCRITO-MESTRE.md ausente para ${edicao.idioma} — escreva/traduza antes de avaliar`);
+
+  await mkdir(path.join(dir, "review"), { recursive: true });
+  const relRel = path.join("review", `REVIEW-${edicao.idioma}.md`);
+  const notaRel = path.join("review", `NOTA-${edicao.idioma}.json`);
+  const prompt =
+    "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
+    `AVALIAÇÃO editorial da edição em ${edicao.idioma}. Use a skill \`book-bestseller-review\`.\n` +
+    `- Leia o manuscrito em ${edicaoDir("", edicao).replace(/^[\\/]/, "")}/MANUSCRITO-MESTRE.md (e os capitulo-NN.md, se precisar).\n` +
+    `- Escreva um relatório legível em ${relRel} com: nota global (0–10), notas por critério, pontos fortes e uma LISTA PRIORIZADA E ACIONÁVEL de pontos fracos (cada item: o problema, onde ocorre — capítulo/cena — e o que mudar).\n` +
+    `- Grave ${notaRel} com APENAS {"nota": <número 0-10>}.\n` +
+    "- NÃO altere o manuscrito. NÃO dispare /goal.";
+  await runClaude(prompt, dir);
+
+  if (!(await exists(path.join(dir, relRel)))) throw new Error(`avaliação não gerou ${relRel} (verifique a skill book-bestseller-review / saldo)`);
+  // upload do relatório como artifact "review"
+  const relKey = storageKey(projectId, edicao.idioma, `REVIEW-${edicao.idioma}.md`);
+  await uploadFile("manuscritos", relKey, path.join(dir, relRel));
+  await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "review", storage_path: relKey }));
+
+  // nota: do JSON, com fallback para regex no relatório
+  let nota: number | null = null;
+  const nj = await readText(path.join(dir, notaRel));
+  if (nj) { try { const n = Number(JSON.parse(nj).nota); if (!Number.isNaN(n)) nota = n; } catch { /* ignore */ } }
+  if (nota == null) {
+    const m = (await readText(path.join(dir, relRel))).match(/nota\s*(?:global)?\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*\/?\s*10/i);
+    if (m) nota = Number(m[1].replace(",", "."));
+  }
+  await must(sb.from("editions").update({ nota_review: nota }).eq("id", edicao.id));
+  if (jobId) await setProgress(jobId, { fase: "AVALIACAO", idioma: edicao.idioma, nota, concluido: true });
+  return nota;
+}
+
+async function avaliar(job: Job, _hb?: Heartbeat) {
+  const edicao = await getEdition(job.edition_id!);
+  await setProgress(job.id, { fase: "AVALIACAO", idioma: edicao.idioma });
+  await avaliarEdicao(edicao.project_id, edicao, job.id);
+}
+
+// ===========================================================================
+// revisar — revisão cirúrgica: reescreve SÓ os pontos fracos do último relatório
+// (+ instruções de foco opcionais), reupa o manuscrito e re-avalia.
+// ===========================================================================
+async function revisar(job: Job, _hb?: Heartbeat) {
+  const edicao = await getEdition(job.edition_id!);
+  const projectId = edicao.project_id;
+  const dir = projDir(projectId);
+  const sub = edicaoDir(dir, edicao);
+  const relRel = path.join("review", `REVIEW-${edicao.idioma}.md`);
+  if (!(await exists(path.join(dir, relRel)))) throw new Error("avalie a edição antes de pedir melhorias (relatório ausente)");
+  const instrucoes = String(job.payload?.instrucoes ?? "").trim();
+  const proj = await getProject(projectId);
+
+  await setProgress(job.id, { fase: "REVISAO", idioma: edicao.idioma, etapa: "reescrevendo pontos fracos" });
+  await must(sb.from("editions").update({ status: "revisao" }).eq("id", edicao.id));
+
+  const subRel = edicaoDir("", edicao).replace(/^[\\/]/, "");
+  const prompt =
+    "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
+    `REVISÃO CIRÚRGICA da edição em ${edicao.idioma}. Use a skill \`${edicao.is_origem ? proj.skill_escrita || "edicao-kindle" : "traducao-editorial"}\`.\n` +
+    `- Leia o relatório ${relRel} e corrija SOMENTE os pontos fracos priorizados nele` +
+    (instrucoes ? `, dando prioridade a estas instruções do autor: """${instrucoes}""".\n` : ".\n") +
+    `- Edite os capítulos afetados em ${subRel}/capitulo-NN.md preservando tudo que já está bom (não reescreva o livro inteiro).\n` +
+    `- Reconsolide ${subRel}/MANUSCRITO-MESTRE.md (capítulos em ordem, headings preservados).\n` +
+    "- NÃO altere outras edições/idiomas. NÃO dispare /goal.";
+  await runClaude(prompt, dir);
+
+  // reupload do manuscrito revisado (verdade do disco)
+  const caps = await chaptersOnDisk(sub, 1);
+  const idiomaKey = edicao.is_origem ? "origem" : edicao.idioma;
+  for (const c of caps) {
+    const key = storageKey(projectId, idiomaKey, `capitulo-${String(c.numero).padStart(2, "0")}.md`);
+    await uploadFile("manuscritos", key, c.file);
+    await must(sb.from("chapters").upsert(
+      { owner: OWNER, edition_id: edicao.id, numero: c.numero, palavras: c.palavras, storage_path: key },
+      { onConflict: "edition_id,numero" }
+    ));
+  }
+  const mestre = path.join(sub, "MANUSCRITO-MESTRE.md");
+  if (await exists(mestre)) await uploadFile("manuscritos", storageKey(projectId, idiomaKey, "MANUSCRITO-MESTRE.md"), mestre);
+
+  // re-avalia para atualizar a nota e o relatório
+  await setProgress(job.id, { fase: "REVISAO", idioma: edicao.idioma, etapa: "reavaliando" });
+  const nota = await avaliarEdicao(projectId, edicao, job.id);
+  await must(sb.from("editions").update({ status: "pronto" }).eq("id", edicao.id));
+  await setProgress(job.id, { fase: "REVISAO", idioma: edicao.idioma, nota, concluido: true });
+}
+
 // Compositor determinístico (Pillow) — garante layout idêntico entre idiomas.
 const COMPOSER = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "compose_cover.py");
 
@@ -925,6 +1026,8 @@ export async function executarJob(job: Job, hb?: Heartbeat): Promise<void> {
     case "escrever_livro": return escreverLivro(job, hb);
     case "gerar_epub": return gerarEpub(job);
     case "traduzir": return traduzir(job, hb);
+    case "avaliar": return avaliar(job, hb);
+    case "revisar": return revisar(job, hb);
     case "gerar_capa": return gerarCapas(job, hb);
     case "gerar_capas": return gerarCapas(job, hb);
     case "gerar_pacote": return gerarPacote(job, hb);
