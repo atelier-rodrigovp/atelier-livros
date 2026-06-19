@@ -4,6 +4,11 @@ import "dotenv/config";
 import { sb, OWNER } from "./supabase.js";
 import { executarJob, type Job } from "./jobs.js";
 
+// Usar a assinatura MAX (login OAuth do Claude Code), não créditos de API.
+// Se ANTHROPIC_API_KEY estiver no ambiente, o `claude` headless a prioriza e
+// cobra da API (créditos avulsos). Removendo do processo, ele cai no OAuth.
+delete process.env.ANTHROPIC_API_KEY;
+
 const WORKER_ID = process.env.WORKER_ID || "worker-local";
 const POLL = Number(process.env.POLL_INTERVAL_MS || 5000);
 const STALE_MIN = Number(process.env.HEARTBEAT_STALE_MIN || 15);
