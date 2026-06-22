@@ -512,8 +512,15 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
       await setProgress(job.id, { fase: "ESCRITA", cap_atual: caps.length, total, continua: true });
       return;
     }
-    const log = (await readText(path.join(dir, "runner.log"))).slice(-400);
-    throw new Error(`escrita não avançou em ${caps.length}/${total} (rc=${r.code}). ${log}`);
+    const log = (await readText(path.join(dir, "runner.log"))).slice(-700);
+    if (/hit your session limit|session limit/i.test(log)) {
+      const m = log.match(/resets?\s+([0-9apm:. ]+)/i);
+      throw new Error(
+        `Limite de uso do plano Max atingido${m ? ` (reseta ${m[1].trim()})` : ""}. ` +
+          `A escrita parou em ${caps.length}/${total} capítulos; clique em "Escrever livro" após o reset — ela retoma do disco.`
+      );
+    }
+    throw new Error(`escrita não avançou em ${caps.length}/${total} (rc=${r.code}). ${log.slice(-300)}`);
   }
 
   // Manuscrito-mestre
