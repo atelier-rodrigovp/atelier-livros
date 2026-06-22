@@ -66,3 +66,43 @@
     font-optical-sizing: auto;
   }
 }
+
+/* Leitor (e-reader): prosa paginada por colunas. Cores vêm de estilo inline. */
+.reader-prose h1,
+.reader-prose h2,
+.reader-prose h3,
+.reader-prose h4 {
+  font-family: "Fraunces Variable", Georgia, serif;
+  line-height: 1.2;
+  text-align: left;
+  margin: 0 0 0.8em;
+  text-wrap: balance;
+}
+.reader-prose h1 { font-size: 1.55em; font-weight: 600; margin-top: 0.2em; }
+.reader-prose h2 { font-size: 1.3em; font-weight: 600; }
+.reader-prose h3 { font-size: 1.1em; font-weight: 600; }
+.reader-prose p { margin: 0 0 1.05em; orphans: 2; widows: 2; }
+/* Primeiro parágrafo após um título: sem recuo; demais com recuo editorial. */
+.reader-prose p + p { text-indent: 1.3em; }
+.reader-prose em { font-style: italic; }
+.reader-prose strong { font-weight: 600; }
+.reader-prose blockquote {
+  margin: 1.1em 0;
+  padding-left: 1em;
+  border-left: 2px solid currentColor;
+  opacity: 0.85;
+  font-style: italic;
+}
+.reader-prose hr.cena {
+  border: 0;
+  margin: 1.6em auto;
+  width: 40%;
+  text-align: center;
+}
+.reader-prose hr.cena::before {
+  content: "❖";
+  display: block;
+  text-align: center;
+  opacity: 0.5;
+  font-size: 0.9em;
+}

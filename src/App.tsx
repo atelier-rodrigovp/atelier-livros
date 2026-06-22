@@ -7,6 +7,7 @@ import Dashboard from "@/pages/Dashboard";
 import Configuracoes from "@/pages/Configuracoes";
 import NovoProjeto from "@/pages/NovoProjeto";
 import Projeto from "@/pages/Projeto";
+import Leitor from "@/pages/Leitor";
 import Catalogo from "@/pages/Catalogo";
 import Vendas from "@/pages/Vendas";
 
@@ -31,6 +32,7 @@ export default function App() {
         </Routes>
       ) : (
         <Routes>
+          <Route path="projeto/:id/ler" element={<Leitor />} />
           <Route element={<AppLayout />}>
             <Route index element={<Dashboard />} />
             <Route path="catalogo" element={<Catalogo />} />

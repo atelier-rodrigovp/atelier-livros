@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ClipboardCheck, Copy, Download, FileText, Gauge, Image, Languages, Loader2, Maximize2, Pencil, PenLine, Play, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { ArrowLeft, BookOpen, ClipboardCheck, Copy, Download, FileText, Gauge, Image, Languages, Loader2, Maximize2, Pencil, PenLine, Play, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
 import { signedUrl, downloadText, deleteProject } from "@/lib/storage";
@@ -319,6 +319,11 @@ export default function Projeto() {
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={sb.variant}>{sb.label}</Badge>
+          {editions.some((e) => (chapters[e.id] ?? 0) > 0) && (
+            <Button variant="outline" size="sm" onClick={() => nav(`/projeto/${id}/ler`)}>
+              <BookOpen className="h-4 w-4" /> Ler
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={abrirEdicao}>
             <Pencil className="h-4 w-4" /> Editar
           </Button>
