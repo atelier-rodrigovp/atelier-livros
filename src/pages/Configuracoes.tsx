@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, AlertTriangle, Loader2, Send } from "lucide-react";
+import { Activity, Loader2, Power, Send } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/hooks/useSession";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
@@ -9,7 +9,6 @@ import { cn } from "@/lib/utils";
 import type { Job } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import {
   Card,
   CardContent,
@@ -57,7 +56,7 @@ export default function Configuracoes() {
     };
   }, [carregarControle, carregarJobs]);
 
-  async function alternar(novo: boolean) {
+  async function alternarProducao(novo: boolean) {
     setSalvandoCtl(true);
     setAtivo(novo); // otimista
     const { error } = await supabase
@@ -71,9 +70,7 @@ export default function Configuracoes() {
       setAtivo(!novo);
       toast.error(error.message);
     } else {
-      toast.success(
-        novo ? "Fila ativada — o worker vai processar os jobs." : "Fila pausada — novos jobs aguardam."
-      );
+      toast.success(novo ? "Produção ligada — o worker vai processar a fila." : "Produção desligada — o worker fica ocioso.");
     }
   }
 
@@ -89,13 +86,19 @@ export default function Configuracoes() {
     }
   }
 
+  // Estado consolidado: produzindo / pausado / parado.
+  const estado = !online ? "parado" : ativo ? "produzindo" : "pausado";
+  const cfg = {
+    produzindo: { cor: "bg-emerald-500", texto: "Produzindo", pulse: true },
+    pausado: { cor: "bg-amber-500", texto: "Pausado", pulse: false },
+    parado: { cor: "bg-muted-foreground/40", texto: "Parado", pulse: false },
+  }[estado];
+
   return (
     <div className="mx-auto max-w-3xl space-y-8">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Configurações</h1>
-        <p className="mt-1 text-muted-foreground">
-          Perfil, worker e atividade.
-        </p>
+        <p className="mt-1 text-muted-foreground">Perfil, worker e atividade.</p>
       </div>
 
       <Card>
@@ -115,91 +118,62 @@ export default function Configuracoes() {
         </CardContent>
       </Card>
 
-      {/* 1) O worker é um PROGRAMA na sua máquina (online/offline). A web não o liga. */}
+      {/* Worker: controle 100% pelo app (via worker_control). Sem terminal. */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">Status do worker</CardTitle>
+          <CardTitle className="text-xl">Worker</CardTitle>
           <CardDescription>
-            O worker é um programa que roda na sua máquina e executa a IA. Este painel não o inicia.
+            Liga, pausa e acompanha a produção da IA — tudo por aqui.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-2 text-sm">
-            <span
-              className={cn(
-                "inline-block h-3 w-3 rounded-full",
-                online ? "bg-emerald-500" : "bg-muted-foreground/40"
-              )}
-            />
-            <span className="text-base font-medium">{online ? "Online" : "Offline"}</span>
+        <CardContent className="space-y-5">
+          <div className="flex items-center gap-2.5">
+            <span className={cn("inline-block h-3 w-3 rounded-full", cfg.cor, cfg.pulse && "animate-pulse")} />
+            <span className="text-lg font-medium">{cfg.texto}</span>
             {heartbeat?.last_seen && (
-              <span className="text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 · último sinal {new Date(heartbeat.last_seen).toLocaleString()}
               </span>
             )}
           </div>
 
-          {!online && (
-            <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
-              <div className="flex items-center gap-2 font-medium text-amber-700 dark:text-amber-400">
-                <AlertTriangle className="h-4 w-4" />
-                O worker não está rodando na sua máquina.
-              </div>
-              <p className="text-muted-foreground">
-                Sem ele, nada é processado (escrita, traduções, capas). Para iniciar, abra um terminal na
-                pasta do projeto e rode:
-              </p>
-              <pre className="overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs">
-                cd worker{"\n"}npm install   # só na primeira vez{"\n"}npm run dev
-              </pre>
-              <p className="text-xs text-muted-foreground">
-                No Windows, ele também pode subir sozinho pela Tarefa Agendada <code>AtelierWorker</code>
-                {" "}(ao logar). Deixe o terminal/processo aberto enquanto estiver produzindo.
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* 2) A web só liga/pausa a FILA — e isso só tem efeito com o worker online. */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">Processar fila de jobs</CardTitle>
-          <CardDescription>
-            Liga/pausa o consumo da fila pelo worker. Só tem efeito quando o worker está online.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className={cn("flex items-center justify-between rounded-lg border p-4", !online && "opacity-60")}>
-            <div className="space-y-0.5 pr-4">
-              <p className="text-sm font-medium">Processar fila</p>
-              <p className="text-xs text-muted-foreground">
-                {online
-                  ? "Pausado, novos jobs aguardam na fila sem serem executados."
-                  : "Indisponível: o worker está offline. Inicie o worker para a fila ter efeito."}
-              </p>
-            </div>
-            <Switch
-              checked={ativo}
-              onCheckedChange={alternar}
-              disabled={salvandoCtl || !online}
-              aria-label="Ativar ou pausar o processamento da fila"
-            />
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              size="lg"
+              variant={ativo ? "outline" : "default"}
+              disabled={salvandoCtl}
+              onClick={() => alternarProducao(!ativo)}
+            >
+              {salvandoCtl ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
+              {ativo ? "Desligar produção" : "Ligar produção"}
+            </Button>
+            <Button onClick={testarWorker} disabled={enviando} variant="ghost">
+              {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Rodar teste (ping)
+            </Button>
           </div>
 
-          <Button onClick={testarWorker} disabled={enviando} variant="outline">
-            {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            Enfileirar job de teste (ping)
-          </Button>
+          {estado === "parado" ? (
+            <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
+              O worker não está em execução nesta máquina. Inicie o worker uma vez para que o app passe a
+              controlá-lo.
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {estado === "produzindo"
+                ? "O worker está em execução e processando a fila. Você pode desligar a produção a qualquer momento — ele fica ocioso, sem fechar."
+                : "Produção pausada: o worker continua em execução, mas não processa a fila. Religue quando quiser retomar."}
+            </p>
+          )}
 
-          <p className="text-xs text-muted-foreground">
-            Como funciona: o worker é um programa local; este painel só liga/pausa a fila. Para ligar/desligar
-            o worker de fato, é o processo na sua máquina (ver “Status do worker”).
+          <p className="border-t pt-4 text-xs text-muted-foreground">
+            O worker roda de forma residente na sua máquina. Uma vez em execução, ligar, desligar, pausar e
+            acompanhar o status passam a ser 100% por aqui — não precisa de terminal.
           </p>
         </CardContent>
       </Card>
 
-      {/* 3) Atividade técnica (antes ficava no Dashboard). */}
+      {/* Atividade técnica (histórico de jobs). */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-xl">
