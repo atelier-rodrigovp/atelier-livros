@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Library, Play, Search } from "lucide-react";
+import { Library, Search } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { signedUrl } from "@/lib/storage";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { CoverArt, paletaDe } from "@/components/CoverArt";
+import { CoverArt } from "@/components/CoverArt";
 
 interface Item {
   edition_id: string;
@@ -16,6 +16,7 @@ interface Item {
   idioma: string;
   status: string;
   capa: string | null;
+  created_at: string;
 }
 
 // Cache de URLs assinadas por sessão (evita reassinar a cada carregamento).
@@ -28,70 +29,39 @@ function chipCls(on: boolean) {
   );
 }
 
+const ctrlCls =
+  "h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
 function Poster({ item }: { item: Item }) {
   return (
     <Link to={`/projeto/${item.project_id}`} className="group block">
-      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl border bg-muted shadow-sm transition-shadow group-hover:shadow-xl">
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg border bg-muted shadow-sm transition-all group-hover:shadow-lg">
         <CoverArt info={item} variant="poster" className="transition-transform duration-300 group-hover:scale-105" />
         {item.volume && item.serie && (
-          <span className="absolute left-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur">
+          <span className="absolute left-1.5 top-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur">
             Vol. {item.volume}
           </span>
         )}
-        <Badge variant="outline" className="absolute right-2 top-2 bg-background/85 backdrop-blur">
+        <Badge variant="outline" className="absolute right-1.5 top-1.5 bg-background/85 px-1.5 py-0 text-[10px] backdrop-blur">
           {item.status}
         </Badge>
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/25 to-transparent p-3 pt-10">
-          <p className="line-clamp-2 text-sm font-medium leading-snug text-white">{item.titulo}</p>
-          <p className="text-[11px] text-white/70">{item.idioma}</p>
-        </div>
-        <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
-          <span className="flex items-center gap-1 rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-black shadow">
-            <Play className="h-3.5 w-3.5" /> Abrir
-          </span>
-        </div>
+      </div>
+      <div className="mt-1.5">
+        <p className="truncate text-sm font-medium leading-tight" title={item.titulo}>{item.titulo}</p>
+        <p className="text-xs text-muted-foreground">{item.idioma}</p>
       </div>
     </Link>
   );
 }
 
-function Carrossel({ titulo, itens }: { titulo: string; itens: Item[] }) {
-  const ref = useRef<HTMLDivElement>(null);
-  if (!itens.length) return null;
-  const rolar = (dir: number) => {
-    const el = ref.current;
-    if (el) el.scrollBy({ left: dir * el.clientWidth * 0.9, behavior: "smooth" });
-  };
+function Grade({ itens }: { itens: Item[] }) {
   return (
-    <section className="group/row space-y-3">
-      <div className="flex items-baseline gap-2">
-        <h2 className="font-serif text-xl font-semibold tracking-tight">{titulo}</h2>
-        <span className="text-sm text-muted-foreground">{itens.length}</span>
-      </div>
-      <div className="relative">
-        <button
-          onClick={() => rolar(-1)}
-          aria-label="Anterior"
-          className="absolute left-0 top-0 z-10 hidden h-full items-center bg-gradient-to-r from-background/90 to-transparent pl-1 pr-6 opacity-0 transition-opacity group-hover/row:opacity-100 sm:flex"
-        >
-          <span className="rounded-full border bg-background p-1.5 shadow"><ChevronLeft className="h-5 w-5" /></span>
-        </button>
-        <div ref={ref} className="flex snap-x gap-4 overflow-x-auto scroll-smooth pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {itens.map((i) => (
-            <div key={i.edition_id} className="w-[160px] shrink-0 snap-start sm:w-[185px]">
-              <Poster item={i} />
-            </div>
-          ))}
-        </div>
-        <button
-          onClick={() => rolar(1)}
-          aria-label="Próximo"
-          className="absolute right-0 top-0 z-10 hidden h-full items-center bg-gradient-to-l from-background/90 to-transparent pl-6 pr-1 opacity-0 transition-opacity group-hover/row:opacity-100 sm:flex"
-        >
-          <span className="rounded-full border bg-background p-1.5 shadow"><ChevronRight className="h-5 w-5" /></span>
-        </button>
-      </div>
-    </section>
+    <div
+      className="grid gap-4"
+      style={{ gridTemplateColumns: "repeat(auto-fill, minmax(132px, 1fr))" }}
+    >
+      {itens.map((i) => <Poster key={i.edition_id} item={i} />)}
+    </div>
   );
 }
 
@@ -100,10 +70,14 @@ export default function Catalogo() {
   const [busca, setBusca] = useState("");
   const [fIdioma, setFIdioma] = useState("");
   const [fStatus, setFStatus] = useState("");
+  const [ordem, setOrdem] = useState("recentes");
+  const [agrupar, setAgrupar] = useState(() => localStorage.getItem("cat:agrupar") === "1");
+
+  useEffect(() => { localStorage.setItem("cat:agrupar", agrupar ? "1" : "0"); }, [agrupar]);
 
   const carregar = useCallback(async () => {
     const [{ data: projs }, { data: eds }, { data: arts }] = await Promise.all([
-      supabase.from("projects").select("id,titulo,serie,volume"),
+      supabase.from("projects").select("id,titulo,serie,volume,created_at"),
       supabase.from("editions").select("id,project_id,idioma,status"),
       supabase.from("artifacts").select("edition_id,tipo,url_publica,storage_path").eq("tipo", "capa"),
     ]);
@@ -127,6 +101,7 @@ export default function Catalogo() {
         idioma: e.idioma,
         status: e.status,
         capa: capaMap.get(e.id) ?? null,
+        created_at: pmap.get(e.project_id)?.created_at ?? "",
       }))
     );
   }, []);
@@ -135,68 +110,91 @@ export default function Catalogo() {
 
   const idiomas = useMemo(() => [...new Set(itens.map((i) => i.idioma))].sort(), [itens]);
   const statuses = useMemo(() => [...new Set(itens.map((i) => i.status))].sort(), [itens]);
-  const filtrando = !!(busca.trim() || fIdioma || fStatus);
 
-  const filtrados = useMemo(() => {
+  const ordenar = useCallback((arr: Item[]) => {
+    const a = [...arr];
+    if (ordem === "titulo") a.sort((x, y) => x.titulo.localeCompare(y.titulo, "pt-BR"));
+    else if (ordem === "status") a.sort((x, y) => x.status.localeCompare(y.status));
+    else a.sort((x, y) => (y.created_at ?? "").localeCompare(x.created_at ?? ""));
+    return a;
+  }, [ordem]);
+
+  const visiveis = useMemo(() => {
     const q = busca.trim().toLowerCase();
-    return itens.filter(
+    const filtrados = itens.filter(
       (i) =>
         (!q || i.titulo.toLowerCase().includes(q) || (i.serie ?? "").toLowerCase().includes(q)) &&
         (!fIdioma || i.idioma === fIdioma) &&
         (!fStatus || i.status === fStatus)
     );
-  }, [itens, busca, fIdioma, fStatus]);
+    return ordenar(filtrados);
+  }, [itens, busca, fIdioma, fStatus, ordenar]);
 
-  const { sagas, avulsos } = useMemo(() => {
+  // Modo agrupado: seções por série (preservando a ordem escolhida), volumes por número.
+  const grupos = useMemo(() => {
     const bySerie = new Map<string, Item[]>();
-    const soltos: Item[] = [];
-    for (const i of itens) {
+    const avulsos: Item[] = [];
+    for (const i of visiveis) {
       if (i.serie) {
         const arr = bySerie.get(i.serie) ?? [];
         arr.push(i);
         bySerie.set(i.serie, arr);
-      } else soltos.push(i);
+      } else avulsos.push(i);
     }
-    const sagas = [...bySerie.entries()].map(([serie, arr]) => ({
+    const series = [...bySerie.entries()].map(([serie, arr]) => ({
       serie,
       itens: arr.sort((a, b) => (a.volume ?? 0) - (b.volume ?? 0)),
     }));
-    return { sagas, avulsos: soltos };
-  }, [itens]);
-
-  // Hero: primeiro livro em produção (origem, não pronto).
-  const hero = useMemo(
-    () => itens.find((i) => i.status !== "pronto" && i.status !== "publicado") ?? null,
-    [itens]
-  );
+    return { series, avulsos };
+  }, [visiveis]);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8">
+    <div className="mx-auto max-w-6xl space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Catálogo</h1>
-          <p className="mt-1 text-muted-foreground">Sua biblioteca de capas e edições.</p>
+          <p className="mt-1 text-muted-foreground">
+            {itens.length} {itens.length === 1 ? "livro" : "livros"} · {idiomas.length} {idiomas.length === 1 ? "idioma" : "idiomas"}
+          </p>
         </div>
         {itens.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-full sm:w-60">
+          <div className="flex items-center gap-2">
+            <div className="relative w-full sm:w-[190px]">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
                 placeholder="Buscar…"
-                className="h-9 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className={cn(ctrlCls, "w-full pl-9 pr-3")}
               />
             </div>
-            {idiomas.length > 1 && idiomas.map((i) => (
-              <button key={i} className={chipCls(fIdioma === i)} onClick={() => setFIdioma((c) => (c === i ? "" : i))}>{i}</button>
-            ))}
-            {statuses.length > 1 && statuses.map((s) => (
-              <button key={s} className={chipCls(fStatus === s)} onClick={() => setFStatus((c) => (c === s ? "" : s))}>{s}</button>
-            ))}
+            <select value={ordem} onChange={(e) => setOrdem(e.target.value)} className={ctrlCls} aria-label="Ordenar">
+              <option value="recentes">Recentes</option>
+              <option value="titulo">Título A–Z</option>
+              <option value="status">Status</option>
+            </select>
           </div>
         )}
       </div>
+
+      {itens.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {idiomas.length > 1 && idiomas.map((i) => (
+            <button key={i} className={chipCls(fIdioma === i)} onClick={() => setFIdioma((c) => (c === i ? "" : i))}>{i}</button>
+          ))}
+          {idiomas.length > 1 && statuses.length > 1 && <span className="mx-1 h-4 w-px bg-border" />}
+          {statuses.length > 1 && statuses.map((s) => (
+            <button key={s} className={chipCls(fStatus === s)} onClick={() => setFStatus((c) => (c === s ? "" : s))}>{s}</button>
+          ))}
+          <button
+            className={cn(chipCls(agrupar), "ml-auto")}
+            onClick={() => setAgrupar((v) => !v)}
+            aria-pressed={agrupar}
+          >
+            Agrupar por série
+          </button>
+        </div>
+      )}
 
       {itens.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed py-20 text-center">
@@ -206,45 +204,28 @@ export default function Catalogo() {
             Criar primeiro projeto
           </Link>
         </div>
-      ) : filtrando ? (
-        filtrados.length === 0 ? (
-          <p className="py-12 text-center text-sm text-muted-foreground">Nada encontrado com esses filtros.</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-            {filtrados.map((i) => <Poster key={i.edition_id} item={i} />)}
-          </div>
-        )
-      ) : (
-        <div className="space-y-10">
-          {hero && (() => {
-            const [c1, c2] = paletaDe(hero.titulo + (hero.volume ?? ""));
-            return (
-              <Link
-                to={`/projeto/${hero.project_id}`}
-                className="relative block h-56 overflow-hidden rounded-2xl sm:h-64"
-                style={
-                  hero.capa
-                    ? { backgroundImage: `url(${hero.capa})`, backgroundSize: "cover", backgroundPosition: "center" }
-                    : { background: `linear-gradient(120deg, ${c1}, ${c2})` }
-                }
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/45 to-black/10" />
-                <div className="relative flex h-full flex-col justify-end gap-2 p-6 sm:p-8">
-                  <span className="text-xs uppercase tracking-widest text-white/70">Em produção</span>
-                  <h2 className="font-serif text-2xl font-semibold text-white sm:text-3xl">{hero.titulo}</h2>
-                  <div className="flex items-center gap-3">
-                    <Badge variant="outline" className="border-white/30 bg-white/10 text-white">{hero.status}</Badge>
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-sm font-medium text-black">
-                      <Play className="h-4 w-4" /> Continuar
-                    </span>
-                  </div>
-                </div>
-              </Link>
-            );
-          })()}
-          {sagas.map((g) => <Carrossel key={g.serie} titulo={g.serie} itens={g.itens} />)}
-          <Carrossel titulo="Livros avulsos" itens={avulsos} />
+      ) : visiveis.length === 0 ? (
+        <p className="py-12 text-center text-sm text-muted-foreground">Nada encontrado.</p>
+      ) : agrupar ? (
+        <div className="space-y-8">
+          {grupos.series.map((g) => (
+            <section key={g.serie} className="space-y-3">
+              <div className="flex items-baseline gap-2">
+                <h2 className="font-serif text-xl font-semibold tracking-tight">{g.serie}</h2>
+                <span className="text-sm text-muted-foreground">{g.itens.length}</span>
+              </div>
+              <Grade itens={g.itens} />
+            </section>
+          ))}
+          {grupos.avulsos.length > 0 && (
+            <section className="space-y-3">
+              {grupos.series.length > 0 && <h2 className="font-serif text-xl font-semibold tracking-tight">Livros avulsos</h2>}
+              <Grade itens={grupos.avulsos} />
+            </section>
+          )}
         </div>
+      ) : (
+        <Grade itens={visiveis} />
       )}
     </div>
   );
