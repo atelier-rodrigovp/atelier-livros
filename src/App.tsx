@@ -25,7 +25,7 @@ export default function App() {
   if (carregando) return <Carregando />;
 
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       {!session ? (
         <Routes>
           <Route path="*" element={<Login />} />
