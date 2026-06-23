@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { BookText, Layers, MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { BookText, CheckCircle2, Layers, MoreHorizontal, PenLine, Plus, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
-import { deleteProject } from "@/lib/storage";
+import { signedUrl, deleteProject } from "@/lib/storage";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
 import type { Project } from "@/lib/types";
 import { displayProjectStatus } from "@/lib/status";
+import { CoverArt } from "@/components/CoverArt";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -19,28 +20,27 @@ import {
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning";
 type Derivado = { label: string; variant: BadgeVariant; pulse: boolean };
 
-// Badge de status com ponto pulsante quando a escrita está realmente ativa.
-function StatusBadge({ s, className }: { s: Derivado; className?: string }) {
+function corDot(v: BadgeVariant) {
+  return v === "success" ? "bg-emerald-500" : v === "warning" ? "bg-amber-500" : v === "default" ? "bg-primary" : "bg-muted-foreground/40";
+}
+
+function StatusBadge({ s }: { s: Derivado }) {
   return (
-    <Badge variant={s.variant} className={className}>
+    <Badge variant={s.variant}>
       {s.pulse && <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />}
       {s.label}
     </Badge>
   );
 }
 
-function MiniProgresso({ feitos, total }: { feitos: number; total: number | null }) {
-  if (!feitos || !total) return null;
-  const pct = Math.min(100, Math.round((feitos / total) * 100));
+function Kpi({ label, valor, Icon }: { label: string; valor: number; Icon: typeof BookText }) {
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>{feitos}/{total} capítulos</span>
-        <span className="tabular-nums">{pct}%</span>
+    <div className="rounded-xl border bg-card p-4">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <Icon className="h-4 w-4 text-muted-foreground/50" />
       </div>
-      <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
-        <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
-      </div>
+      <p className="mt-1 text-2xl font-semibold tabular-nums">{valor}</p>
     </div>
   );
 }
@@ -50,19 +50,23 @@ export default function Dashboard() {
   const { online } = useWorkerStatus(15_000);
   const [projects, setProjects] = useState<Project[]>([]);
   const [feitos, setFeitos] = useState<Record<string, number>>({});
+  const [capas, setCapas] = useState<Record<string, string>>({});
   const [ativos, setAtivos] = useState<Set<string>>(new Set());
 
   const carregar = useCallback(async () => {
-    const [{ data: projs }, { data: eds }, { data: chs }, { data: jobsAtivos }] = await Promise.all([
+    const [{ data: projs }, { data: eds }, { data: chs }, { data: jobsAtivos }, { data: arts }] = await Promise.all([
       supabase.from("projects").select("*").order("created_at", { ascending: false }),
       supabase.from("editions").select("id,project_id,is_origem"),
       supabase.from("chapters").select("edition_id"),
       supabase.from("jobs").select("project_id").in("status", ["queued", "running"]).neq("tipo", "controle_escrita"),
+      supabase.from("artifacts").select("edition_id,storage_path,url_publica").eq("tipo", "capa"),
     ]);
     setProjects((projs as Project[]) ?? []);
 
     const origemEd: Record<string, string> = {};
+    const edToProj: Record<string, string> = {};
     for (const e of (eds as { id: string; project_id: string; is_origem: boolean }[]) ?? []) {
+      edToProj[e.id] = e.project_id;
       if (e.is_origem) origemEd[e.project_id] = e.id;
     }
     const porEd: Record<string, number> = {};
@@ -70,6 +74,18 @@ export default function Dashboard() {
     const f: Record<string, number> = {};
     for (const [pid, edid] of Object.entries(origemEd)) f[pid] = porEd[edid] ?? 0;
     setFeitos(f);
+
+    // Capa do projeto = capa da edição de origem.
+    const origemSet = new Set(Object.values(origemEd));
+    const capaEntries = await Promise.all(
+      ((arts as { edition_id: string; storage_path: string; url_publica: string | null }[]) ?? [])
+        .filter((a) => origemSet.has(a.edition_id))
+        .map(async (a) => {
+          const url = (await signedUrl("capas", a.storage_path, 3600)) ?? a.url_publica ?? null;
+          return [edToProj[a.edition_id], url] as const;
+        })
+    );
+    setCapas(Object.fromEntries(capaEntries.filter(([, u]) => u)) as Record<string, string>);
 
     setAtivos(new Set(((jobsAtivos as { project_id: string | null }[]) ?? []).map((j) => j.project_id).filter(Boolean) as string[]));
   }, []);
@@ -86,8 +102,7 @@ export default function Dashboard() {
   }, [carregar]);
 
   const statusDe = useCallback(
-    (p: Project): Derivado =>
-      displayProjectStatus({ projectStatus: p.status, hasActiveJob: ativos.has(p.id), workerOnline: online }),
+    (p: Project): Derivado => displayProjectStatus({ projectStatus: p.status, hasActiveJob: ativos.has(p.id), workerOnline: online }),
     [ativos, online]
   );
 
@@ -101,9 +116,8 @@ export default function Dashboard() {
     }
   }
 
-  // Agrupa volumes de uma mesma série num único card (só na UI; não toca o banco).
   type CardItem = { kind: "single"; project: Project } | { kind: "saga"; serie: string; volumes: Project[] };
-  const cards = useMemo<CardItem[]>(() => {
+  const { cards, kpis, subtitulo } = useMemo(() => {
     const out: CardItem[] = [];
     const idx: Record<string, number> = {};
     for (const p of projects) {
@@ -111,31 +125,43 @@ export default function Dashboard() {
         if (idx[p.serie] === undefined) {
           idx[p.serie] = out.length;
           out.push({ kind: "saga", serie: p.serie, volumes: [p] });
-        } else {
-          (out[idx[p.serie]] as { volumes: Project[] }).volumes.push(p);
-        }
-      } else {
-        out.push({ kind: "single", project: p });
-      }
+        } else (out[idx[p.serie]] as { volumes: Project[] }).volumes.push(p);
+      } else out.push({ kind: "single", project: p });
     }
     for (const c of out) if (c.kind === "saga") c.volumes.sort((a, b) => (a.volume ?? 0) - (b.volume ?? 0));
-    return out;
+
+    const kpis = {
+      total: projects.length,
+      producao: projects.filter((p) => p.status === "escrevendo" || p.status === "revisao").length,
+      prontos: projects.filter((p) => p.status === "pronto").length,
+      publicados: projects.filter((p) => p.status === "publicado").length,
+    };
+    const nSeries = out.filter((c) => c.kind === "saga").length;
+    const nVol = out.filter((c) => c.kind === "saga").reduce((a, c) => a + (c as { volumes: Project[] }).volumes.length, 0);
+    const nAvulsos = out.filter((c) => c.kind === "single").length;
+    const partes: string[] = [];
+    if (nSeries) partes.push(`${nSeries} série${nSeries !== 1 ? "s" : ""} · ${nVol} volume${nVol !== 1 ? "s" : ""}`);
+    partes.push(`${nAvulsos} ${nAvulsos === 1 ? "livro avulso" : "livros avulsos"}`);
+    return { cards: out, kpis, subtitulo: partes.join(" · ") };
   }, [projects]);
+
+  function MiniCapa({ p, size = "h-24 w-16" }: { p: Project; size?: string }) {
+    return (
+      <div className={`relative ${size} shrink-0 overflow-hidden rounded-md border`}>
+        <CoverArt info={{ titulo: p.titulo, serie: p.serie, volume: p.volume, capa: capas[p.id] ?? null }} variant="mini" />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
-          <p className="mt-1 text-muted-foreground">
-            {projects.length} {projects.length === 1 ? "projeto" : "projetos"} · produção editorial.
-          </p>
+          <p className="mt-1 text-muted-foreground">{projects.length ? subtitulo : "Produção editorial."}</p>
         </div>
         <Button asChild>
-          <Link to="/novo-projeto">
-            <Plus className="h-4 w-4" />
-            Novo projeto
-          </Link>
+          <Link to="/novo-projeto"><Plus className="h-4 w-4" /> Novo projeto</Link>
         </Button>
       </div>
 
@@ -148,78 +174,98 @@ export default function Dashboard() {
           </Button>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {cards.map((c) =>
-            c.kind === "single" ? (
-              <div
-                key={c.project.id}
-                onClick={() => nav(`/projeto/${c.project.id}`)}
-                className="group relative cursor-pointer rounded-xl border bg-card p-5 transition-shadow hover:shadow-md"
-              >
-                <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        onClick={(e) => e.stopPropagation()}
-                        className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"
-                        title="Mais ações"
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                      <DropdownMenuItem
-                        className="text-destructive focus:text-destructive"
-                        onClick={() => excluir(c.project)}
-                      >
-                        <Trash2 className="h-4 w-4" /> Excluir projeto
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-                <div className="space-y-3">
-                  <div className="space-y-1 pr-6">
-                    <h3 className="line-clamp-2 font-semibold leading-snug">{c.project.titulo}</h3>
-                    <p className="text-xs text-muted-foreground">
-                      {c.project.genero ?? "—"} · {c.project.idioma_origem}
-                    </p>
+        <>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <Kpi label="Livros" valor={kpis.total} Icon={BookText} />
+            <Kpi label="Em produção" valor={kpis.producao} Icon={PenLine} />
+            <Kpi label="Prontos" valor={kpis.prontos} Icon={CheckCircle2} />
+            <Kpi label="Publicados" valor={kpis.publicados} Icon={Send} />
+          </div>
+
+          <div>
+            <h2 className="mb-4 text-lg font-semibold tracking-tight">Seus projetos</h2>
+            <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              {cards.map((c) =>
+                c.kind === "single" ? (
+                  <div
+                    key={c.project.id}
+                    onClick={() => nav(`/projeto/${c.project.id}`)}
+                    className="group relative flex cursor-pointer gap-4 rounded-xl border bg-card p-4 transition-shadow hover:shadow-md"
+                  >
+                    <MiniCapa p={c.project} />
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <h3 className="line-clamp-2 pr-6 font-semibold leading-snug">{c.project.titulo}</h3>
+                      <p className="text-xs text-muted-foreground">{c.project.genero ?? "—"} · {c.project.idioma_origem}</p>
+                      <StatusBadge s={statusDe(c.project)} />
+                      {(() => {
+                        const fe = feitos[c.project.id] ?? 0;
+                        const tt = c.project.total_capitulos;
+                        if (!fe || !tt) return null;
+                        return (
+                          <div className="pt-1">
+                            <div className="mb-0.5 text-[11px] text-muted-foreground">{fe}/{tt} capítulos</div>
+                            <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+                              <div className="h-full bg-primary" style={{ width: `${Math.min(100, (fe / tt) * 100)}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button onClick={(e) => e.stopPropagation()} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => excluir(c.project)}>
+                            <Trash2 className="h-4 w-4" /> Excluir projeto
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
-                  <StatusBadge s={statusDe(c.project)} />
-                  <MiniProgresso feitos={feitos[c.project.id] ?? 0} total={c.project.total_capitulos} />
-                </div>
-              </div>
-            ) : (
-              <div key={c.serie} className="relative rounded-xl border bg-card p-5 sm:col-span-2 lg:col-span-1">
-                <div className="mb-3 flex items-center gap-2">
-                  <Layers className="h-4 w-4 text-primary" />
-                  <div className="min-w-0">
-                    <h3 className="truncate font-semibold leading-snug">{c.serie}</h3>
-                    <p className="text-xs text-muted-foreground">
-                      Saga · {c.volumes.length} {c.volumes.length === 1 ? "volume" : "volumes"}
-                      {c.volumes.length > 1 ? ` (Vol. ${c.volumes[0].volume}–${c.volumes[c.volumes.length - 1].volume})` : ""}
-                    </p>
-                  </div>
-                </div>
-                <ul className="space-y-1.5">
-                  {c.volumes.map((v) => (
-                    <li key={v.id}>
-                      <Link
-                        to={`/projeto/${v.id}`}
-                        className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-muted"
-                      >
-                        <span className="w-7 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">
-                          v{v.volume}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-sm">{v.titulo}</span>
-                        <StatusBadge s={statusDe(v)} className="shrink-0" />
+                ) : (() => {
+                  const prontos = c.volumes.filter((v) => v.status === "pronto" || v.status === "publicado").length;
+                  const pendente = c.volumes.find((v) => v.status !== "pronto" && v.status !== "publicado");
+                  const agg = pendente ? statusDe(pendente) : null;
+                  return (
+                    <div key={c.serie} className="rounded-xl border bg-card p-4 sm:col-span-2 xl:col-span-1">
+                      <Link to={`/projeto/${c.volumes[0].id}`} className="mb-3 flex items-center gap-2 hover:underline">
+                        <Layers className="h-4 w-4 shrink-0 text-primary" />
+                        <div className="min-w-0">
+                          <h3 className="truncate font-semibold leading-snug">{c.serie}</h3>
+                          <p className="text-xs text-muted-foreground">Saga · {c.volumes.length} volumes</p>
+                        </div>
                       </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )
-          )}
-        </div>
+                      <div className="flex gap-2.5">
+                        {c.volumes.map((v) => (
+                          <Link key={v.id} to={`/projeto/${v.id}`} className="group/v relative" title={`Vol. ${v.volume}: ${v.titulo}`}>
+                            <MiniCapa p={v} size="h-[84px] w-14" />
+                            <span className="absolute left-1 top-1 rounded bg-black/55 px-1 text-[9px] font-medium text-white">v{v.volume}</span>
+                            <span className={`absolute bottom-1 right-1 h-2 w-2 rounded-full ring-1 ring-background ${corDot(statusDe(v).variant)}`} />
+                          </Link>
+                        ))}
+                      </div>
+                      <div className="mt-3">
+                        <div className="mb-0.5 flex justify-between text-[11px] text-muted-foreground">
+                          <span>{prontos}/{c.volumes.length} volumes prontos</span>
+                        </div>
+                        <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+                          <div className="h-full bg-primary" style={{ width: `${(prontos / c.volumes.length) * 100}%` }} />
+                        </div>
+                      </div>
+                      {agg && pendente && (
+                        <p className="mt-2 truncate text-xs text-muted-foreground">Vol. {pendente.volume}: {agg.label}</p>
+                      )}
+                    </div>
+                  );
+                })()
+              )}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

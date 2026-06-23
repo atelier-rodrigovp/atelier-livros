@@ -88,6 +88,7 @@ export default function Configuracoes() {
 
   // Estado consolidado: produzindo / pausado / parado.
   const estado = !online ? "parado" : ativo ? "produzindo" : "pausado";
+  const produzindo = estado === "produzindo";
   const cfg = {
     produzindo: { cor: "bg-emerald-500", texto: "Produzindo", pulse: true },
     pausado: { cor: "bg-amber-500", texto: "Pausado", pulse: false },
@@ -140,12 +141,12 @@ export default function Configuracoes() {
           <div className="flex flex-wrap items-center gap-3">
             <Button
               size="lg"
-              variant={ativo ? "outline" : "default"}
+              variant={produzindo ? "outline" : "default"}
               disabled={salvandoCtl}
-              onClick={() => alternarProducao(!ativo)}
+              onClick={() => alternarProducao(!produzindo)}
             >
               {salvandoCtl ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
-              {ativo ? "Desligar produção" : "Ligar produção"}
+              {produzindo ? "Desligar produção" : "Ligar produção"}
             </Button>
             <Button onClick={testarWorker} disabled={enviando} variant="ghost">
               {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
