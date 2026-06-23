@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jobStatusBadge, projectStatusBadge, workerOnline } from "./status";
+import { displayProjectStatus, jobStatusBadge, projectStatusBadge, workerOnline } from "./status";
 
 describe("jobStatusBadge", () => {
   it("mapeia todos os status de job", () => {
@@ -16,6 +16,31 @@ describe("projectStatusBadge", () => {
     expect(projectStatusBadge("rascunho").label).toBe("Rascunho");
     expect(projectStatusBadge("pronto").variant).toBe("success");
     expect(projectStatusBadge("publicado").variant).toBe("default");
+  });
+});
+
+describe("displayProjectStatus", () => {
+  it("offline + escrevendo vira 'pausada', sem animação", () => {
+    const r = displayProjectStatus({ projectStatus: "escrevendo", hasActiveJob: true, workerOnline: false });
+    expect(r.label).toBe("Escrita pausada (worker offline)");
+    expect(r.variant).toBe("warning");
+    expect(r.pulse).toBe(false);
+  });
+
+  it("offline + job ativo (status fundacao) também vira 'pausada'", () => {
+    const r = displayProjectStatus({ projectStatus: "fundacao", hasActiveJob: true, workerOnline: false });
+    expect(r.label).toBe("Escrita pausada (worker offline)");
+  });
+
+  it("online + job ativo vira 'Escrevendo' animado", () => {
+    const r = displayProjectStatus({ projectStatus: "escrevendo", hasActiveJob: true, workerOnline: true });
+    expect(r.label).toBe("Escrevendo");
+    expect(r.pulse).toBe(true);
+  });
+
+  it("sem job ativo cai no mapeamento base", () => {
+    expect(displayProjectStatus({ projectStatus: "pronto", hasActiveJob: false, workerOnline: true }).label).toBe("Pronto");
+    expect(displayProjectStatus({ projectStatus: "fundacao", hasActiveJob: false, workerOnline: false }).label).toBe("Fundação");
   });
 });
 

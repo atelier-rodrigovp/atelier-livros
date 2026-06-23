@@ -21,7 +21,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ChevronDown } from "lucide-react";
 import { IDIOMAS, type Job, type Project } from "@/lib/types";
-import { jobStatusBadge, projectStatusBadge } from "@/lib/status";
+import { displayProjectStatus, jobStatusBadge } from "@/lib/status";
+import { useWorkerStatus } from "@/hooks/useWorkerStatus";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,6 +59,7 @@ function JobStatus({ job }: { job?: Job }) {
 export default function Projeto() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
+  const { online: workerOnline } = useWorkerStatus();
   const [proj, setProj] = useState<Project | null>(null);
   const [editions, setEditions] = useState<Edition[]>([]);
   const [chapters, setChapters] = useState<Record<string, number>>({});
@@ -87,6 +89,8 @@ export default function Projeto() {
   const [melhTxt, setMelhTxt] = useState("");
   const [enviandoMelh, setEnviandoMelh] = useState(false);
   const [escritaPausada, setEscritaPausada] = useState(false);
+  const [volDialogOpen, setVolDialogOpen] = useState(false);
+  const [irmaos, setIrmaos] = useState<{ id: string; titulo: string; volume: number; status: string }[]>([]);
 
   const carregar = useCallback(async () => {
     if (!id) return;
@@ -151,6 +155,20 @@ export default function Projeto() {
       toast.success("Escrita retomada.");
     }
   }
+
+  // Volumes irmãos da mesma série (para mostrar links e o que já foi criado).
+  useEffect(() => {
+    if (!proj?.serie || !proj?.id) { setIrmaos([]); return; }
+    let vivo = true;
+    supabase
+      .from("projects")
+      .select("id,titulo,volume,status")
+      .eq("serie", proj.serie)
+      .neq("id", proj.id)
+      .order("volume", { ascending: true })
+      .then(({ data }) => { if (vivo) setIrmaos((data as { id: string; titulo: string; volume: number; status: string }[]) ?? []); });
+    return () => { vivo = false; };
+  }, [proj?.serie, proj?.id, jobs]);
 
   const origem = useMemo(() => editions.find((e) => e.is_origem), [editions]);
 
@@ -263,7 +281,12 @@ export default function Projeto() {
   }
 
   if (!proj) return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
-  const sb = projectStatusBadge(proj.status);
+  const hasActiveJob = jobs.some((j) => j.status === "queued" || j.status === "running");
+  const sb = displayProjectStatus({ projectStatus: proj.status, hasActiveJob, workerOnline });
+  // Dados da saga (volumes extras a criar a partir deste volume).
+  const serieTotal = Number((proj.briefing as any)?.serie_total ?? 0);
+  const faltamVolumes = Math.max(0, serieTotal - (proj.volume ?? 1));
+  const fundacaoPronta = proj.status !== "rascunho" && !!origem;
   const capaDe = (ed: string) => artifacts.find((a) => a.edition_id === ed && a.tipo === "capa");
   // EPUBs de uma edição, ordenados por criação, com nº de versão (v1, v2, ...).
   const epubVersoes = (ed: string) =>
@@ -353,7 +376,10 @@ export default function Projeto() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant={sb.variant}>{sb.label}</Badge>
+          <Badge variant={sb.variant}>
+            {sb.pulse && <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />}
+            {sb.label}
+          </Badge>
           {editions.some((e) => (chapters[e.id] ?? 0) > 0) && (
             <Button variant="outline" size="sm" onClick={() => nav(`/projeto/${id}/ler`)}>
               <BookOpen className="h-4 w-4" /> Ler
@@ -368,29 +394,50 @@ export default function Projeto() {
         </div>
       </div>
 
-      {(() => {
-        const serieTotal = Number((proj.briefing as any)?.serie_total ?? 0);
-        if (!proj.serie || serieTotal <= (proj.volume ?? 1)) return null;
+      {proj.serie && faltamVolumes > 0 && (() => {
         const jv = jobMaisRecente(jobs, "criar_volumes");
         const criando = jv?.status === "queued" || jv?.status === "running";
-        const faltam = serieTotal - (proj.volume ?? 1);
+        const erroAmigavel = (() => {
+          const e = jv?.status === "error" && jv?.erro ? jv.erro : "";
+          if (!e) return null;
+          if (/credit balance|saldo|insufficient|too low/i.test(e))
+            return "Sua conta de IA está sem créditos/limite no momento. Recarregue ou aguarde o reset e tente de novo.";
+          if (/funda|foundation|estrutura/i.test(e))
+            return "A fundação deste volume precisa estar pronta antes de criar os próximos. Gere a fundação e tente de novo.";
+          return e.slice(0, 200);
+        })();
         return (
           <Card className="border-primary/30 bg-primary/5">
-            <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-              <div>
-                <p className="text-sm font-medium">Saga “{proj.serie}” — {serieTotal} volumes</p>
-                <p className="text-xs text-muted-foreground">
-                  Crie os {faltam} volume(s) restante(s) como projetos encadeados, herdando a fundação
-                  (mundo, elenco, voz) e com estrutura própria que avança os arcos.
-                </p>
+            <CardContent className="space-y-3 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Saga “{proj.serie}” — {serieTotal} volumes</p>
+                  <p className="text-xs text-muted-foreground">
+                    Faltam {faltamVolumes} volume(s). Cada um vira um projeto próprio, herdando a fundação
+                    deste volume (mundo, elenco, voz) e com estrutura nova que avança os arcos.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button size="sm" disabled={criando} onClick={() => setVolDialogOpen(true)}>
+                    {criando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                    {criando ? "Criando volumes…" : `Criar volumes da saga (${faltamVolumes})`}
+                  </Button>
+                  {criando && <JobStatus job={jv} />}
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <Button size="sm" disabled={criando} onClick={() => enfileira("criar_volumes", {})}>
-                  {criando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                  Criar volumes da saga ({faltam})
-                </Button>
-                <JobStatus job={jv} />
-              </div>
+              {erroAmigavel && (
+                <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{erroAmigavel}</p>
+              )}
+              {irmaos.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <span className="self-center text-xs text-muted-foreground">Volumes criados:</span>
+                  {irmaos.map((v) => (
+                    <Button key={v.id} variant="outline" size="sm" onClick={() => nav(`/projeto/${v.id}`)}>
+                      <BookOpen className="h-3.5 w-3.5" /> Vol. {v.volume}: {v.titulo}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         );
@@ -513,6 +560,18 @@ export default function Projeto() {
                 const pct = total > 0 ? Math.min(100, Math.round((feitos / total) * 100)) : 0;
                 const nota = origem?.nota_review ?? (p.nota != null ? Number(p.nota) : null);
                 const palavras = Number(p.palavras ?? 0);
+                const completo = total > 0 && feitos >= total;
+                // Rótulo sempre não-destrutivo (continua/refina, nunca "refaz tudo").
+                const rotulo = escrevendo
+                  ? "Escrevendo…"
+                  : feitos === 0
+                    ? "Iniciar escrita"
+                    : !completo
+                      ? `Continuar escrita (cap. ${feitos}${total ? `/${total}` : ""})`
+                      : "Refinar até a meta";
+                const dicaRefino = completo
+                  ? "Melhora os capítulos rumo à meta de nota — não recomeça nem descarta o que já existe."
+                  : undefined;
                 return (
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
@@ -529,13 +588,9 @@ export default function Projeto() {
                       </div>
                     )}
                     <div className="flex items-center gap-3">
-                      <Button disabled={escrevendo || escritaPausada} onClick={() => enfileira("escrever_livro", {})}>
+                      <Button title={dicaRefino} disabled={escrevendo || escritaPausada} onClick={() => enfileira("escrever_livro", {})}>
                         {escrevendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenLine className="h-4 w-4" />}
-                        {feitos > 0 && !escrevendo
-                          ? feitos < total || total === 0
-                            ? "Continuar escrita"
-                            : "Continuar / revisar"
-                          : "Escrever livro"}
+                        {rotulo}
                       </Button>
                       <JobStatus job={j} />
                     </div>
@@ -947,6 +1002,45 @@ export default function Projeto() {
             <Button variant="destructive" disabled={excluindo} onClick={excluir}>
               {excluindo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               Excluir definitivamente
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={volDialogOpen} onOpenChange={setVolDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Criar volumes da saga “{proj.serie}”</DialogTitle>
+            <DialogDescription>
+              Vamos criar {faltamVolumes} novo(s) projeto(s) — os volumes {(proj.volume ?? 1) + 1} a {serieTotal} — sem alterar este volume {proj.volume}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div>
+              <p className="font-medium">O que é herdado deste volume</p>
+              <p className="text-muted-foreground">Mundo, elenco e voz (Bíblia, Mapa de Personagens, perfil de voz).</p>
+            </div>
+            <div>
+              <p className="font-medium">O que é gerado novo</p>
+              <p className="text-muted-foreground">A estrutura própria de cada volume, avançando os arcos da história.</p>
+            </div>
+            <div>
+              <p className="font-medium">O que NÃO acontece</p>
+              <p className="text-muted-foreground">
+                Os capítulos dos novos volumes não são escritos automaticamente — cada volume é escrito depois, individualmente.
+              </p>
+            </div>
+            {!fundacaoPronta && (
+              <p className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                Atenção: a fundação deste volume precisa estar pronta. Se ainda não estiver, gere a fundação
+                antes — o worker valida isso e pode falhar.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setVolDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={() => { enfileira("criar_volumes", {}); setVolDialogOpen(false); }}>
+              <Sparkles className="h-4 w-4" /> Criar volumes
             </Button>
           </DialogFooter>
         </DialogContent>

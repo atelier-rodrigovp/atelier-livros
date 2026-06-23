@@ -49,6 +49,26 @@ export function projectStatusBadge(status: ProjectStatus): {
   }
 }
 
+// Status de EXIBIÇÃO de um projeto, coerente com o worker.
+// "Escrevendo" só aparece se o worker estiver online (offline = nada processa,
+// então rotulamos como pausado, nunca com o estado animado de escrita ativa).
+export function displayProjectStatus(args: {
+  projectStatus: ProjectStatus;
+  hasActiveJob: boolean;
+  workerOnline: boolean;
+}): { label: string; variant: BadgeVariant; pulse: boolean } {
+  const { projectStatus, hasActiveJob, workerOnline } = args;
+  const emEscrita = hasActiveJob || projectStatus === "escrevendo";
+  if (emEscrita && !workerOnline) {
+    return { label: "Escrita pausada (worker offline)", variant: "warning", pulse: false };
+  }
+  if (hasActiveJob && workerOnline) {
+    return { label: "Escrevendo", variant: "warning", pulse: true };
+  }
+  const base = projectStatusBadge(projectStatus);
+  return { ...base, pulse: false };
+}
+
 // Worker é considerado online se o último heartbeat foi há menos de staleMin minutos.
 export function workerOnline(
   hb: Pick<WorkerHeartbeat, "last_seen"> | null | undefined,
