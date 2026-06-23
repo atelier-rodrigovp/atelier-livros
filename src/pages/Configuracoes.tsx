@@ -119,15 +119,15 @@ export default function Configuracoes() {
         </CardContent>
       </Card>
 
-      {/* Worker: controle 100% pelo app (via worker_control). Sem terminal. */}
+      {/* A) Worker = o PROCESSO na máquina. Só status; o app não inicia processo. */}
       <Card>
         <CardHeader>
           <CardTitle className="text-xl">Worker</CardTitle>
           <CardDescription>
-            Liga, pausa e acompanha a produção da IA — tudo por aqui.
+            O programa que roda a IA na sua máquina. O app acompanha o status; não inicia o processo.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="space-y-4">
           <div className="flex items-center gap-2.5">
             <span className={cn("inline-block h-3 w-3 rounded-full", cfg.cor, cfg.pulse && "animate-pulse")} />
             <span className="text-lg font-medium">{cfg.texto}</span>
@@ -138,39 +138,68 @@ export default function Configuracoes() {
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              size="lg"
-              variant={produzindo ? "outline" : "default"}
-              disabled={salvandoCtl}
-              onClick={() => alternarProducao(!produzindo)}
-            >
-              {salvandoCtl ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
-              {produzindo ? "Desligar produção" : "Ligar produção"}
-            </Button>
-            <Button onClick={testarWorker} disabled={enviando} variant="ghost">
-              {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Rodar teste (ping)
-            </Button>
-          </div>
+          {estado === "parado" && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                O worker não está em execução nesta máquina. O app só controla a produção quando ele está rodando.
+              </p>
+              <details className="text-sm">
+                <summary className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground">
+                  Como iniciar o worker
+                </summary>
+                <p className="mt-2 text-muted-foreground">
+                  Rode o worker uma vez na sua máquina:{" "}
+                  <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">npm run dev</code> na pasta{" "}
+                  <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">worker/</code>. Depois disso,
+                  a produção é controlada aqui.
+                </p>
+              </details>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
-          {estado === "parado" ? (
-            <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
-              O worker não está em execução nesta máquina. Inicie o worker uma vez para que o app passe a
-              controlá-lo.
-            </p>
+      {/* B) Produção = a FILA de jobs. Isto o app controla (worker_control.enabled). */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-xl">Produção</CardTitle>
+          <CardDescription>Liga e pausa o processamento da fila de jobs pelo worker.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <span
+              className={cn(!online && "cursor-not-allowed")}
+              title={!online ? "Disponível quando o worker estiver em execução." : undefined}
+            >
+              <Button
+                size="lg"
+                variant={produzindo ? "outline" : "default"}
+                disabled={salvandoCtl || !online}
+                onClick={() => alternarProducao(!produzindo)}
+              >
+                {salvandoCtl ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
+                {produzindo ? "Desligar produção" : "Ligar produção"}
+              </Button>
+            </span>
+            <span
+              className={cn(!online && "cursor-not-allowed")}
+              title={!online ? "Disponível quando o worker estiver em execução." : undefined}
+            >
+              <Button onClick={testarWorker} disabled={enviando || !online} variant="ghost">
+                {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Rodar teste (ping)
+              </Button>
+            </span>
+          </div>
+          {!online ? (
+            <p className="text-xs text-muted-foreground">Disponível quando o worker estiver em execução.</p>
           ) : (
             <p className="text-xs text-muted-foreground">
-              {estado === "produzindo"
-                ? "O worker está em execução e processando a fila. Você pode desligar a produção a qualquer momento — ele fica ocioso, sem fechar."
-                : "Produção pausada: o worker continua em execução, mas não processa a fila. Religue quando quiser retomar."}
+              {produzindo
+                ? "O worker está processando a fila. Desligar pausa a produção — ele fica ocioso, sem fechar."
+                : "Produção pausada: o worker está rodando, mas não processa a fila. Religue para retomar."}
             </p>
           )}
-
-          <p className="border-t pt-4 text-xs text-muted-foreground">
-            O worker roda de forma residente na sua máquina. Uma vez em execução, ligar, desligar, pausar e
-            acompanhar o status passam a ser 100% por aqui — não precisa de terminal.
-          </p>
         </CardContent>
       </Card>
 
