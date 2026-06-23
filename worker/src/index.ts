@@ -40,7 +40,7 @@ async function recuperarOrfaos() {
     .lt("locked_at", limite);
 }
 
-// Flag de controle (a web liga/pausa o processamento). Default: ativo.
+// Flag de controle global (a web liga/pausa TODO o processamento). Default: ativo.
 // Fail-open: erro transitório não derruba o worker.
 async function processamentoAtivo(): Promise<boolean> {
   const { data, error } = await sb
@@ -50,6 +50,22 @@ async function processamentoAtivo(): Promise<boolean> {
     .maybeSingle();
   if (error) return true;
   return data ? data.enabled !== false : true;
+}
+
+// Pausa SÓ a escrita de livros (economiza tokens sem parar entrevistas/capas/etc).
+// Implementada sem alterar o schema: uma linha de controle em `jobs`
+// (tipo='controle_escrita', status='paused') que nenhum picker reivindica.
+// Existir essa linha = escrita pausada. Fail-open em erro transitório.
+async function escritaPausada(): Promise<boolean> {
+  const { data, error } = await sb
+    .from("jobs")
+    .select("id")
+    .eq("owner", OWNER)
+    .eq("tipo", "controle_escrita")
+    .eq("status", "paused")
+    .limit(1);
+  if (error) return false;
+  return (data?.length ?? 0) > 0;
 }
 
 // Jobs interativos rodam numa faixa PARALELA (não esperam atrás de jobs pesados).
@@ -150,7 +166,12 @@ async function loopPesado() {
         await sleep(POLL);
         continue;
       }
-      const job = await pegarProximo({ excluir: INTERATIVOS });
+      // Se a escrita estiver pausada, não reivindica escrever_livro (mas segue
+      // processando os demais jobs pesados normalmente).
+      const excluir = (await escritaPausada())
+        ? [...INTERATIVOS, "escrever_livro"]
+        : INTERATIVOS;
+      const job = await pegarProximo({ excluir });
       if (!job) {
         await sleep(POLL);
         continue;

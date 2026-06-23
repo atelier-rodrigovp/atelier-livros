@@ -33,6 +33,7 @@ export default function Dashboard() {
     supabase
       .from("jobs")
       .select("*")
+      .neq("tipo", "controle_escrita") // linha de controle interno, não é um job real
       .order("created_at", { ascending: false })
       .limit(20)
       .then(({ data }) => setJobs((data as Job[]) ?? []));
@@ -49,6 +50,7 @@ export default function Dashboard() {
             if (payload.eventType === "DELETE") {
               return prev.filter((j) => j.id !== (payload.old as Job).id);
             }
+            if ((row?.tipo as string) === "controle_escrita") return prev; // ignora controle interno
             const i = prev.findIndex((j) => j.id === row.id);
             if (i === -1) return [row, ...prev].slice(0, 20);
             const copy = [...prev];

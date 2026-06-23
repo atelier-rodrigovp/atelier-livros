@@ -86,6 +86,7 @@ export default function Projeto() {
   const [melhEd, setMelhEd] = useState<Edition | null>(null);
   const [melhTxt, setMelhTxt] = useState("");
   const [enviandoMelh, setEnviandoMelh] = useState(false);
+  const [escritaPausada, setEscritaPausada] = useState(false);
 
   const carregar = useCallback(async () => {
     if (!id) return;
@@ -116,6 +117,40 @@ export default function Projeto() {
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [id, carregar]);
+
+  // Pausa global da escrita (linha de controle em `jobs`, sem schema novo).
+  const carregarPausa = useCallback(async () => {
+    const { data } = await supabase
+      .from("jobs")
+      .select("id")
+      .eq("tipo", "controle_escrita")
+      .eq("status", "paused")
+      .limit(1);
+    setEscritaPausada((data?.length ?? 0) > 0);
+  }, []);
+
+  useEffect(() => {
+    carregarPausa();
+    const ch = supabase
+      .channel("ctrl-escrita")
+      .on("postgres_changes", { event: "*", schema: "public", table: "jobs", filter: "tipo=eq.controle_escrita" }, () => carregarPausa())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [carregarPausa]);
+
+  async function alternarPausaEscrita(novo: boolean) {
+    setEscritaPausada(novo); // otimista
+    if (novo) {
+      await supabase.from("jobs").delete().eq("tipo", "controle_escrita"); // evita duplicatas
+      const { error } = await supabase.from("jobs").insert({ tipo: "controle_escrita", status: "paused" });
+      if (error) { setEscritaPausada(false); toast.error(error.message); return; }
+      toast.success("Escrita pausada — para após o capítulo atual. Entrevistas/capas/traduções seguem.");
+    } else {
+      const { error } = await supabase.from("jobs").delete().eq("tipo", "controle_escrita");
+      if (error) { setEscritaPausada(true); toast.error(error.message); return; }
+      toast.success("Escrita retomada.");
+    }
+  }
 
   const origem = useMemo(() => editions.find((e) => e.is_origem), [editions]);
 
@@ -494,18 +529,40 @@ export default function Projeto() {
                       </div>
                     )}
                     <div className="flex items-center gap-3">
-                      <Button disabled={escrevendo} onClick={() => enfileira("escrever_livro", {})}>
+                      <Button disabled={escrevendo || escritaPausada} onClick={() => enfileira("escrever_livro", {})}>
                         {escrevendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenLine className="h-4 w-4" />}
-                        {feitos > 0 && !escrevendo ? "Reescrever livro" : "Escrever livro"}
+                        {feitos > 0 && !escrevendo
+                          ? feitos < total || total === 0
+                            ? "Continuar escrita"
+                            : "Continuar / revisar"
+                          : "Escrever livro"}
                       </Button>
                       <JobStatus job={j} />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Roda o livro_runner.py (Opus) capítulo a capítulo até a meta de nota, com verdade do disco.
+                      {feitos > 0
+                        ? "Continua de onde parou: lê os capítulos já escritos no disco e segue do próximo — não descarta nem reescreve o que já existe. Roda o Opus capítulo a capítulo até a meta de nota."
+                        : "Roda o livro_runner.py (Opus) capítulo a capítulo até a meta de nota, com verdade do disco."}
                     </p>
                   </div>
                 );
               })()}
+
+              <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                <div className="space-y-0.5 pr-4">
+                  <p className="text-sm font-medium">Pausar a escrita</p>
+                  <p className="text-xs text-muted-foreground">
+                    Para a geração de capítulos (Opus) e economiza tokens. O capítulo em
+                    andamento termina antes de parar; entrevistas, capas e traduções
+                    continuam normalmente. Vale para todos os livros.
+                  </p>
+                </div>
+                <Switch
+                  checked={escritaPausada}
+                  onCheckedChange={alternarPausaEscrita}
+                  aria-label="Pausar a escrita dos livros"
+                />
+              </div>
 
               {origem && (chapters[origem.id] ?? 0) > 0 && (
                 <>

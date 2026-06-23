@@ -26,6 +26,17 @@ const TEMAS: Record<Tema, { bg: string; fg: string; muted: string; rule: string 
 
 const FONTES = [17, 19, 21, 23, 26, 29];
 
+// Famílias de fonte para a leitura (a app já carrega Fraunces e Inter).
+const FAMILIAS = [
+  { nome: "Fraunces", css: "'Fraunces Variable', Georgia, serif" },
+  { nome: "Georgia", css: "Georgia, 'Times New Roman', serif" },
+  { nome: "Inter", css: "'Inter Variable', system-ui, sans-serif" },
+  { nome: "Sistema", css: "system-ui, -apple-system, Segoe UI, sans-serif" },
+];
+
+// A partir desta largura mostramos duas páginas lado a lado (como um livro).
+const LARGURA_LIVRO_ABERTO = 760;
+
 export default function Leitor() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
@@ -42,7 +53,9 @@ export default function Leitor() {
   const [pagina, setPagina] = useState(0);
   const [totalPag, setTotalPag] = useState(1);
   const [pageW, setPageW] = useState(0);
+  const [cols, setCols] = useState(1);
   const [fonteIdx, setFonteIdx] = useState(1);
+  const [familiaIdx, setFamiliaIdx] = useState(0);
   const [tema, setTema] = useState<Tema>("sepia");
   const [tocAberto, setTocAberto] = useState(false);
 
@@ -54,7 +67,9 @@ export default function Leitor() {
 
   const cor = TEMAS[tema];
   const fonte = FONTES[fonteIdx];
+  const familia = FAMILIAS[familiaIdx].css;
   const GAP = 80;
+  const colW = cols === 2 ? (pageW - GAP) / 2 : pageW;
 
   // ---- carga base: projeto + edições -------------------------------------
   useEffect(() => {
@@ -113,18 +128,27 @@ export default function Leitor() {
   }, [caps, capIdx]);
 
   // ---- medição do nº de páginas (colunas) --------------------------------
+  // Em telas largas mostramos 2 colunas (livro aberto); em telas estreitas, 1.
+  // Cada "tela" exibe `colunas` páginas; o avanço por tela continua sendo
+  // (largura + GAP) porque 2 colunas + 1 gutter somam a largura do viewport.
   useLayoutEffect(() => {
     const host = colHostRef.current;
     if (!host) return;
     const largura = host.clientWidth;
+    const colunas = largura >= LARGURA_LIVRO_ABERTO ? 2 : 1;
+    const cw = colunas === 2 ? (largura - GAP) / 2 : largura;
+    // aplica a largura de coluna antes de medir, para o scrollWidth já refletir
+    host.style.columnWidth = cw > 0 ? `${cw}px` : "";
+    const colunasTotais = cw > 0 ? Math.max(1, Math.round((host.scrollWidth + GAP) / (cw + GAP))) : 1;
+    const telas = Math.max(1, Math.ceil(colunasTotais / colunas));
     setPageW(largura);
-    const total = largura > 0 ? Math.max(1, Math.round((host.scrollWidth + GAP) / (largura + GAP))) : 1;
-    setTotalPag(total);
+    setCols(colunas);
+    setTotalPag(telas);
     setPagina((pg) => {
-      if (irUltima.current) { irUltima.current = false; return total - 1; }
-      return Math.min(pg, total - 1);
+      if (irUltima.current) { irUltima.current = false; return telas - 1; }
+      return Math.min(pg, telas - 1);
     });
-  }, [html, fonte, dims, carregandoCap]);
+  }, [html, fonte, familia, dims, carregandoCap]);
 
   // recalcula quando fontes carregam e em resize do viewport
   useEffect(() => {
@@ -206,9 +230,21 @@ export default function Leitor() {
           </select>
         )}
 
+        <select
+          value={familiaIdx}
+          onChange={(e) => setFamiliaIdx(Number(e.target.value))}
+          className="rounded-md border bg-transparent px-2 py-1 text-xs"
+          style={{ borderColor: cor.rule, color: cor.fg }}
+          title="Fonte"
+        >
+          {FAMILIAS.map((f, i) => (
+            <option key={f.nome} value={i} style={{ color: "#111" }}>{f.nome}</option>
+          ))}
+        </select>
         <div className="flex items-center gap-1">
-          <button onClick={() => setFonteIdx((i) => Math.max(0, i - 1))} className="rounded p-1 opacity-70 hover:opacity-100" title="Diminuir fonte"><Minus className="h-4 w-4" /></button>
-          <button onClick={() => setFonteIdx((i) => Math.min(FONTES.length - 1, i + 1))} className="rounded p-1 opacity-70 hover:opacity-100" title="Aumentar fonte"><Plus className="h-4 w-4" /></button>
+          <button onClick={() => setFonteIdx((i) => Math.max(0, i - 1))} className="rounded p-1 opacity-70 hover:opacity-100" title="Diminuir letra"><Minus className="h-4 w-4" /></button>
+          <span className="w-7 text-center text-xs tabular-nums opacity-70" title="Tamanho da letra">{fonte}</span>
+          <button onClick={() => setFonteIdx((i) => Math.min(FONTES.length - 1, i + 1))} className="rounded p-1 opacity-70 hover:opacity-100" title="Aumentar letra"><Plus className="h-4 w-4" /></button>
         </div>
         <div className="flex items-center gap-1">
           {(["claro", "sepia", "escuro"] as Tema[]).map((t) => (
@@ -276,18 +312,25 @@ export default function Leitor() {
                 ref={colHostRef}
                 className="reader-prose h-full"
                 style={{
-                  columnWidth: pageW || undefined,
+                  columnWidth: colW > 0 ? colW : undefined,
                   columnGap: GAP,
                   columnFill: "auto",
                   transform: `translateX(-${pagina * (pageW + GAP)}px)`,
                   transition: "transform 0.4s cubic-bezier(0.22, 1, 0.36, 1)",
-                  fontFamily: "'Fraunces Variable', Georgia, serif",
+                  fontFamily: familia,
                   fontSize: fonte,
                   lineHeight: 1.7,
                   textAlign: "justify",
                   hyphens: "auto",
                 }}
                 dangerouslySetInnerHTML={{ __html: html }}
+              />
+            )}
+            {/* vinco central do livro aberto (só em página dupla) */}
+            {cols === 2 && !carregandoCap && !semConteudo && (
+              <div
+                className="pointer-events-none absolute inset-y-8 left-1/2 w-px -translate-x-1/2"
+                style={{ background: cor.rule }}
               />
             )}
           </div>
