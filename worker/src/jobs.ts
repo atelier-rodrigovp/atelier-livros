@@ -20,6 +20,7 @@ import {
   PY_BIN,
   MODEL,
   CLAUDE_BIN,
+  WORK_DIR,
 } from "./lib.js";
 
 export interface Job {
@@ -1034,6 +1035,100 @@ async function importarVendas(job: Job) {
 }
 
 // ---- dispatch -------------------------------------------------------------
+// ===========================================================================
+// gerar_post_social — rascunho de post de rede social NA VOZ do autor (modelo leve).
+// Sem postagem real: só gera variações + hashtags e grava em social_posts.
+// ===========================================================================
+const POST_MODEL = process.env.POST_MODEL || "sonnet"; // leve/barato; voz não precisa de Opus
+
+const SPEC_REDE: Record<string, string> = {
+  instagram: "Instagram: legenda envolvente; a 1ª linha é um gancho forte; 3 a 6 hashtags relevantes (sem spam); inclua um CTA ('link na bio'); emojis com moderação conforme a voz do autor.",
+  x: "X (Twitter): no máximo 280 caracteres; punchy; 0 a 2 hashtags; nada de emoji se a voz do autor for seca.",
+  tiktok: "TikTok: roteiro curto e nativo — gancho nos primeiros 3 segundos + legenda; sugira UMA ideia visual entre colchetes no fim.",
+  threads: "Threads: conversacional, sem spam de hashtag; termine convidando uma resposta.",
+  youtube: "YouTube: conforme o objetivo, um TÍTULO + DESCRIÇÃO de vídeo, ou um post de comunidade curto.",
+  site: "Site/blog: uma nota ou parágrafo curto, tom um pouco mais formal, sem hashtags.",
+};
+
+function extrairJson(s: string): any {
+  // tenta achar o último bloco { ... } (o claude -p pode imprimir texto antes)
+  const matches = s.match(/\{[\s\S]*\}/g);
+  if (!matches) return null;
+  for (let i = matches.length - 1; i >= 0; i--) {
+    try { return JSON.parse(matches[i]); } catch { /* tenta o próximo */ }
+  }
+  return null;
+}
+
+async function gerarPostSocial(job: Job, hb?: Heartbeat): Promise<void> {
+  const p = job.payload || {};
+  if (!p.author_id || !p.rede) throw new Error("payload incompleto (author_id, rede)");
+  const { data: autor, error: ea } = await sb
+    .from("authors").select("nome,estilo,genero,bio,personalidade,referencias").eq("id", p.author_id).single();
+  if (ea || !autor) throw new Error("autor não encontrado: " + (ea?.message ?? ""));
+
+  // contexto da obra (opcional)
+  let obraCtx = "";
+  if (p.project_id) {
+    const { data: proj } = await sb.from("projects").select("titulo,genero,serie,volume").eq("id", p.project_id).single();
+    let sinopse = "";
+    const { data: eds } = await sb.from("editions").select("id").eq("project_id", p.project_id).eq("is_origem", true).limit(1);
+    if (eds?.[0]) {
+      const { data: pkg } = await sb.from("publishing_packages").select("sinopse").eq("edition_id", eds[0].id).limit(1);
+      sinopse = pkg?.[0]?.sinopse ?? "";
+    }
+    if (proj) obraCtx = `\nOBRA ANCORADA: "${proj.titulo}"${proj.serie ? ` (${proj.serie}, vol. ${proj.volume})` : ""}${proj.genero ? ` — ${proj.genero}` : ""}.${sinopse ? ` Sinopse: ${sinopse}` : ""}`;
+  }
+
+  const n = Math.min(6, Math.max(1, Number(p.n_variantes ?? 3)));
+  const spec = SPEC_REDE[p.rede] ?? `Rede ${p.rede}.`;
+  await setProgress(job.id, { fase: "POST", etapa: `${autor.nome} · ${p.rede}` });
+  await hb?.({ fase: "POST", autor: autor.nome, rede: p.rede });
+
+  const prompt = [
+    `Você é um ghostwriter de redes sociais. Escreva NA VOZ do autor abaixo (um pseudônimo literário). É um RASCUNHO — não publique nada.`,
+    `\n=== VOZ DO AUTOR (contrato, siga à risca) ===`,
+    `Nome: ${autor.nome}`,
+    autor.estilo ? `Estilo: ${autor.estilo}` : "",
+    autor.genero ? `Gênero: ${autor.genero}` : "",
+    autor.personalidade ? `Personalidade: ${autor.personalidade}` : "",
+    autor.referencias ? `Referências: ${autor.referencias}` : "",
+    autor.bio ? `Bio: ${autor.bio}` : "",
+    `\n=== TAREFA ===`,
+    `Rede: ${p.rede}. ${spec}`,
+    `Objetivo: ${p.objetivo || "engajamento"}.`,
+    p.tema ? `Tema: ${p.tema}.` : "",
+    obraCtx,
+    `Idioma: pt-BR (a menos que o objetivo peça outro).`,
+    `\nGere ${n} VARIAÇÕES distintas do post (não numere dentro do texto) e uma lista de hashtags sugeridas coerentes com a rede.`,
+    `\n=== SAÍDA ===`,
+    `Responda APENAS com um JSON válido, sem cercas de código e sem texto antes ou depois, no formato exato:`,
+    `{"variantes": ["texto da variação 1", "texto da variação 2"], "hashtags": ["#exemplo"]}`,
+  ].filter(Boolean).join("\n");
+
+  await mkdir(WORK_DIR, { recursive: true });
+  const r = await run(CLAUDE_BIN, ["-p", prompt, "--permission-mode", "bypassPermissions", "--model", POST_MODEL], { cwd: WORK_DIR });
+
+  if (/credit balance is too low|insufficient/i.test(r.out + r.err))
+    throw new Error("Saldo/limite da conta de IA esgotado — tente novamente após o reset.");
+
+  const parsed = extrairJson(r.out);
+  let variantes: string[] = Array.isArray(parsed?.variantes) ? parsed.variantes.map((x: unknown) => String(x).trim()).filter(Boolean) : [];
+  let hashtags: string[] = Array.isArray(parsed?.hashtags) ? parsed.hashtags.map((x: unknown) => String(x).trim()).filter(Boolean) : [];
+  if (!variantes.length) {
+    const cru = r.out.trim();
+    if (!cru) throw new Error(`geração vazia (rc=${r.code}). ${r.err.slice(-200)}`);
+    variantes = [cru]; // fallback: usa o texto cru se não veio JSON
+  }
+
+  await must(sb.from("social_posts").insert({
+    owner: OWNER, author_id: p.author_id, project_id: p.project_id ?? null,
+    rede: p.rede, objetivo: p.objetivo ?? null, tema: p.tema ?? null,
+    conteudo: variantes[0], variantes, hashtags, status: "rascunho",
+  }));
+  await setProgress(job.id, { fase: "POST", etapa: "pronto", variacoes: variantes.length });
+}
+
 export async function executarJob(job: Job, hb?: Heartbeat): Promise<void> {
   switch (job.tipo) {
     case "ping": return ping(job);
@@ -1050,6 +1145,7 @@ export async function executarJob(job: Job, hb?: Heartbeat): Promise<void> {
     case "gerar_capas": return gerarCapas(job, hb);
     case "gerar_pacote": return gerarPacote(job, hb);
     case "importar_vendas": return importarVendas(job);
+    case "gerar_post_social": return gerarPostSocial(job, hb);
     default: throw new Error("tipo de job desconhecido: " + job.tipo);
   }
 }

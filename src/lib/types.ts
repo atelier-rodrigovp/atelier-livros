@@ -46,6 +46,7 @@ export const JOB_TIPOS = [
   "gerar_capas",
   "gerar_pacote",
   "importar_vendas",
+  "gerar_post_social",
 ] as const;
 export type JobTipo = (typeof JOB_TIPOS)[number];
 
@@ -64,6 +65,22 @@ export interface Author {
   referencias: string | null;
   avatar_path: string | null;
   social: Partial<Record<Rede, string>>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SocialPost {
+  id: string;
+  owner: string;
+  author_id: string;
+  project_id: string | null;
+  rede: Rede;
+  objetivo: string | null;
+  tema: string | null;
+  conteudo: string | null;
+  variantes: string[];
+  hashtags: string[] | null;
+  status: "rascunho" | "aprovado" | "arquivado";
   created_at: string;
   updated_at: string;
 }

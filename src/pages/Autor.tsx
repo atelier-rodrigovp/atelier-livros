@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Loader2, Save, Sparkles, Trash2, Upload } from "lucide-react";
+import { Archive, ArrowLeft, Check, Copy, Download, ExternalLink, Loader2, Save, Sparkles, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/lib/supabase";
+import { supabase, enqueueJob } from "@/lib/supabase";
 import { signedUrl } from "@/lib/storage";
-import { REDES, type Author, type Project, type Rede } from "@/lib/types";
+import { useWorkerStatus } from "@/hooks/useWorkerStatus";
+import { REDES, type Author, type Project, type Rede, type SocialPost } from "@/lib/types";
 import { CoverArt } from "@/components/CoverArt";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
+const OBJETIVOS = ["Divulgar lançamento", "Teaser", "Bastidores", "Frase de impacto", "Engajamento"];
 
 const ctrl = "h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const META: Record<Rede, { label: string; url: (h: string) => string }> = {
@@ -34,6 +38,76 @@ export default function Autor() {
   const [capas, setCapas] = useState<Record<string, string>>({});
   const [avatar, setAvatar] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
+  const { online } = useWorkerStatus(15_000);
+  const [posts, setPosts] = useState<SocialPost[]>([]);
+  const [fRede, setFRede] = useState("");
+  const [fStatus, setFStatus] = useState("rascunho");
+  const [varIdx, setVarIdx] = useState<Record<string, number>>({});
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editTxt, setEditTxt] = useState("");
+  const [dlg, setDlg] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [form, setForm] = useState({ rede: "instagram" as Rede, objetivo: OBJETIVOS[4], tema: "", project_id: "", n: "3" });
+
+  const carregarPosts = useCallback(async () => {
+    if (!id) return;
+    const { data } = await supabase.from("social_posts").select("*").eq("author_id", id).order("created_at", { ascending: false });
+    setPosts((data as SocialPost[]) ?? []);
+  }, [id]);
+
+  useEffect(() => {
+    carregarPosts();
+    const ch = supabase
+      .channel(`posts-${id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "social_posts", filter: `author_id=eq.${id}` }, () => carregarPosts())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [id, carregarPosts]);
+
+  function abrirDlg(rede: Rede) { setForm((f) => ({ ...f, rede })); setDlg(true); }
+
+  async function gerar() {
+    setEnviando(true);
+    try {
+      await enqueueJob("gerar_post_social", {
+        author_id: id, rede: form.rede, objetivo: form.objetivo, tema: form.tema.trim() || null,
+        project_id: form.project_id || null, n_variantes: Number(form.n) || 3,
+      });
+      toast.success(online ? "Gerando post… aparece aqui em instantes." : "Post na fila — vai gerar quando o worker estiver ligado.");
+      setDlg(false); setForm((f) => ({ ...f, tema: "" }));
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setEnviando(false); }
+  }
+
+  async function setPostStatus(post: SocialPost, status: SocialPost["status"]) {
+    await supabase.from("social_posts").update({ status }).eq("id", post.id);
+    setPosts((cur) => cur.map((p) => (p.id === post.id ? { ...p, status } : p)));
+  }
+  async function salvarEdicao(post: SocialPost) {
+    await supabase.from("social_posts").update({ conteudo: editTxt }).eq("id", post.id);
+    setPosts((cur) => cur.map((p) => (p.id === post.id ? { ...p, conteudo: editTxt } : p)));
+    setEditId(null); toast.success("Post atualizado.");
+  }
+  async function excluirPost(post: SocialPost) {
+    await supabase.from("social_posts").delete().eq("id", post.id);
+    setPosts((cur) => cur.filter((p) => p.id !== post.id));
+  }
+  function textoAtual(post: SocialPost) {
+    const i = varIdx[post.id] ?? 0;
+    return post.variantes?.[i] ?? post.conteudo ?? "";
+  }
+  function copiar(post: SocialPost) {
+    const txt = textoAtual(post) + (post.hashtags?.length ? "\n\n" + post.hashtags.join(" ") : "");
+    navigator.clipboard?.writeText(txt).then(() => toast.success("Copiado."), () => toast.error("Não consegui copiar."));
+  }
+  function exportar(post: SocialPost) {
+    const txt = textoAtual(post) + (post.hashtags?.length ? "\n\n" + post.hashtags.join(" ") : "");
+    const blob = new Blob([txt], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url; link.download = `post-${post.rede}-${post.id.slice(0, 8)}.txt`; link.click();
+    URL.revokeObjectURL(url);
+  }
 
   const carregar = useCallback(async () => {
     if (!id) return;
@@ -154,14 +228,102 @@ export default function Autor() {
                 ) : (
                   <span className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">a criar</span>
                 )}
+                <Button variant="outline" size="sm" className="h-7 shrink-0 px-2 text-xs" onClick={() => abrirDlg(k)} title={`Gerar post para ${META[k].label}`}>
+                  <Sparkles className="h-3.5 w-3.5" /> Gerar
+                </Button>
               </div>
             );
           })}
-          <div className="pt-1">
-            <Button variant="outline" size="sm" disabled title="Em breve: rascunho de post na voz do autor">
-              <Sparkles className="h-4 w-4" /> Gerar post (em breve)
-            </Button>
+          <div className="pt-1 text-xs text-muted-foreground">
+            Os rascunhos gerados aparecem em “Conteúdo”, abaixo.
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Conteúdo (rascunhos de posts) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Conteúdo</CardTitle>
+          <CardDescription>Rascunhos gerados na voz do autor. Edite, aprove e copie/exporte — nada é publicado automaticamente.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!online && (
+            <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+              Worker offline: posts enfileirados aguardam até você ligar a produção (Configurações → Produção).
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <select className={`${ctrl} h-8 text-xs`} value={fRede} onChange={(e) => setFRede(e.target.value)}>
+              <option value="">Todas as redes</option>
+              {REDES.map((k) => <option key={k} value={k}>{META[k].label}</option>)}
+            </select>
+            <select className={`${ctrl} h-8 text-xs`} value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
+              <option value="">Todos os status</option>
+              <option value="rascunho">Rascunho</option>
+              <option value="aprovado">Aprovado</option>
+              <option value="arquivado">Arquivado</option>
+            </select>
+          </div>
+          {(() => {
+            const lista = posts.filter((p) => (!fRede || p.rede === fRede) && (!fStatus || p.status === fStatus));
+            if (!posts.length) return <p className="py-6 text-center text-sm text-muted-foreground">Nenhum post ainda. Clique em “Gerar” numa rede acima.</p>;
+            if (!lista.length) return <p className="py-6 text-center text-sm text-muted-foreground">Nada com esse filtro.</p>;
+            return (
+              <ul className="space-y-3">
+                {lista.map((post) => {
+                  const i = varIdx[post.id] ?? 0;
+                  const obra = obras.find((o) => o.id === post.project_id);
+                  const editando = editId === post.id;
+                  return (
+                    <li key={post.id} className="rounded-lg border p-3">
+                      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span className="rounded-full border px-2 py-0.5 font-medium text-foreground">{META[post.rede]?.label ?? post.rede}</span>
+                        {post.objetivo && <span>· {post.objetivo}</span>}
+                        {obra && <span>· {obra.titulo}</span>}
+                        <span className={`ml-auto rounded-full px-2 py-0.5 ${post.status === "aprovado" ? "bg-emerald-600/15 text-emerald-700 dark:text-emerald-400" : post.status === "arquivado" ? "bg-muted text-muted-foreground" : "bg-amber-500/15 text-amber-700 dark:text-amber-400"}`}>{post.status}</span>
+                      </div>
+                      {editando ? (
+                        <Textarea rows={5} value={editTxt} onChange={(e) => setEditTxt(e.target.value)} />
+                      ) : (
+                        <p className="whitespace-pre-wrap text-sm">{textoAtual(post)}</p>
+                      )}
+                      {post.hashtags?.length ? (
+                        <p className="mt-1.5 text-xs text-primary">{post.hashtags.join(" ")}</p>
+                      ) : null}
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                        {post.variantes?.length > 1 && !editando && (
+                          <span className="mr-1 flex items-center gap-1 text-xs text-muted-foreground">
+                            <button className="rounded border px-1.5 hover:bg-muted" onClick={() => setVarIdx((m) => ({ ...m, [post.id]: (i - 1 + post.variantes.length) % post.variantes.length }))}>‹</button>
+                            {i + 1}/{post.variantes.length}
+                            <button className="rounded border px-1.5 hover:bg-muted" onClick={() => setVarIdx((m) => ({ ...m, [post.id]: (i + 1) % post.variantes.length }))}>›</button>
+                          </span>
+                        )}
+                        {editando ? (
+                          <>
+                            <Button size="sm" className="h-7 px-2 text-xs" onClick={() => salvarEdicao(post)}><Save className="h-3.5 w-3.5" /> Salvar</Button>
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setEditId(null)}>Cancelar</Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => copiar(post)}><Copy className="h-3.5 w-3.5" /> Copiar</Button>
+                            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => { setEditId(post.id); setEditTxt(textoAtual(post)); }}>Editar</Button>
+                            {post.status !== "aprovado" ? (
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setPostStatus(post, "aprovado")}><Check className="h-3.5 w-3.5" /> Aprovar</Button>
+                            ) : (
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setPostStatus(post, "rascunho")}>Reabrir</Button>
+                            )}
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setPostStatus(post, "arquivado")} title="Arquivar"><Archive className="h-3.5 w-3.5" /></Button>
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => exportar(post)} title="Exportar .txt"><Download className="h-3.5 w-3.5" /></Button>
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-destructive hover:text-destructive" onClick={() => excluirPost(post)} title="Excluir"><Trash2 className="h-3.5 w-3.5" /></Button>
+                          </>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            );
+          })()}
         </CardContent>
       </Card>
 
@@ -197,6 +359,52 @@ export default function Autor() {
           {salvando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Salvar
         </Button>
       </div>
+
+      <Dialog open={dlg} onOpenChange={setDlg}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Gerar post — {META[form.rede].label}</DialogTitle>
+            <DialogDescription>Rascunho na voz de {a.nome}. Nada é publicado — só gera para você revisar.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Rede</Label>
+              <select className={`${ctrl} w-full`} value={form.rede} onChange={(e) => setForm((f) => ({ ...f, rede: e.target.value as Rede }))}>
+                {REDES.map((k) => <option key={k} value={k}>{META[k].label}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Objetivo</Label>
+              <select className={`${ctrl} w-full`} value={form.objetivo} onChange={(e) => setForm((f) => ({ ...f, objetivo: e.target.value }))}>
+                {OBJETIVOS.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Tema (opcional)</Label>
+              <Input value={form.tema} onChange={(e) => setForm((f) => ({ ...f, tema: e.target.value }))} placeholder="ex.: o clímax sem spoiler, bastidores da pesquisa…" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Obra (opcional)</Label>
+              <select className={`${ctrl} w-full`} value={form.project_id} onChange={(e) => setForm((f) => ({ ...f, project_id: e.target.value }))}>
+                <option value="">— nenhuma —</option>
+                {obras.map((o) => <option key={o.id} value={o.id}>{o.titulo}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Variações</Label>
+              <select className={`${ctrl} w-full`} value={form.n} onChange={(e) => setForm((f) => ({ ...f, n: e.target.value }))}>
+                {["2", "3", "4", "5"].map((x) => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDlg(false)}>Cancelar</Button>
+            <Button onClick={gerar} disabled={enviando}>
+              {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Gerar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
