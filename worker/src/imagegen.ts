@@ -26,15 +26,20 @@ function temCreds(p: ImgProvider): boolean {
   }
 }
 
-// Cadeia: gpt-image-1 (se houver chave paga) no topo; depois o IMAGE_PROVIDER
-// preferido (se tiver creds); depois os demais grátis com creds; por fim Pollinations.
+// Cadeia, respeitando IMAGE_PROVIDER como preferência AUTORITATIVA:
+//  - se IMAGE_PROVIDER=openai (e há chave), gpt-image-1 vai no topo;
+//  - senão, o provedor grátis preferido vai primeiro, depois os outros grátis com creds;
+//  - OpenAI (pago) entra como fallback SÓ se nenhum grátis estiver configurado
+//    (evita que uma OPENAI_API_KEY no ambiente force o provedor pago sem querer);
+//  - Pollinations sempre por último (sem chave).
 export function cadeiaProviders(): ImgProvider[] {
   const pref = (process.env.IMAGE_PROVIDER || "cloudflare").toLowerCase() as ImgProvider;
   const gratis: ImgProvider[] = ["huggingface", "cloudflare", "together"];
   const ordem: ImgProvider[] = [];
-  if (temCreds("openai")) ordem.push("openai");
+  if (pref === "openai" && temCreds("openai")) ordem.push("openai");
   if (gratis.includes(pref) && temCreds(pref)) ordem.push(pref);
   for (const g of gratis) if (g !== pref && temCreds(g) && !ordem.includes(g)) ordem.push(g);
+  if (temCreds("openai") && ordem.length === 0) ordem.push("openai"); // fallback pago só se nada grátis
   ordem.push("pollinations");
   return ordem;
 }
@@ -68,9 +73,12 @@ async function viaOpenAI(prompt: string, w: number, h: number): Promise<Buffer |
 
 async function viaHuggingFace(prompt: string, w: number, h: number, seed?: number): Promise<Buffer | null> {
   const body = JSON.stringify({ inputs: prompt, parameters: { width: w, height: h, ...(seed != null ? { seed } : {}) } });
-  // FLUX.1-dev pode ter cold start (503 com estimated_time) — tenta algumas vezes.
+  // Endpoint atual (o antigo api-inference.huggingface.co foi descontinuado).
+  // Obs.: no plano grátis o hf-inference pode responder 410 (modelo descontinuado);
+  // nesse caso retornamos null e a cadeia cai para o próximo provedor.
+  const HF_URL = process.env.HF_MODEL_URL || "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-dev";
   for (let tentativa = 0; tentativa < 4; tentativa++) {
-    const res = await fetchTimeout("https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-dev", {
+    const res = await fetchTimeout(HF_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.HF_API_TOKEN}`, "x-wait-for-model": "true" },
       body,
