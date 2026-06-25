@@ -22,6 +22,7 @@ import {
   CLAUDE_BIN,
   WORK_DIR,
 } from "./lib.js";
+import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
 
 export interface Job {
   id: string;
@@ -786,25 +787,103 @@ async function revisar(job: Job, _hb?: Heartbeat) {
 
 // Compositor determinístico (Pillow) — garante layout idêntico entre idiomas.
 const COMPOSER = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "compose_cover.py");
+// Logo Maremonti (branca/transparente), aplicada em TODAS as capas (centro-inferior).
+const LOGO_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "assets", "maremonti-white.png");
 
-// Arte-mestra por IA de imagem (Pollinations.ai — Flux, grátis, sem chave).
-async function baixarPollinations(prompt: string, outPath: string): Promise<boolean> {
-  const seed = Math.floor(Math.random() * 1_000_000);
-  const u = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1600&height=2560&model=flux&nologo=true&seed=${seed}`;
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 120_000);
-    const res = await fetch(u, { signal: ctrl.signal });
-    clearTimeout(t);
-    if (!res.ok) return false;
-    if (!(res.headers.get("content-type") || "").startsWith("image/")) return false;
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length < 15_000) return false; // imagem pequena demais => provável erro
-    await writeFile(outPath, buf);
-    return true;
-  } catch {
-    return false;
+// Direções de composição para diversificar as 5 opções (não 5 quase iguais).
+const COMPOSICOES = [
+  "tight emotional close-up of the protagonist, shallow depth of field",
+  "wide atmospheric establishing shot of the setting, cinematic scale",
+  "a single symbolic object in dramatic chiaroscuro light, minimalist",
+  "two figures separated by tension or distance, charged negative space",
+  "moody architectural or environmental detail, evocative and ominous",
+];
+
+function artPromptCapa(genero: string, brief: string, premissa: string, composicao?: string): string {
+  return (
+    `Book cover background art, portrait orientation, genre: ${genero || "literary fiction"}. ` +
+    (composicao ? `Composition: ${composicao}. ` : "") +
+    (brief ? `Art direction: ${brief}. ` : "Strong, original direction fitting the genre. ") +
+    (premissa ? `Mood/context: ${premissa}. ` : "") +
+    "Cinematic, atmospheric, richly detailed, professional illustration, dramatic lighting, high quality, sharp focus. " +
+    "Absolutely NO text, no letters, no title, no typography, no watermark, no frame. Avoid an AI look. " +
+    "Keep the top and bottom areas cleaner for text overlay."
+  );
+}
+
+// Gera UMA arte-mestra (sem texto) pela cadeia de provedores; grava em outPath.
+async function gerarArteMestra(prompt: string, outPath: string, seed?: number): Promise<boolean> {
+  const r = await gerarImagem(prompt, { width: 1024, height: 1536, seed });
+  if (!r) return false;
+  await writeFile(outPath, r.bytes);
+  return true;
+}
+
+// Traduz título/subtítulo e compõe a capa de cada idioma a partir de uma master
+// única (mesma arte, layout fixo, só o texto muda) + logo Maremonti.
+async function comporCapasDeMaster(
+  projectId: string, proj: any, masterPng: string, idiomas: string[], brief: string, subOrig: string, hb?: Heartbeat, jobId?: string
+) {
+  const origem = proj.idioma_origem || "pt-BR";
+  const dir = projDir(projectId);
+  const capasDir = path.join(dir, "capas");
+  const fontsDir = path.join(skillsDir(), "canvas-design", "canvas-fonts");
+  const autor = proj.briefing?.autor || "Atelier de Livros IA";
+  const tituloOrig = proj.titulo;
+
+  await hb?.({ fase: "CAPA", etapa: "textos" });
+  const textosFile = path.join(capasDir, "textos.json");
+  try { await rm(textosFile); } catch {}
+  const promptTxt =
+    "Modo headless. Trabalhe SOMENTE nesta pasta.\n" +
+    "Traduza o TÍTULO e o SUBTÍTULO de um livro para os idiomas pedidos, soando nativo e preservando o sentido " +
+    "(como a skill `traducao-editorial` faria para título de capa; preserve nomes próprios).\n" +
+    `Idioma de origem: ${origem}. Título: "${tituloOrig}". Subtítulo: "${subOrig}".\n` +
+    `Idiomas pedidos: ${idiomas.join(", ")}.\n` +
+    'Grave SOMENTE capas/textos.json no formato {"<idioma>": {"titulo":"...","subtitulo":"..."}}, ' +
+    `incluindo ${origem} com o título/subtítulo ORIGINAIS. Nada além do JSON.`;
+  const rt = await runClaude(promptTxt, dir);
+  let textos: Record<string, any> = {};
+  const rawTxt = await readText(textosFile);
+  if (rawTxt) {
+    try { textos = JSON.parse(rawTxt); } catch { const m = rawTxt.match(/\{[\s\S]*\}/); textos = m ? JSON.parse(m[0]) : {}; }
   }
+  // Fallback robusto: se a tradução falhar, ao menos compõe o idioma de origem.
+  if (!Object.keys(textos).length) {
+    if (idiomas.length === 1 && idiomas[0] === origem) textos = { [origem]: { titulo: tituloOrig, subtitulo: subOrig } };
+    else throw new Error("tradução de textos falhou (textos.json). rc=" + rt.code);
+  }
+
+  for (const idioma of idiomas) {
+    await hb?.({ fase: "CAPA", etapa: "compondo", idioma });
+    const t = textos[idioma] || {};
+    const titulo = String(t.titulo || tituloOrig);
+    const subtitulo = String(t.subtitulo ?? (idioma === origem ? subOrig : ""));
+    const outPng = path.join(capasDir, `${idioma}.png`);
+    const outPdf = path.join(capasDir, `${idioma}.pdf`);
+    const cfgFile = path.join(capasDir, `_cfg-${idioma}.json`);
+    await writeFile(
+      cfgFile,
+      JSON.stringify({ art: masterPng, out: outPng, pdf: outPdf, title: titulo, subtitle: subtitulo, author: autor, fonts_dir: fontsDir, logo: LOGO_PATH }),
+      "utf8"
+    );
+    const rc = await run(PY_BIN, [COMPOSER, "--config", cfgFile], { cwd: dir });
+    if (!(await exists(outPng))) throw new Error(`composição da capa ${idioma} falhou. ${(rc.err || rc.out).slice(-300)}`);
+
+    const ed = await ensureEdition(projectId, idioma, idioma === origem, idioma === origem ? "pronto" : "pendente");
+    const keyPng = storageKey(projectId, idioma, "capa.png");
+    await uploadFile("capas", keyPng, outPng);
+    const url = await signedUrl("capas", keyPng);
+    const meta: any = { briefing: brief || null, titulo, master: true };
+    if (await exists(outPdf)) {
+      const keyPdf = storageKey(projectId, idioma, "capa.pdf");
+      await uploadFile("capas", keyPdf, outPdf);
+      meta.pdf = keyPdf;
+    }
+    await sb.from("artifacts").delete().eq("edition_id", ed.id).eq("tipo", "capa");
+    await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: ed.id, tipo: "capa", storage_path: keyPng, url_publica: url, meta }));
+  }
+  if (jobId) await setProgress(jobId, { fase: "CAPA", concluido: true, idiomas });
 }
 
 // ===========================================================================
@@ -828,9 +907,6 @@ async function gerarCapas(job: Job, hb?: Heartbeat) {
   const dir = projDir(projectId);
   const capasDir = path.join(dir, "capas");
   await mkdir(capasDir, { recursive: true });
-  const fontsDir = path.join(skillsDir(), "canvas-design", "canvas-fonts");
-  const autor = proj.briefing?.autor || "Atelier de Livros IA";
-  const tituloOrig = proj.titulo;
   const subOrig = job.payload?.subtitulo || proj.briefing?.subtitulo || "";
   const premissa = proj.briefing?.ideia_central || "";
   const brief = String(job.payload?.briefing || "").trim();
@@ -842,19 +918,9 @@ async function gerarCapas(job: Job, hb?: Heartbeat) {
     await hb?.({ fase: "CAPA", etapa: "arte-mestra" });
     await setProgress(job.id, { fase: "CAPA", etapa: "arte-mestra" });
     try { await rm(masterPng); } catch {}
-
-    // 1ª opção: IA de imagem (Pollinations/Flux) — arte fotorrealista, sem texto.
-    const artPrompt =
-      `Book cover background art, portrait orientation, genre: ${proj.genero || "literary fiction"}. ` +
-      (brief ? `Art direction: ${brief}. ` : "Strong, original direction fitting the genre. ") +
-      (premissa ? `Mood/context: ${premissa}. ` : "") +
-      "Cinematic, atmospheric, richly detailed, professional illustration, dramatic lighting. " +
-      "Absolutely NO text, no letters, no title, no typography, no watermark, no frame. " +
-      "Keep the top and bottom areas cleaner for text overlay.";
-    let ok = await baixarPollinations(artPrompt, masterPng);
-
-    // Fallback: canvas-design (Claude) se a IA de imagem falhar.
+    const ok = await gerarArteMestra(artPromptCapa(proj.genero || "", brief, premissa), masterPng);
     if (!ok) {
+      // Fallback: canvas-design (Claude) se a cadeia de imagem falhar.
       const promptArt =
         "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
         "Crie SOMENTE a ARTE DE FUNDO de uma capa de livro — SEM NENHUM TEXTO, sem letras, sem título, sem nome — " +
@@ -866,64 +932,91 @@ async function gerarCapas(job: Job, hb?: Heartbeat) {
         "- EVITE cara de IA. NÃO escreva NENHUM texto/letra na imagem.\n" +
         "ENTREGA: salve em capas/master.png (1600×2560). Não gere mais nada.";
       const r = await runClaude(promptArt, dir);
-      ok = await exists(masterPng);
-      if (!ok) throw new Error(`arte-mestra não gerada (Pollinations e canvas-design falharam). rc=${r.code} ${r.err.slice(-300)}`);
+      if (!(await exists(masterPng))) throw new Error(`arte-mestra não gerada (cadeia de imagem e canvas-design falharam). rc=${r.code} ${r.err.slice(-300)}`);
     }
     await uploadFile("capas", storageKey(projectId, "master.png"), masterPng);
   }
 
-  // 2) Traduzir título/subtítulo (uma vez) para os idiomas pedidos
-  await hb?.({ fase: "CAPA", etapa: "textos" });
-  const textosFile = path.join(capasDir, "textos.json");
-  try { await rm(textosFile); } catch {}
-  const promptTxt =
-    "Modo headless. Trabalhe SOMENTE nesta pasta.\n" +
-    "Traduza o TÍTULO e o SUBTÍTULO de um livro para os idiomas pedidos, soando nativo e preservando o sentido " +
-    "(como a skill `traducao-editorial` faria para título de capa; preserve nomes próprios).\n" +
-    `Idioma de origem: ${origem}. Título: "${tituloOrig}". Subtítulo: "${subOrig}".\n` +
-    `Idiomas pedidos: ${idiomas.join(", ")}.\n` +
-    'Grave SOMENTE capas/textos.json no formato {"<idioma>": {"titulo":"...","subtitulo":"..."}}, ' +
-    `incluindo ${origem} com o título/subtítulo ORIGINAIS. Nada além do JSON.`;
-  const rt = await runClaude(promptTxt, dir);
-  let textos: Record<string, any> = {};
-  const rawTxt = await readText(textosFile);
-  if (rawTxt) {
-    try { textos = JSON.parse(rawTxt); } catch { const m = rawTxt.match(/\{[\s\S]*\}/); textos = m ? JSON.parse(m[0]) : {}; }
-  }
-  if (!Object.keys(textos).length) throw new Error("tradução de textos falhou (textos.json). rc=" + rt.code);
+  // 2-3) Traduzir textos + compor cada idioma da MESMA master (+ logo)
+  await comporCapasDeMaster(projectId, proj, masterPng, idiomas, brief, subOrig, hb, job.id);
+}
 
-  // 3) Compor cada idioma DETERMINISTICAMENTE (mesma arte, layout idêntico)
-  for (const idioma of idiomas) {
-    await hb?.({ fase: "CAPA", etapa: "compondo", idioma });
-    const t = textos[idioma] || {};
-    const titulo = String(t.titulo || tituloOrig);
-    const subtitulo = String(t.subtitulo ?? (idioma === origem ? subOrig : ""));
-    const outPng = path.join(capasDir, `${idioma}.png`);
-    const outPdf = path.join(capasDir, `${idioma}.pdf`);
-    const cfgFile = path.join(capasDir, `_cfg-${idioma}.json`);
-    await writeFile(
-      cfgFile,
-      JSON.stringify({ art: masterPng, out: outPng, pdf: outPdf, title: titulo, subtitle: subtitulo, author: autor, fonts_dir: fontsDir }),
-      "utf8"
-    );
-    const rc = await run(PY_BIN, [COMPOSER, "--config", cfgFile], { cwd: dir });
-    if (!(await exists(outPng)))
-      throw new Error(`composição da capa ${idioma} falhou. ${(rc.err || rc.out).slice(-300)}`);
+// ===========================================================================
+// gerar_capas_opcoes — N artes-mestra SEM TEXTO (default 5), diversas, para escolha.
+// Sobe como artifacts tipo='capa_opcao' na edição de origem (meta.idx/seed/provider).
+// ===========================================================================
+async function gerarCapasOpcoes(job: Job, hb?: Heartbeat) {
+  const projectId = job.project_id;
+  if (!projectId) throw new Error("gerar_capas_opcoes: faltou project_id");
+  const proj = await getProject(projectId);
+  const origem = proj.idioma_origem || "pt-BR";
+  const dir = projDir(projectId);
+  const opcoesDir = path.join(dir, "capas", "opcoes");
+  await mkdir(opcoesDir, { recursive: true });
+  const brief = String(job.payload?.briefing || "").trim();
+  const premissa = proj.briefing?.ideia_central || "";
+  const n = Math.min(8, Math.max(2, Number(job.payload?.n ?? 5)));
+  const provLabel = providerLabel(providerAtivo());
 
-    const ed = await ensureEdition(projectId, idioma, idioma === origem, idioma === origem ? "pronto" : "pendente");
-    const keyPng = storageKey(projectId, idioma, "capa.png");
-    await uploadFile("capas", keyPng, outPng);
-    const url = await signedUrl("capas", keyPng);
-    const meta: any = { briefing: brief || null, titulo, master: true };
-    if (await exists(outPdf)) {
-      const keyPdf = storageKey(projectId, idioma, "capa.pdf");
-      await uploadFile("capas", keyPdf, outPdf);
-      meta.pdf = keyPdf;
-    }
-    await sb.from("artifacts").delete().eq("edition_id", ed.id).eq("tipo", "capa");
-    await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: ed.id, tipo: "capa", storage_path: keyPng, url_publica: url, meta }));
+  // edição de origem ancora as opções; limpa as opções antigas (db + storage best-effort)
+  const ed = await ensureEdition(projectId, origem, true, "pendente");
+  const { data: antigas } = await sb.from("artifacts").select("storage_path").eq("edition_id", ed.id).eq("tipo", "capa_opcao");
+  for (const a of antigas ?? []) { try { await sb.storage.from("capas").remove([(a as any).storage_path]); } catch {} }
+  await sb.from("artifacts").delete().eq("edition_id", ed.id).eq("tipo", "capa_opcao");
+
+  let geradas = 0;
+  for (let i = 0; i < n; i++) {
+    await hb?.({ fase: "CAPA", etapa: `opção ${i + 1}/${n}`, provedor: provLabel });
+    await setProgress(job.id, { fase: "CAPA", etapa: `opção ${i + 1}/${n}`, provedor: provLabel, total: n, cap_atual: i });
+    const seed = Math.floor(Math.random() * 1_000_000);
+    const prompt = artPromptCapa(proj.genero || "", brief, premissa, COMPOSICOES[i % COMPOSICOES.length]);
+    const r = await gerarImagem(prompt, { width: 1024, height: 1536, seed });
+    if (!r) continue;
+    const localPng = path.join(opcoesDir, `opcao-${i}.png`);
+    await writeFile(localPng, r.bytes);
+    const key = storageKey(projectId, "opcoes", `opcao-${i}.png`);
+    await uploadFile("capas", key, localPng);
+    const url = await signedUrl("capas", key);
+    await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: ed.id, tipo: "capa_opcao", storage_path: key, url_publica: url, meta: { idx: i, seed, provider: r.provider } }));
+    geradas++;
   }
-  await setProgress(job.id, { fase: "CAPA", concluido: true, idiomas });
+  if (!geradas) throw new Error("nenhuma opção de capa gerada (cadeia de imagem falhou). Verifique tokens em worker/.env ou tente de novo.");
+  await setProgress(job.id, { fase: "CAPA", etapa: "opções prontas", concluido: true, total: n, cap_atual: geradas, provedor: provLabel });
+}
+
+// ===========================================================================
+// compor_capas — fixa UMA opção escolhida como master e compõe a capa final
+// (texto + logo) do idioma de origem e de cada idioma pedido (mesma master).
+// payload: { opcao: <storage_path da capa_opcao>, idiomas?:[...], briefing?, subtitulo? }
+// ===========================================================================
+async function comporCapas(job: Job, hb?: Heartbeat) {
+  const projectId = job.project_id;
+  if (!projectId) throw new Error("compor_capas: faltou project_id");
+  const proj = await getProject(projectId);
+  const origem = proj.idioma_origem || "pt-BR";
+  let idiomas: string[] = Array.isArray(job.payload?.idiomas) ? job.payload.idiomas.filter(Boolean) : [];
+  if (!idiomas.length) idiomas = [origem];
+  const opcaoPath = String(job.payload?.opcao || "").trim();
+  if (!opcaoPath) throw new Error("compor_capas: faltou a opção escolhida (payload.opcao)");
+
+  const dir = projDir(projectId);
+  const capasDir = path.join(dir, "capas");
+  await mkdir(capasDir, { recursive: true });
+  const masterPng = path.join(capasDir, "master.png");
+
+  // baixa a opção escolhida -> master.png e registra como master
+  await hb?.({ fase: "CAPA", etapa: "fixando master" });
+  const { data: blob, error: de } = await sb.storage.from("capas").download(opcaoPath);
+  if (de || !blob) throw new Error("não baixei a opção escolhida: " + (de?.message ?? ""));
+  await writeFile(masterPng, Buffer.from(await blob.arrayBuffer()));
+  await uploadFile("capas", storageKey(projectId, "master.png"), masterPng);
+  const edOrigem = await ensureEdition(projectId, origem, true, "pronto");
+  await sb.from("artifacts").delete().eq("edition_id", edOrigem.id).eq("tipo", "capa_master");
+  await sb.from("artifacts").insert({ owner: OWNER, edition_id: edOrigem.id, tipo: "capa_master", storage_path: storageKey(projectId, "master.png"), meta: { from: opcaoPath } });
+
+  const subOrig = job.payload?.subtitulo || proj.briefing?.subtitulo || "";
+  const brief = String(job.payload?.briefing || "").trim();
+  await comporCapasDeMaster(projectId, proj, masterPng, idiomas, brief, subOrig, hb, job.id);
 }
 
 // ===========================================================================
@@ -1143,6 +1236,8 @@ export async function executarJob(job: Job, hb?: Heartbeat): Promise<void> {
     case "revisar": return revisar(job, hb);
     case "gerar_capa": return gerarCapas(job, hb);
     case "gerar_capas": return gerarCapas(job, hb);
+    case "gerar_capas_opcoes": return gerarCapasOpcoes(job, hb);
+    case "compor_capas": return comporCapas(job, hb);
     case "gerar_pacote": return gerarPacote(job, hb);
     case "importar_vendas": return importarVendas(job);
     case "gerar_post_social": return gerarPostSocial(job, hb);

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, BookOpen, ClipboardCheck, Copy, Download, FileText, Gauge, Image, Languages, Loader2, Maximize2, Pencil, PenLine, Play, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, ClipboardCheck, Copy, Download, FileText, Gauge, Image, Languages, Loader2, Maximize2, Pencil, PenLine, Play, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
 import { signedUrl, downloadText, deleteProject } from "@/lib/storage";
@@ -71,7 +71,8 @@ export default function Projeto() {
   const [capaBrief, setCapaBrief] = useState("");
   const [capaSub, setCapaSub] = useState("");
   const [capaIdiomas, setCapaIdiomas] = useState<string[]>([]);
-  const [capaNovaArte, setCapaNovaArte] = useState(true);
+  const [opcaoUrls, setOpcaoUrls] = useState<Record<string, string>>({});
+  const [opcaoSel, setOpcaoSel] = useState<string>("");
   const [selEpub, setSelEpub] = useState<Record<string, string>>({});
   const [confirmDel, setConfirmDel] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
@@ -198,6 +199,27 @@ export default function Projeto() {
     return () => { ativo = false; };
   }, [artifacts]);
 
+  // Assina as URLs das 5 opções de arte (capa_opcao).
+  useEffect(() => {
+    const ops = artifacts.filter((a) => a.tipo === "capa_opcao");
+    if (!ops.length) { setOpcaoUrls({}); return; }
+    let ativo = true;
+    (async () => {
+      const ent = await Promise.all(ops.map(async (a) => [a.storage_path, await signedUrl("capas", a.storage_path, 3600)] as const));
+      if (ativo) setOpcaoUrls(Object.fromEntries(ent.filter(([, u]) => u)) as Record<string, string>);
+    })();
+    return () => { ativo = false; };
+  }, [artifacts]);
+
+  // Opções de arte ordenadas (galeria de escolha).
+  const opcoes = useMemo(
+    () => artifacts
+      .filter((a) => a.tipo === "capa_opcao")
+      .sort((a, b) => ((a.meta?.idx ?? 0) as number) - ((b.meta?.idx ?? 0) as number))
+      .map((a) => ({ id: a.id, path: a.storage_path, url: opcaoUrls[a.storage_path] ?? null, provider: (a.meta?.provider as string) ?? "" })),
+    [artifacts, opcaoUrls]
+  );
+
   // Por padrão, todas as edições selecionadas para gerar capa.
   useEffect(() => {
     if (editions.length && capaIdiomas.length === 0) {
@@ -263,17 +285,15 @@ export default function Projeto() {
     }
   }
 
-  async function gerarCapasBatch() {
-    if (!capaIdiomas.length) {
-      toast.error("Selecione ao menos um idioma.");
-      return;
-    }
-    await enfileira("gerar_capas", {
-      idiomas: capaIdiomas,
-      briefing: capaBrief.trim(),
-      subtitulo: capaSub.trim(),
-      novo_art: capaNovaArte,
-    });
+  async function gerar5Opcoes() {
+    await enfileira("gerar_capas_opcoes", { briefing: capaBrief.trim(), n: 5 });
+    setOpcaoSel("");
+  }
+
+  async function aprovarArte() {
+    if (!opcaoSel) { toast.error("Escolha uma das artes primeiro."); return; }
+    const idiomas = capaIdiomas.length ? capaIdiomas : origem ? [origem.idioma] : [];
+    await enfileira("compor_capas", { opcao: opcaoSel, idiomas, briefing: capaBrief.trim(), subtitulo: capaSub.trim() });
   }
 
   async function enfileira(tipo: any, payload: Record<string, unknown>, edition_id?: string) {
@@ -714,77 +734,96 @@ export default function Projeto() {
             <p className="text-muted-foreground">Crie a edição primeiro (escreva o livro).</p>
           ) : (
             <div className="space-y-6">
-              {/* Painel: um briefing -> capas em vários idiomas (mesma arte) */}
+              {/* 1) Briefing -> 5 opções de arte (sem texto) */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-xl">Direção de arte</CardTitle>
                   <CardDescription>
-                    Um briefing só. A IA cria <strong>uma arte-mestra</strong> e o sistema
-                    compõe as capas dos idiomas escolhidos com a <strong>mesma imagem</strong> e
-                    layout padronizado (posição, fontes e autor idênticos) — só o texto muda, traduzido.
+                    A IA gera <strong>5 opções</strong> de arte (sem texto). Você escolhe 1, e o sistema
+                    compõe a capa final de cada idioma com a <strong>mesma arte</strong>, layout padronizado e a
+                    <strong> logo Maremonti</strong> — só o texto traduz.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
                     <div className="space-y-2">
                       <Label htmlFor="brief">Briefing visual</Label>
-                      <Textarea
-                        id="brief"
-                        rows={4}
-                        value={capaBrief}
-                        onChange={(ev) => setCapaBrief(ev.target.value)}
-                        placeholder="Atmosfera, imagem central, paleta, referências, o que evitar. Ex.: farol solitário ao entardecer, azul-petróleo e âmbar, mistério; sem pessoas."
-                      />
+                      <Textarea id="brief" rows={4} value={capaBrief} onChange={(ev) => setCapaBrief(ev.target.value)}
+                        placeholder="Atmosfera, imagem central, paleta, referências, o que evitar. Ex.: farol solitário ao entardecer, azul-petróleo e âmbar, mistério; sem pessoas." />
                     </div>
                     <div className="space-y-2 sm:w-56">
                       <Label htmlFor="sub">Subtítulo (origem)</Label>
                       <Input id="sub" value={capaSub} onChange={(ev) => setCapaSub(ev.target.value)} placeholder="Opcional" />
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Idiomas das capas</Label>
-                    <div className="flex flex-wrap gap-2">
-                      {editions.map((e) => {
-                        const on = capaIdiomas.includes(e.idioma);
-                        return (
-                          <button
-                            key={e.id}
-                            type="button"
-                            onClick={() =>
-                              setCapaIdiomas((s) =>
-                                on ? s.filter((x) => x !== e.idioma) : [...s, e.idioma]
-                              )
-                            }
-                            className={cn(
-                              "rounded-full border px-3 py-1 text-xs transition-colors",
-                              on ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent"
-                            )}
-                          >
-                            {e.idioma}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border p-3">
-                    <div className="pr-4">
-                      <p className="text-sm font-medium">Gerar nova arte-mestra</p>
-                      <p className="text-xs text-muted-foreground">
-                        Desligado, reaproveita a arte atual e só compõe os textos (instantâneo) —
-                        ideal para adicionar um idioma mantendo a mesma imagem.
-                      </p>
-                    </div>
-                    <Switch checked={capaNovaArte} onCheckedChange={setCapaNovaArte} aria-label="Gerar nova arte-mestra" />
-                  </div>
                   <div className="flex flex-wrap items-center gap-3">
-                    <Button onClick={gerarCapasBatch} disabled={!capaIdiomas.length}>
+                    <Button onClick={gerar5Opcoes}>
                       <Sparkles className="h-4 w-4" />
-                      Gerar capas ({capaIdiomas.length})
+                      {opcoes.length ? "Regerar 5 opções" : "Gerar 5 opções"}
                     </Button>
-                    <JobStatus job={jobMaisRecente(jobs, "gerar_capas") ?? jobMaisRecente(jobs, "gerar_capa")} />
+                    <JobStatus job={jobMaisRecente(jobs, "gerar_capas_opcoes")} />
                   </div>
+                  {(() => {
+                    const prov = (jobMaisRecente(jobs, "gerar_capas_opcoes")?.progresso as any)?.provedor;
+                    return (
+                      <p className="text-xs text-muted-foreground">
+                        {prov ? `Provedor de imagem: ${prov}. ` : ""}
+                        FLUX é grátis com um token (Hugging Face / Cloudflare / Together) no worker/.env; sem token, usa o
+                        fallback Pollinations (qualidade menor). {!workerOnline && "Worker offline: o job aguarda na fila até ligar a produção."}
+                      </p>
+                    );
+                  })()}
                 </CardContent>
               </Card>
+
+              {/* 2) Galeria das 5 opções -> escolher -> aprovar (compõe multilíngue) */}
+              {opcoes.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-xl">Escolha a arte ({opcoes.length})</CardTitle>
+                    <CardDescription>Clique numa arte para selecionar; depois aprove para compor as capas finais (com logo).</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+                      {opcoes.map((o) => (
+                        <button key={o.id} type="button" onClick={() => setOpcaoSel(o.path)}
+                          className={cn("group relative overflow-hidden rounded-lg border-2 bg-muted transition", opcaoSel === o.path ? "border-primary ring-2 ring-primary/30" : "border-transparent hover:border-foreground/20")}
+                          title="Selecionar esta arte">
+                          {o.url ? (
+                            <img src={o.url} alt="Opção de arte" loading="lazy" className="aspect-[2/3] w-full object-cover" />
+                          ) : (
+                            <div className="flex aspect-[2/3] w-full items-center justify-center text-muted-foreground"><Image className="h-6 w-6" /></div>
+                          )}
+                          {opcaoSel === o.path && (
+                            <span className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-primary text-primary-foreground"><Check className="h-4 w-4" /></span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Idiomas a compor</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {editions.map((e) => {
+                          const on = capaIdiomas.includes(e.idioma);
+                          return (
+                            <button key={e.id} type="button"
+                              onClick={() => setCapaIdiomas((s) => (on ? s.filter((x) => x !== e.idioma) : [...s, e.idioma]))}
+                              className={cn("rounded-full border px-3 py-1 text-xs transition-colors", on ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent")}>
+                              {e.idioma}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Button onClick={aprovarArte} disabled={!opcaoSel}>
+                        <Check className="h-4 w-4" /> Aprovar arte e compor capas
+                      </Button>
+                      <JobStatus job={jobMaisRecente(jobs, "compor_capas")} />
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Galeria padronizada */}
               <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">

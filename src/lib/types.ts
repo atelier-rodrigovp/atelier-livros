@@ -44,6 +44,8 @@ export const JOB_TIPOS = [
   "revisar",
   "gerar_capa",
   "gerar_capas",
+  "gerar_capas_opcoes",
+  "compor_capas",
   "gerar_pacote",
   "importar_vendas",
   "gerar_post_social",

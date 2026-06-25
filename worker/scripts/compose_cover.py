@@ -29,10 +29,15 @@ USABLE = W - 2 * MARGIN_X
 TITLE_TOP = int(H * 0.085)        # topo do bloco de título (fixo)
 TITLE_MAX_LINES = 3
 SUBTITLE_GAP = 36
-AUTHOR_BASELINE = H - 200         # autor ancorado (tamanho fixo)
+AUTHOR_BASELINE = H - 200         # autor ancorado (tamanho fixo) — quando NÃO há logo
 AUTHOR_SIZE = 60
 SUBTITLE_SIZE = 58
 RULE_W = 220                       # filete decorativo acima do autor
+
+# Logo (centro-inferior, FIXO e IGUAL em todo livro)
+LOGO_W = 350                       # ~22% de 1600
+LOGO_MARGIN_BOTTOM = 100           # margem inferior fixa
+LOGO_AUTHOR_GAP = 44               # respiro entre autor e logo
 
 
 def font(fonts_dir, name, size):
@@ -114,6 +119,7 @@ def tracked(s, spaces=1):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
+    ap.add_argument("--logo", default=None, help="PNG da logo (centro-inferior); ou via config['logo']")
     args = ap.parse_args()
     cfg = json.load(open(args.config, encoding="utf-8"))
     fonts_dir = cfg["fonts_dir"]
@@ -126,6 +132,17 @@ def main():
     title = (cfg.get("title") or "").strip()
     subtitle = (cfg.get("subtitle") or "").strip()
     author = (cfg.get("author") or "").strip()
+
+    # Logo (centro-inferior) — posição/tamanho FIXOS; o autor sobe para dar lugar.
+    logo_path = cfg.get("logo") or args.logo
+    logo_img = None
+    author_baseline = AUTHOR_BASELINE
+    if logo_path and os.path.exists(logo_path):
+        lg = Image.open(logo_path).convert("RGBA")
+        lh = max(1, round(LOGO_W * lg.height / lg.width))
+        logo_img = lg.resize((LOGO_W, lh), Image.LANCZOS)
+        logo_top = H - LOGO_MARGIN_BOTTOM - lh
+        author_baseline = logo_top - LOGO_AUTHOR_GAP - AUTHOR_SIZE
 
     # Título (auto-fit, centralizado, bloco no topo fixo)
     tf, tlines, tsize = fit_title(draw, title, fonts_dir, USABLE, TITLE_MAX_LINES)
@@ -143,11 +160,17 @@ def main():
             draw_center(draw, y, ln, sf, (230, 228, 222, 255))
             y += SUBTITLE_SIZE
 
-    # Filete + autor (tamanho fixo, ancorado na base)
-    rule_y = AUTHOR_BASELINE - 70
+    # Filete + autor (tamanho fixo, ancorado acima da logo)
+    rule_y = author_baseline - 70
     draw.line([(W / 2 - RULE_W / 2, rule_y), (W / 2 + RULE_W / 2, rule_y)], fill=(220, 218, 212, 220), width=3)
     af = font(fonts_dir, "CrimsonPro-Regular.ttf", AUTHOR_SIZE)
-    draw_center(draw, AUTHOR_BASELINE, tracked(author.upper(), 1), af, WHITE)
+    draw_center(draw, author_baseline, tracked(author.upper(), 1), af, WHITE)
+
+    # Logo Maremonti (branca/transparente) centralizada na base — IGUAL em todo livro
+    if logo_img is not None:
+        lx = (W - LOGO_W) // 2
+        ly = H - LOGO_MARGIN_BOTTOM - logo_img.height
+        canvas.alpha_composite(logo_img, (lx, ly))
 
     os.makedirs(os.path.dirname(cfg["out"]) or ".", exist_ok=True)
     canvas.convert("RGB").save(cfg["out"], "PNG")
