@@ -91,6 +91,7 @@ export default function Projeto() {
   const [escritaPausada, setEscritaPausada] = useState(false);
   const [volDialogOpen, setVolDialogOpen] = useState(false);
   const [irmaos, setIrmaos] = useState<{ id: string; titulo: string; volume: number; status: string }[]>([]);
+  const [autores, setAutores] = useState<{ id: string; nome: string }[]>([]);
 
   const carregar = useCallback(async () => {
     if (!id) return;
@@ -169,6 +170,17 @@ export default function Projeto() {
       .then(({ data }) => { if (vivo) setIrmaos((data as { id: string; titulo: string; volume: number; status: string }[]) ?? []); });
     return () => { vivo = false; };
   }, [proj?.serie, proj?.id, jobs]);
+
+  useEffect(() => {
+    supabase.from("authors").select("id,nome").order("nome").then(({ data }) => setAutores((data as { id: string; nome: string }[]) ?? []));
+  }, []);
+
+  async function definirAutor(author_id: string) {
+    if (!id) return;
+    const { error } = await supabase.from("projects").update({ author_id: author_id || null }).eq("id", id);
+    if (error) { toast.error(error.message); return; }
+    setProj((p) => (p ? { ...p, author_id: author_id || null } : p));
+  }
 
   const origem = useMemo(() => editions.find((e) => e.is_origem), [editions]);
 
@@ -374,6 +386,20 @@ export default function Projeto() {
             {proj.genero ?? "—"} · {proj.idioma_origem}
             {proj.serie ? ` · ${proj.serie}${proj.volume ? ` (vol. ${proj.volume})` : ""}` : ""}
           </p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Autor:</span>
+            <select
+              className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+              value={proj.author_id ?? ""}
+              onChange={(e) => definirAutor(e.target.value)}
+            >
+              <option value="">— sem autor —</option>
+              {autores.map((au) => <option key={au.id} value={au.id}>{au.nome}</option>)}
+            </select>
+            {proj.author_id && (
+              <Link to={`/autores/${proj.author_id}`} className="text-primary hover:underline">ver autor</Link>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={sb.variant}>

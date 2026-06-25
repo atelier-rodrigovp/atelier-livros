@@ -9,6 +9,8 @@ import NovoProjeto from "@/pages/NovoProjeto";
 import Projeto from "@/pages/Projeto";
 import Leitor from "@/pages/Leitor";
 import Catalogo from "@/pages/Catalogo";
+import Autores from "@/pages/Autores";
+import Autor from "@/pages/Autor";
 import Vendas from "@/pages/Vendas";
 
 function Carregando() {
@@ -36,6 +38,8 @@ export default function App() {
           <Route element={<AppLayout />}>
             <Route index element={<Dashboard />} />
             <Route path="catalogo" element={<Catalogo />} />
+            <Route path="autores" element={<Autores />} />
+            <Route path="autores/:id" element={<Autor />} />
             <Route path="vendas" element={<Vendas />} />
             <Route path="configuracoes" element={<Configuracoes />} />
             <Route path="novo-projeto" element={<NovoProjeto />} />

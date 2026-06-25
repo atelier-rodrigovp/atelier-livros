@@ -7,7 +7,7 @@
 do $$
 declare b text;
 begin
-  foreach b in array array['manuscritos','epubs','capas','pacotes'] loop
+  foreach b in array array['manuscritos','epubs','capas','pacotes','autores'] loop
     -- SELECT (necessário para createSignedUrl/download e list)
     execute format('drop policy if exists %I on storage.objects;', 'owner_read_' || b);
     execute format($p$

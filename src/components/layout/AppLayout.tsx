@@ -5,6 +5,7 @@ import {
   Library,
   LineChart,
   Settings,
+  Users,
   LogOut,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -25,6 +26,7 @@ import {
 const nav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/catalogo", label: "Catálogo", icon: Library },
+  { to: "/autores", label: "Autores", icon: Users },
   { to: "/vendas", label: "Vendas", icon: LineChart },
   { to: "/configuracoes", label: "Configurações", icon: Settings },
 ];

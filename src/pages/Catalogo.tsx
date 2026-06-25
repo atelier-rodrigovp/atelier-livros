@@ -17,6 +17,8 @@ interface Item {
   status: string;
   capa: string | null;
   created_at: string;
+  autorId: string | null;
+  autor: string | null;
 }
 
 // Cache de URLs assinadas por sessão (evita reassinar a cada carregamento).
@@ -48,7 +50,7 @@ function Poster({ item }: { item: Item }) {
       </div>
       <div className="mt-1.5">
         <p className="truncate text-sm font-medium leading-tight" title={item.titulo}>{item.titulo}</p>
-        <p className="text-xs text-muted-foreground">{item.idioma}</p>
+        <p className="truncate text-xs text-muted-foreground">{item.autor ? item.autor : item.idioma}</p>
       </div>
     </Link>
   );
@@ -70,18 +72,21 @@ export default function Catalogo() {
   const [busca, setBusca] = useState("");
   const [fIdioma, setFIdioma] = useState("");
   const [fStatus, setFStatus] = useState("");
+  const [fAutor, setFAutor] = useState("");
   const [ordem, setOrdem] = useState("recentes");
   const [agrupar, setAgrupar] = useState(() => localStorage.getItem("cat:agrupar") === "1");
 
   useEffect(() => { localStorage.setItem("cat:agrupar", agrupar ? "1" : "0"); }, [agrupar]);
 
   const carregar = useCallback(async () => {
-    const [{ data: projs }, { data: eds }, { data: arts }] = await Promise.all([
-      supabase.from("projects").select("id,titulo,serie,volume,created_at"),
+    const [{ data: projs }, { data: eds }, { data: arts }, { data: auts }] = await Promise.all([
+      supabase.from("projects").select("*"), // "*" p/ não quebrar antes da migração de author_id
       supabase.from("editions").select("id,project_id,idioma,status"),
       supabase.from("artifacts").select("edition_id,tipo,url_publica,storage_path").eq("tipo", "capa"),
+      supabase.from("authors").select("id,nome"),
     ]);
     const pmap = new Map((projs ?? []).map((p: any) => [p.id, p]));
+    const amap = new Map((auts ?? []).map((a: any) => [a.id, a.nome]));
     const capaEntries = await Promise.all(
       (arts ?? []).map(async (a: any) => {
         if (capaCache.has(a.storage_path)) return [a.edition_id, capaCache.get(a.storage_path)!] as const;
@@ -102,6 +107,8 @@ export default function Catalogo() {
         status: e.status,
         capa: capaMap.get(e.id) ?? null,
         created_at: pmap.get(e.project_id)?.created_at ?? "",
+        autorId: pmap.get(e.project_id)?.author_id ?? null,
+        autor: amap.get(pmap.get(e.project_id)?.author_id) ?? null,
       }))
     );
   }, []);
@@ -110,6 +117,7 @@ export default function Catalogo() {
 
   const idiomas = useMemo(() => [...new Set(itens.map((i) => i.idioma))].sort(), [itens]);
   const statuses = useMemo(() => [...new Set(itens.map((i) => i.status))].sort(), [itens]);
+  const autoresList = useMemo(() => [...new Set(itens.map((i) => i.autor).filter(Boolean))].sort() as string[], [itens]);
 
   const ordenar = useCallback((arr: Item[]) => {
     const a = [...arr];
@@ -123,12 +131,13 @@ export default function Catalogo() {
     const q = busca.trim().toLowerCase();
     const filtrados = itens.filter(
       (i) =>
-        (!q || i.titulo.toLowerCase().includes(q) || (i.serie ?? "").toLowerCase().includes(q)) &&
+        (!q || i.titulo.toLowerCase().includes(q) || (i.serie ?? "").toLowerCase().includes(q) || (i.autor ?? "").toLowerCase().includes(q)) &&
         (!fIdioma || i.idioma === fIdioma) &&
-        (!fStatus || i.status === fStatus)
+        (!fStatus || i.status === fStatus) &&
+        (!fAutor || i.autor === fAutor)
     );
     return ordenar(filtrados);
-  }, [itens, busca, fIdioma, fStatus, ordenar]);
+  }, [itens, busca, fIdioma, fStatus, fAutor, ordenar]);
 
   // Modo agrupado: seções por série (preservando a ordem escolhida), volumes por número.
   const grupos = useMemo(() => {
@@ -185,6 +194,10 @@ export default function Catalogo() {
           {idiomas.length > 1 && statuses.length > 1 && <span className="mx-1 h-4 w-px bg-border" />}
           {statuses.length > 1 && statuses.map((s) => (
             <button key={s} className={chipCls(fStatus === s)} onClick={() => setFStatus((c) => (c === s ? "" : s))}>{s}</button>
+          ))}
+          {autoresList.length > 1 && <span className="mx-1 h-4 w-px bg-border" />}
+          {autoresList.length > 1 && autoresList.map((au) => (
+            <button key={au} className={chipCls(fAutor === au)} onClick={() => setFAutor((c) => (c === au ? "" : au))}>{au}</button>
           ))}
           <button
             className={cn(chipCls(agrupar), "ml-auto")}

@@ -49,12 +49,32 @@ export const JOB_TIPOS = [
 ] as const;
 export type JobTipo = (typeof JOB_TIPOS)[number];
 
+export const REDES = ["instagram", "x", "tiktok", "threads", "youtube", "site"] as const;
+export type Rede = (typeof REDES)[number];
+
+export interface Author {
+  id: string;
+  owner: string;
+  nome: string;
+  slug: string | null;
+  estilo: string | null;
+  genero: string | null;
+  bio: string | null;
+  personalidade: string | null;
+  referencias: string | null;
+  avatar_path: string | null;
+  social: Partial<Record<Rede, string>>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Project {
   id: string;
   owner: string;
   titulo: string;
   serie: string | null;
   volume: number;
+  author_id: string | null;
   genero: string | null;
   idioma_origem: string;
   status: ProjectStatus;
