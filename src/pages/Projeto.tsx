@@ -982,7 +982,7 @@ export default function Projeto() {
               <Label>Skill de escrita</Label>
               <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 value={ed.skill_escrita ?? ""} onChange={(e) => setEd((s) => ({ ...s, skill_escrita: e.target.value }))}>
-                {["", "skill-dan-brown", "hoover-mcfadden", "skill-jk-rowling", "vesper-escritor-de-capitulos"].map((v) => (
+                {["", "skill-dan-brown", "hoover-mcfadden", "skill-jk-rowling", "vesper-escritor-de-capitulos", "skill-romantasy"].map((v) => (
                   <option key={v} value={v}>{v || "Nenhuma"}</option>
                 ))}
               </select>

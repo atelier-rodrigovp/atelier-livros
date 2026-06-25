@@ -26,8 +26,12 @@ const AUTORES = [
     referencias: "Dan Brown, Michael Crichton, Blake Crouch",
     bio: "Techno-thrillers de página-vira sobre conspirações, ciência e segredos enterrados — Dan Brown com lastro factual real. Frio, clínico, ritmo de bisturi; capítulos curtos que terminam em gancho.",
     personalidade: "Cerebral, cético, fascinado por mistérios institucionais; gosta de fato verificável dramatizado." },
-  { nome: "Lena Agarti", estilo: "A definir", genero: null, referencias: null,
-    bio: "Pseudônimo em formação — estilo e catálogo a definir.", personalidade: "A definir." },
+  { nome: "Lena Agarti", estilo: "Romantasy — fantasia romântica de alto risco e tensão amorosa",
+    genero: "Fantasia / romance (new adult)",
+    referencias: "Sarah J. Maas, Rebecca Yarros, Jennifer L. Armentrout",
+    bio: "Mundos perigosos onde o romance é a maior das apostas. Inimigos que viram amantes, juramentos que cobram preço, magia com regras e um slow burn que não deixa respirar. Fantasia épica com o coração na garganta — feita para virar a noite e a página.",
+    personalidade: "Intensa e calorosa, sensual sem vulgaridade, fala direto com a leitora; vive de tensão romântica, lealdade e escolhas impossíveis; adora um gancho cruel no fim do capítulo.",
+    skill_escrita: "skill-romantasy" }, // ponteiro p/ a skill de escrita (vira projects.skill_escrita nos livros da Lena)
 ];
 
 const MAPA = {

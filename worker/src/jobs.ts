@@ -186,7 +186,7 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
     "  1) AUTOR (nome do autor, exatamente como deve aparecer na capa).\n" +
     "  2) PÁGINAS-ALVO e nº de CAPÍTULOS.\n" +
     "  3) SÉRIE: é livro único, TRILOGIA, ou SAGA de N livros? Se série, qual o NOME da série e QUANTOS livros (N), e qual o volume atual.\n" +
-    "  4) SKILL DE ESCRITA (metodologia), opções: skill-dan-brown, hoover-mcfadden, skill-jk-rowling, vesper-escritor-de-capitulos, Nenhuma.\n" +
+    "  4) SKILL DE ESCRITA (metodologia), opções: skill-dan-brown, hoover-mcfadden, skill-jk-rowling, vesper-escritor-de-capitulos, skill-romantasy, Nenhuma.\n" +
     "  5) Nº DE PERSONAGENS NOMEADOS por papel: quantos protagonista(s), antagonista(s) e personagens de APOIO.\n" +
     "Verifique nas respostas acima quais já foram cobertos; só conclua quando os 4 estiverem respondidos.\n\n" +
     "REGRA DE CONVERGÊNCIA: entrevista CURTA, no máximo 4 blocos. Priorize os campos obrigatórios e os " +

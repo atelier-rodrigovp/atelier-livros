@@ -14,7 +14,7 @@ create table if not exists projects (
   idioma_origem text default 'pt-BR',
   status text not null default 'rascunho', -- rascunho|fundacao|escrevendo|revisao|pronto|publicado
   briefing jsonb not null default '{}',
-  skill_escrita text,                      -- skill-dan-brown | hoover-mcfadden | skill-jk-rowling | vesper-escritor-de-capitulos | null
+  skill_escrita text,                      -- skill-dan-brown | hoover-mcfadden | skill-jk-rowling | vesper-escritor-de-capitulos | skill-romantasy | null
   paginas_alvo int,
   total_capitulos int,
   piso_palavras int default 1400,
