@@ -69,6 +69,46 @@ export function displayProjectStatus(args: {
   return { ...base, pulse: false };
 }
 
+// Um job está REALMENTE rodando? running + worker online + lock fresco (< staleMin).
+// Cobre o caso do job órfão: status='running' mas o worker caiu (offline/lock velho).
+export function jobAtivoReal(args: {
+  status: string;
+  workerOnline: boolean;
+  lockedAt?: string | null;
+  now?: Date;
+  staleMin?: number;
+}): boolean {
+  const { status, workerOnline, lockedAt, now = new Date(), staleMin = 5 } = args;
+  if (status !== "running") return false;
+  if (!workerOnline) return false;
+  if (!lockedAt) return true; // running + online, recém-reivindicado (sem lock ainda)
+  const t = new Date(lockedAt).getTime();
+  if (Number.isNaN(t)) return true;
+  return now.getTime() - t < staleMin * 60_000;
+}
+
+// Rótulo amigável por tipo de job (apresentação).
+const TIPO_LABEL: Record<string, string> = {
+  escrever_livro: "Escrita",
+  gerar_capa: "Capas",
+  gerar_capas: "Capas",
+  gerar_epub: "EPUB",
+  traduzir: "Tradução",
+  avaliar: "Avaliação",
+  revisar: "Revisão",
+  gerar_post_social: "Post social",
+  criar_fundacao: "Fundação",
+  refinar_fundacao: "Fundação",
+  criar_volumes: "Volumes da saga",
+  gerar_pacote: "Pacote KDP",
+  importar_vendas: "Vendas",
+  entrevistar: "Entrevista",
+  ping: "Teste",
+};
+export function tipoLabel(tipo: string): string {
+  return TIPO_LABEL[tipo] ?? tipo;
+}
+
 // Worker é considerado online se o último heartbeat foi há menos de staleMin minutos.
 export function workerOnline(
   hb: Pick<WorkerHeartbeat, "last_seen"> | null | undefined,

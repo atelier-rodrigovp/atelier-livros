@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Loader2, Power, Send } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Activity, Loader2, Power, RotateCcw, Send } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/hooks/useSession";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
 import { enqueueJob, supabase } from "@/lib/supabase";
-import { jobStatusBadge } from "@/lib/status";
+import { jobAtivoReal, jobStatusBadge, tipoLabel } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { Job } from "@/lib/types";
+
+interface ProjInfo { titulo: string; serie: string | null; volume: number | null; autor: string | null; }
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +27,15 @@ export default function Configuracoes() {
   const [ativo, setAtivo] = useState(true);
   const [salvandoCtl, setSalvandoCtl] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [projetos, setProjetos] = useState<Record<string, ProjInfo>>({});
+
+  const carregarProjetos = useCallback(async () => {
+    const { data } = await supabase.from("projects").select("id,titulo,serie,volume,briefing");
+    const m: Record<string, ProjInfo> = {};
+    for (const p of (data as { id: string; titulo: string; serie: string | null; volume: number | null; briefing: any }[]) ?? [])
+      m[p.id] = { titulo: p.titulo, serie: p.serie, volume: p.volume, autor: p.briefing?.autor ?? null };
+    setProjetos(m);
+  }, []);
 
   const carregarControle = useCallback(async () => {
     const { data } = await supabase
@@ -46,15 +58,46 @@ export default function Configuracoes() {
   useEffect(() => {
     carregarControle();
     carregarJobs();
+    carregarProjetos();
     const ch = supabase
       .channel("config-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "worker_control" }, () => carregarControle())
       .on("postgres_changes", { event: "*", schema: "public", table: "jobs" }, () => carregarJobs())
+      .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, () => carregarProjetos())
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [carregarControle, carregarJobs]);
+  }, [carregarControle, carregarJobs, carregarProjetos]);
+
+  // Rótulo do projeto de um job (título + série/volume).
+  function projLabel(pid: string | null): string | null {
+    const p = pid ? projetos[pid] : null;
+    if (!p) return null;
+    return `${p.titulo}${p.serie ? ` · ${p.serie}${p.volume ? ` (Vol. ${p.volume})` : ""}` : ""}`;
+  }
+
+  // Detalhe de progresso de um job (cap X/Y, fase, palavras, nota…).
+  function detalheProgresso(j: Job): string {
+    const p: any = j.progresso || {};
+    const partes: string[] = [tipoLabel(j.tipo)];
+    if (p.cap_atual != null && p.total != null) partes.push(`cap ${p.cap_atual}/${p.total}`);
+    if (p.fase) partes.push(`fase ${p.fase}`);
+    if (p.etapa && !p.cap_atual) partes.push(String(p.etapa));
+    if (p.palavras) partes.push(`${Number(p.palavras).toLocaleString("pt-BR")} palavras`);
+    if (p.nota != null) partes.push(`nota ${p.nota}`);
+    return partes.join(" · ");
+  }
+
+  async function reenfileirar(j: Job) {
+    const { error } = await supabase
+      .from("jobs")
+      .update({ status: "queued", locked_by: null, locked_at: null })
+      .eq("id", j.id);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Job reenfileirado — volta para a fila.");
+    carregarJobs();
+  }
 
   async function alternarProducao(novo: boolean) {
     setSalvandoCtl(true);
@@ -94,6 +137,10 @@ export default function Configuracoes() {
     pausado: { cor: "bg-amber-500", texto: "Pausado", pulse: false },
     parado: { cor: "bg-muted-foreground/40", texto: "Parado", pulse: false },
   }[estado];
+
+  // Job realmente em execução agora (running + worker online + lock fresco).
+  const jobRodando = jobs.find((j) => j.status === "running");
+  const trabalhando = !!jobRodando && jobAtivoReal({ status: jobRodando.status, workerOnline: online, lockedAt: jobRodando.locked_at });
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -155,6 +202,34 @@ export default function Configuracoes() {
                 </p>
               </details>
             </>
+          )}
+
+          {online && (
+            trabalhando && jobRodando ? (
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Trabalhando agora</p>
+                {jobRodando.project_id && projLabel(jobRodando.project_id) ? (
+                  <Link to={`/projeto/${jobRodando.project_id}`} className="font-medium hover:underline">
+                    {projLabel(jobRodando.project_id)}
+                  </Link>
+                ) : (
+                  <span className="font-medium">{tipoLabel(jobRodando.tipo)}</span>
+                )}
+                <p className="mt-0.5 text-sm text-muted-foreground">{detalheProgresso(jobRodando)}</p>
+                {(() => {
+                  const p: any = jobRodando.progresso || {};
+                  if (p.cap_atual == null || !p.total) return null;
+                  const pct = Math.min(100, Math.round((Number(p.cap_atual) / Number(p.total)) * 100));
+                  return (
+                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Worker ocioso — sem tarefa no momento.</p>
+            )
           )}
         </CardContent>
       </Card>
@@ -218,21 +293,43 @@ export default function Configuracoes() {
           ) : (
             <ul className="divide-y text-sm">
               {jobs.map((j) => {
-                const b = jobStatusBadge(j.status);
-                return (
-                  <li key={j.id} className="flex items-center justify-between gap-3 py-2">
+                const orfao = j.status === "running" && !jobAtivoReal({ status: j.status, workerOnline: online, lockedAt: j.locked_at });
+                const b = orfao ? { label: "Interrompido", variant: "warning" as const } : jobStatusBadge(j.status);
+                const pl = projLabel(j.project_id);
+                const dica = orfao ? "O worker caiu durante esta tarefa. Religue o worker para retomar." : undefined;
+                const inner = (
+                  <>
                     <div className="min-w-0">
-                      <span className="font-mono text-xs">{j.tipo}</span>
-                      {j.erro && (
-                        <p className="truncate text-xs text-destructive" title={j.erro}>{j.erro}</p>
-                      )}
+                      <span className="font-medium">{tipoLabel(j.tipo)}</span>
+                      {pl ? <span className="text-muted-foreground"> · {pl}</span> : null}
+                      {orfao && <p className="text-xs text-amber-600 dark:text-amber-400">{dica}</p>}
+                      {j.erro && !orfao && <p className="truncate text-xs text-destructive" title={j.erro}>{j.erro}</p>}
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
+                      {orfao && (
+                        <Button
+                          size="sm" variant="outline" className="h-7 px-2 text-xs"
+                          onClick={(e) => { e.preventDefault(); reenfileirar(j); }}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" /> Reenfileirar
+                        </Button>
+                      )}
                       <span className="hidden text-xs text-muted-foreground sm:inline">
                         {new Date(j.created_at).toLocaleString()}
                       </span>
-                      <Badge variant={b.variant}>{b.label}</Badge>
+                      <Badge variant={b.variant} title={dica}>{b.label}</Badge>
                     </div>
+                  </>
+                );
+                return (
+                  <li key={j.id}>
+                    {j.project_id ? (
+                      <Link to={`/projeto/${j.project_id}`} className="-mx-2 flex items-center justify-between gap-3 rounded px-2 py-2 hover:bg-muted/50">
+                        {inner}
+                      </Link>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3 py-2">{inner}</div>
+                    )}
                   </li>
                 );
               })}

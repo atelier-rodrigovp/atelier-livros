@@ -118,6 +118,8 @@ export interface Job {
   erro: string | null;
   attempts: number;
   max_attempts: number;
+  locked_at?: string | null;
+  locked_by?: string | null;
   created_at: string;
   updated_at: string;
 }

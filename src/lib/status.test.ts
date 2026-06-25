@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { displayProjectStatus, jobStatusBadge, projectStatusBadge, workerOnline } from "./status";
+import { displayProjectStatus, jobAtivoReal, jobStatusBadge, projectStatusBadge, tipoLabel, workerOnline } from "./status";
 
 describe("jobStatusBadge", () => {
   it("mapeia todos os status de job", () => {
@@ -41,6 +41,37 @@ describe("displayProjectStatus", () => {
   it("sem job ativo cai no mapeamento base", () => {
     expect(displayProjectStatus({ projectStatus: "pronto", hasActiveJob: false, workerOnline: true }).label).toBe("Pronto");
     expect(displayProjectStatus({ projectStatus: "fundacao", hasActiveJob: false, workerOnline: false }).label).toBe("Fundação");
+  });
+});
+
+describe("jobAtivoReal", () => {
+  const now = new Date("2026-06-25T12:00:00Z");
+  it("false quando o job não está running", () => {
+    expect(jobAtivoReal({ status: "queued", workerOnline: true, lockedAt: now.toISOString(), now })).toBe(false);
+    expect(jobAtivoReal({ status: "done", workerOnline: true, lockedAt: now.toISOString(), now })).toBe(false);
+  });
+  it("false quando running mas worker offline (job órfão)", () => {
+    expect(jobAtivoReal({ status: "running", workerOnline: false, lockedAt: now.toISOString(), now })).toBe(false);
+  });
+  it("false quando running, online, mas lock velho (> 5 min)", () => {
+    const old = new Date(now.getTime() - 10 * 60_000).toISOString();
+    expect(jobAtivoReal({ status: "running", workerOnline: true, lockedAt: old, now })).toBe(false);
+  });
+  it("true quando running, online e lock fresco", () => {
+    const fresh = new Date(now.getTime() - 30_000).toISOString();
+    expect(jobAtivoReal({ status: "running", workerOnline: true, lockedAt: fresh, now })).toBe(true);
+  });
+  it("true quando running, online e sem lock (recém-reivindicado)", () => {
+    expect(jobAtivoReal({ status: "running", workerOnline: true, lockedAt: null, now })).toBe(true);
+  });
+});
+
+describe("tipoLabel", () => {
+  it("mapeia tipos conhecidos e cai no próprio nome para desconhecido", () => {
+    expect(tipoLabel("escrever_livro")).toBe("Escrita");
+    expect(tipoLabel("gerar_post_social")).toBe("Post social");
+    expect(tipoLabel("criar_volumes")).toBe("Volumes da saga");
+    expect(tipoLabel("xpto")).toBe("xpto");
   });
 });
 
