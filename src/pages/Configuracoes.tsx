@@ -129,18 +129,21 @@ export default function Configuracoes() {
     }
   }
 
-  // Estado consolidado: produzindo / pausado / parado.
-  const estado = !online ? "parado" : ativo ? "produzindo" : "pausado";
-  const produzindo = estado === "produzindo";
-  const cfg = {
-    produzindo: { cor: "bg-emerald-500", texto: "Produzindo", pulse: true },
-    pausado: { cor: "bg-amber-500", texto: "Pausado", pulse: false },
-    parado: { cor: "bg-muted-foreground/40", texto: "Parado", pulse: false },
-  }[estado];
-
   // Job realmente em execução agora (running + worker online + lock fresco).
   const jobRodando = jobs.find((j) => j.status === "running");
   const trabalhando = !!jobRodando && jobAtivoReal({ status: jobRodando.status, workerOnline: online, lockedAt: jobRodando.locked_at });
+
+  // Produção ligada (controla o botão Ligar/Desligar): fila habilitada e worker vivo.
+  const produzindo = online && ativo;
+
+  // Badge do worker: parado / pausado / ocioso (ligado, sem tarefa) / produzindo (com tarefa real).
+  const estado = !online ? "parado" : !ativo ? "pausado" : trabalhando ? "produzindo" : "ocioso";
+  const cfg = {
+    produzindo: { cor: "bg-emerald-500", texto: "Produzindo", pulse: true },
+    ocioso: { cor: "bg-emerald-500/60", texto: "Ocioso", pulse: false },
+    pausado: { cor: "bg-amber-500", texto: "Pausado", pulse: false },
+    parado: { cor: "bg-muted-foreground/40", texto: "Parado", pulse: false },
+  }[estado];
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -291,7 +294,12 @@ export default function Configuracoes() {
           {jobs.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">Sem atividade ainda.</p>
           ) : (
-            <ul className="divide-y text-sm">
+            <>
+              <div className="flex items-center justify-between gap-3 border-b pb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                <span>Tarefa · Projeto</span>
+                <span>Atualizado · Status</span>
+              </div>
+              <ul className="divide-y text-sm">
               {jobs.map((j) => {
                 const orfao = j.status === "running" && !jobAtivoReal({ status: j.status, workerOnline: online, lockedAt: j.locked_at });
                 const b = orfao ? { label: "Interrompido", variant: "warning" as const } : jobStatusBadge(j.status);
@@ -314,8 +322,11 @@ export default function Configuracoes() {
                           <RotateCcw className="h-3.5 w-3.5" /> Reenfileirar
                         </Button>
                       )}
-                      <span className="hidden text-xs text-muted-foreground sm:inline">
-                        {new Date(j.created_at).toLocaleString()}
+                      <span
+                        className="hidden text-xs text-muted-foreground sm:inline"
+                        title={`Iniciado em ${new Date(j.created_at).toLocaleString()}${j.updated_at ? `\nAtualizado em ${new Date(j.updated_at).toLocaleString()}` : ""}`}
+                      >
+                        {new Date(j.updated_at ?? j.created_at).toLocaleString()}
                       </span>
                       <Badge variant={b.variant} title={dica}>{b.label}</Badge>
                     </div>
@@ -334,6 +345,7 @@ export default function Configuracoes() {
                 );
               })}
             </ul>
+            </>
           )}
         </CardContent>
       </Card>
