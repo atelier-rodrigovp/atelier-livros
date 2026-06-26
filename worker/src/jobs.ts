@@ -1,7 +1,7 @@
 // Executores por tipo de job. Cada um ORQUESTRA uma skill do Claude Code (ou um
 // script determinístico da skill) — NÃO reimplementa a lógica das skills.
 // Verdade do disco: o worker confere arquivos reais antes de gravar status.
-import { mkdir, writeFile, rm, cp } from "node:fs/promises";
+import { mkdir, writeFile, rm, cp, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sb, OWNER } from "./supabase.js";
@@ -23,6 +23,8 @@ import {
   WORK_DIR,
 } from "./lib.js";
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
+import { sanitizarCapitulo, metaResidual } from "./sanitize.js";
+import { existsSync } from "node:fs";
 
 export interface Job {
   id: string;
@@ -40,6 +42,78 @@ function skillsDir(): string {
 }
 function edicaoKindleScript(name: string): string {
   return path.join(skillsDir(), "edicao-kindle", "scripts", name);
+}
+
+// ---------------------------------------------------------------------------
+// Trava antivazamento: nenhum meta-texto de pipeline pode chegar ao livro.
+// ---------------------------------------------------------------------------
+const GATE_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "tools", "gate_manuscrito.py");
+const SKILLS_ESCRITA_CONHECIDAS = ["skill-dan-brown", "hoover-mcfadden", "skill-jk-rowling", "vesper-escritor-de-capitulos", "skill-romantasy"];
+
+// Preflight: a skill_escrita configurada precisa existir no ambiente. FALHA ALTO
+// (job error) — nunca degrada em silêncio nem escreve nota de fallback no texto.
+function assertSkillInstalada(skillEscrita: string | null | undefined): void {
+  const s = String(skillEscrita || "").trim();
+  if (!s || /^nenhuma$/i.test(s)) return; // sem skill: metodologia padrão, ok
+  const dir = skillsDir();
+  if (dir && existsSync(path.join(dir, s))) return;
+  throw new Error(
+    `Skill '${s}' não instalada no worker — instale-a em ${dir || "~/.claude/skills"} ` +
+      `ou troque o estilo do projeto. Escrita não iniciada. ` +
+      `(skills de escrita: ${SKILLS_ESCRITA_CONHECIDAS.join(", ")})`
+  );
+}
+
+// Sanitiza um capítulo NO DISCO antes de salvar/subir: remove meta-texto (com
+// backup do original se mudou) e aplica o GATE — rejeita se restar marcador.
+// Retorna true se removeu algo. Lança erro se meta-texto persistir (rejeição).
+async function sanitizarArquivoCap(file: string, ctx: string): Promise<boolean> {
+  const orig = await readText(file);
+  if (!orig) return false;
+  const { texto, removidos } = sanitizarCapitulo(orig);
+  if (removidos.length) {
+    try { await writeFile(file + ".orig.bak", orig, "utf8"); } catch {}
+    await writeFile(file, texto, "utf8");
+    console.log(`[sanitize] ${ctx} ${path.basename(file)}: removido ${removidos.join("; ")}`);
+  }
+  const resid = metaResidual(texto);
+  if (resid) {
+    throw new Error(
+      `Meta-texto proibido em ${path.basename(file)} (${ctx}): ${resid}. ` +
+        `Capítulo rejeitado — peça reescrita. Nada com meta-texto é aceito.`
+    );
+  }
+  return removidos.length > 0;
+}
+
+// Pré-passe: limpa todos os capitulo-NN.md de uma pasta no disco (best-effort,
+// sem gate) antes do runner remontar o manuscrito/EPUB. Retorna quantos mudaram.
+async function sanitizarPastaCapitulos(subDir: string): Promise<number> {
+  let files: string[] = [];
+  try { files = (await readdir(subDir)).filter((f) => /^capitulo-\d{2}\.md$/.test(f)); } catch { return 0; }
+  let mudou = 0;
+  for (const f of files) {
+    const file = path.join(subDir, f);
+    const orig = await readText(file);
+    const { texto, removidos } = sanitizarCapitulo(orig);
+    if (removidos.length) {
+      try { await writeFile(file + ".orig.bak", orig, "utf8"); } catch {}
+      await writeFile(file, texto, "utf8");
+      console.log(`[sanitize:pré] ${path.basename(subDir)}/${f}: removido ${removidos.join("; ")}`);
+      mudou++;
+    }
+  }
+  return mudou;
+}
+
+// Gate de compilação/EPUB: roda tools/gate_manuscrito.py sobre a pasta do
+// manuscrito; se achar <!--/fence/assinatura, falha com mensagem clara.
+async function gateManuscrito(subDir: string): Promise<void> {
+  if (!existsSync(GATE_SCRIPT)) return; // gate ausente: não bloqueia o build
+  const r = await run(PY_BIN, [GATE_SCRIPT, subDir]);
+  if (r.code !== 0) {
+    throw new Error(`Gate de compilação reprovou o manuscrito: ${(r.out || r.err).trim().slice(-400)}`);
+  }
 }
 
 // ---- DB helpers -----------------------------------------------------------
@@ -449,6 +523,11 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   if (!(await exists(path.join(dir, "ESTADO_LIVRO.json"))))
     throw new Error("fundação ausente — rode criar_fundacao antes de escrever_livro");
 
+  // Preflight: skill de escrita precisa existir — falha alto, sem fallback silencioso.
+  assertSkillInstalada(proj.skill_escrita);
+  // Pré-passe: limpa meta-texto já no disco antes do runner remontar manuscrito/EPUB.
+  await sanitizarPastaCapitulos(path.join(dir, "manuscrito"));
+
   const piso = Number(proj.piso_palavras ?? 1400);
   const meta = Number(proj.meta_nota ?? 9.0);
   await sb.from("projects").update({ status: "escrevendo" }).eq("id", job.project_id!);
@@ -495,12 +574,16 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
 
   // Edição de origem + sync dos capítulos JÁ existentes (mesmo parcial: a UI mostra progresso real)
   const edicao = await ensureEdition(job.project_id!, proj.idioma_origem || "pt-BR", true, completo ? "revisao" : "escrevendo");
+  let sujeiraAposRunner = false; // texto sujo gerado NESTE run → EPUB suspeito
   for (const c of caps) {
+    // Sanitiza+gate ANTES de subir: o leitor lê do Storage, então nada de meta-texto sobe.
+    if (await sanitizarArquivoCap(c.file, "escrita")) sujeiraAposRunner = true;
     const key = storageKey(job.project_id!, "origem", `capitulo-${String(c.numero).padStart(2, "0")}.md`);
     await uploadFile("manuscritos", key, c.file);
-    const titulo = (await readText(c.file)).split("\n").find((l) => l.startsWith("#"))?.replace(/^#+\s*/, "").trim() ?? null;
+    const txt = await readText(c.file);
+    const titulo = txt.split("\n").find((l) => l.startsWith("#"))?.replace(/^#+\s*/, "").trim() ?? null;
     await must(sb.from("chapters").upsert(
-      { owner: OWNER, edition_id: edicao.id, numero: c.numero, titulo, palavras: c.palavras, storage_path: key },
+      { owner: OWNER, edition_id: edicao.id, numero: c.numero, titulo, palavras: countWords(txt), storage_path: key },
       { onConflict: "edition_id,numero" }
     ));
   }
@@ -525,8 +608,23 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     throw new Error(`escrita não avançou em ${caps.length}/${total} (rc=${r.code}). ${log.slice(-300)}`);
   }
 
-  // Manuscrito-mestre
+  // Manuscrito-mestre — sanitiza (o runner pode tê-lo montado de capítulos sujos)
+  // e passa pelo gate de compilação antes de publicar.
   const mestre = path.join(dir, "manuscrito", "MANUSCRITO-MESTRE.md");
+  if (await exists(mestre)) {
+    if (await sanitizarArquivoCap(mestre, "manuscrito-mestre")) sujeiraAposRunner = true;
+  }
+  await gateManuscrito(path.join(dir, "manuscrito"));
+
+  // Se houve meta-texto NESTE run, o EPUB construído pelo runner é suspeito:
+  // NÃO publica manuscrito/EPUB; re-enfileira para remontar do texto já limpo.
+  if (sujeiraAposRunner) {
+    await must(sb.from("jobs").insert({ owner: OWNER, tipo: "escrever_livro", project_id: job.project_id, status: "queued" }));
+    await setProgress(job.id, { fase: "ESCRITA", cap_atual: caps.length, total, sanitizado: true, continua: true });
+    console.log("[sanitize] meta-texto removido neste run; EPUB não publicado, re-enfileirado para rebuild limpo.");
+    return;
+  }
+
   if (await exists(mestre)) {
     const key = storageKey(job.project_id!, "origem", "MANUSCRITO-MESTRE.md");
     await uploadFile("manuscritos", key, mestre);
@@ -668,6 +766,7 @@ async function traduzir(job: Job, hb?: Heartbeat) {
       throw new Error(`tradução ${idioma} incompleta: ${transCaps.length}/${origemCaps.length} caps. rc=${r.code} ${r.err.slice(-300)}`);
     }
     for (const c of transCaps) {
+      await sanitizarArquivoCap(c.file, `tradução ${idioma}`);
       const key = storageKey(job.project_id!, idioma, `capitulo-${String(c.numero).padStart(2, "0")}.md`);
       await uploadFile("manuscritos", key, c.file);
       await must(sb.from("chapters").upsert(
@@ -677,6 +776,8 @@ async function traduzir(job: Job, hb?: Heartbeat) {
     }
     const mestre = path.join(destino, "MANUSCRITO-MESTRE.md");
     if (await exists(mestre)) {
+      await sanitizarArquivoCap(mestre, `tradução ${idioma} (mestre)`);
+      await gateManuscrito(destino);
       await uploadFile("manuscritos", storageKey(job.project_id!, idioma, "MANUSCRITO-MESTRE.md"), mestre);
     }
     await must(sb.from("editions").update({ status: "pronto" }).eq("id", ed.id));
@@ -768,6 +869,7 @@ async function revisar(job: Job, _hb?: Heartbeat) {
   const caps = await chaptersOnDisk(sub, 1);
   const idiomaKey = edicao.is_origem ? "origem" : edicao.idioma;
   for (const c of caps) {
+    await sanitizarArquivoCap(c.file, `revisão ${idiomaKey}`);
     const key = storageKey(projectId, idiomaKey, `capitulo-${String(c.numero).padStart(2, "0")}.md`);
     await uploadFile("manuscritos", key, c.file);
     await must(sb.from("chapters").upsert(
@@ -776,7 +878,11 @@ async function revisar(job: Job, _hb?: Heartbeat) {
     ));
   }
   const mestre = path.join(sub, "MANUSCRITO-MESTRE.md");
-  if (await exists(mestre)) await uploadFile("manuscritos", storageKey(projectId, idiomaKey, "MANUSCRITO-MESTRE.md"), mestre);
+  if (await exists(mestre)) {
+    await sanitizarArquivoCap(mestre, `revisão ${idiomaKey} (mestre)`);
+    await gateManuscrito(sub);
+    await uploadFile("manuscritos", storageKey(projectId, idiomaKey, "MANUSCRITO-MESTRE.md"), mestre);
+  }
 
   // re-avalia para atualizar a nota e o relatório
   await setProgress(job.id, { fase: "REVISAO", idioma: edicao.idioma, etapa: "reavaliando" });

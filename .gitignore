@@ -30,3 +30,6 @@ skills-livro.zip
 
 # script de conveniência local do worker (não versionar)
 /Iniciar-Worker.bat
+
+# Backups da auditoria antivazamento (conteúdo de livros — não versionar)
+worker/audit-backup/

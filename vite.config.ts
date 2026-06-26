@@ -13,6 +13,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    // Cobre também a lógica pura do worker (ex.: trava antivazamento de capítulos).
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "worker/src/**/*.test.ts"],
   },
 });
