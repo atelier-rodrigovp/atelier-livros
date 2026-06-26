@@ -1,0 +1,48 @@
+name: Deploy to GitHub Pages
+
+# Todo push no master publica o front no branch gh-pages automaticamente.
+on:
+  push:
+    branches: [master]
+    # Mudanças que só tocam o worker ou docs não precisam republicar o front.
+    paths-ignore:
+      - "worker/**"
+      - "**/*.md"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build (base do GitHub Pages)
+        env:
+          GHPAGES: "1"
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: npm run build
+
+      - name: SPA fallback (404.html) para deep-links
+        run: cp dist/index.html dist/404.html
+
+      - name: Publicar dist no branch gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          publish_branch: gh-pages

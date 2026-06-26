@@ -23,3 +23,10 @@ skills-livro.zip
 
 # Local Netlify folder
 .netlify
+
+# rascunhos de prompt na RAIZ (os versionados ficam em docs/prompts/)
+/PROMPT-*.md
+*.local
+
+# script de conveniência local do worker (não versionar)
+/Iniciar-Worker.bat
