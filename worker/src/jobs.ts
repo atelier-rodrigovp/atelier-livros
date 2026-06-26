@@ -811,6 +811,31 @@ function artPromptCapa(genero: string, brief: string, premissa: string, composic
   );
 }
 
+// Diretor de arte (LLM leve): lê o contexto do livro e escreve UM prompt de imagem
+// rico e profissional para a ARTE DE FUNDO (sem texto). Cai no template se falhar.
+async function direcaoDeArte(proj: any, brief: string, premissa: string, cwd: string): Promise<string> {
+  const autor = proj.briefing?.autor || "";
+  const sin = premissa || proj.briefing?.sinopse || "";
+  const meta =
+    "Você é diretor de arte de capas de livro premiadas. Escreva UM ÚNICO prompt de imagem em INGLÊS, " +
+    "denso e cinematográfico, para a ARTE DE FUNDO (sem NENHUM texto) da capa do livro abaixo.\n" +
+    `LIVRO: "${proj.titulo}"${proj.serie ? ` (${proj.serie})` : ""}. Gênero: ${proj.genero || "ficção literária"}.` +
+    (autor ? ` Autor/estilo: ${autor}.` : "") + (sin ? ` Premissa: ${sin}.` : "") +
+    (brief ? ` Direção do autor: ${brief}.` : "") + "\n" +
+    "O prompt deve especificar: figura/assunto central, composição em ORIENTAÇÃO RETRATO com ESPAÇO NEGATIVO " +
+    "deliberado no TOPO (título) e na BASE (autor/logo), iluminação, paleta e mood do gênero, lente/" +
+    "enquadramento, referência de estilo e acabamento editorial. " +
+    'Termine SEMPRE com: "no text, no letters, no title, no typography, no watermark, no logo, no frame. Avoid an AI look."\n' +
+    "Responda APENAS com o prompt (texto corrido, sem aspas, sem rótulos, sem explicação).";
+  try {
+    const r = await run(CLAUDE_BIN, ["-p", meta, "--permission-mode", "bypassPermissions", "--model", POST_MODEL], { cwd, timeoutMs: 120000 });
+    const out = (r.out || "").trim().replace(/^["']+|["']+$/g, "");
+    return out.length > 60 ? out : "";
+  } catch {
+    return "";
+  }
+}
+
 // Gera UMA arte-mestra (sem texto) pela cadeia de provedores; grava em outPath.
 async function gerarArteMestra(prompt: string, outPath: string, seed?: number): Promise<boolean> {
   const r = await gerarImagem(prompt, { width: 1024, height: 1536, seed });
@@ -864,7 +889,7 @@ async function comporCapasDeMaster(
     const cfgFile = path.join(capasDir, `_cfg-${idioma}.json`);
     await writeFile(
       cfgFile,
-      JSON.stringify({ art: masterPng, out: outPng, pdf: outPdf, title: titulo, subtitle: subtitulo, author: autor, fonts_dir: fontsDir, logo: LOGO_PATH }),
+      JSON.stringify({ art: masterPng, out: outPng, pdf: outPdf, title: titulo, subtitle: subtitulo, author: autor, genre: proj.genero || "", fonts_dir: fontsDir, logo: LOGO_PATH }),
       "utf8"
     );
     const rc = await run(PY_BIN, [COMPOSER, "--config", cfgFile], { cwd: dir });
@@ -918,7 +943,8 @@ async function gerarCapas(job: Job, hb?: Heartbeat) {
     await hb?.({ fase: "CAPA", etapa: "arte-mestra" });
     await setProgress(job.id, { fase: "CAPA", etapa: "arte-mestra" });
     try { await rm(masterPng); } catch {}
-    const ok = await gerarArteMestra(artPromptCapa(proj.genero || "", brief, premissa), masterPng);
+    const baseArt = (await direcaoDeArte(proj, brief, premissa, dir)) || artPromptCapa(proj.genero || "", brief, premissa);
+    const ok = await gerarArteMestra(baseArt, masterPng);
     if (!ok) {
       // Fallback: canvas-design (Claude) se a cadeia de imagem falhar.
       const promptArt =
@@ -965,12 +991,19 @@ async function gerarCapasOpcoes(job: Job, hb?: Heartbeat) {
   for (const a of antigas ?? []) { try { await sb.storage.from("capas").remove([(a as any).storage_path]); } catch {} }
   await sb.from("artifacts").delete().eq("edition_id", ed.id).eq("tipo", "capa_opcao");
 
+  // Diretor de arte: UM prompt-base rico pro livro; cada opção varia a composição.
+  await hb?.({ fase: "CAPA", etapa: "direção de arte", provedor: provPref });
+  const baseArt = await direcaoDeArte(proj, brief, premissa, dir);
+
   let geradas = 0;
   for (let i = 0; i < n; i++) {
     await hb?.({ fase: "CAPA", etapa: `opção ${i + 1}/${n}`, provedor: provReal || provPref });
     await setProgress(job.id, { fase: "CAPA", etapa: `opção ${i + 1}/${n}`, provedor: provReal || provPref, total: n, cap_atual: i });
     const seed = Math.floor(Math.random() * 1_000_000);
-    const prompt = artPromptCapa(proj.genero || "", brief, premissa, COMPOSICOES[i % COMPOSICOES.length]);
+    const comp = COMPOSICOES[i % COMPOSICOES.length];
+    const prompt = baseArt
+      ? `${baseArt} Composition variation ${i + 1}: ${comp}.`
+      : artPromptCapa(proj.genero || "", brief, premissa, comp);
     const r = await gerarImagem(prompt, { width: 1024, height: 1536, seed });
     if (!r) continue;
     provReal = providerLabel(r.provider);

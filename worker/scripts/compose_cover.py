@@ -1,43 +1,65 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Compositor de capa DETERMINÍSTICO (Pillow).
-Desenha título/subtítulo/autor sobre uma ARTE-MESTRA, com layout fixo e
-padronizado — de modo que capas em idiomas diferentes fiquem IDÊNTICAS no
-posicionamento, mudando apenas o texto traduzido.
+Compositor de capa PROFISSIONAL e DETERMINÍSTICO (Pillow).
+Desenha título/subtítulo/autor + selo da editora sobre uma ARTE-MESTRA (sem
+texto), com layout fixo e padronizado — capas em idiomas diferentes ficam
+IDÊNTICAS no posicionamento, mudando só o texto traduzido.
+
+Princípios de qualidade:
+  (a) NUNCA estica: a arte entra por cover-fit com recorte proporcional.
+  (b) Tipografia por gênero, com hierarquia real (título grande, autor caps).
+  (c) Logo Maremonti como SELO coeso (autor → filete → logo), fixo em todo livro.
 
 Uso:
   python compose_cover.py --config config.json
 config.json:
   {
-    "art": "capas/master.png",
-    "out": "capas/en-US.png",
-    "title": "The Taste of Memory",
-    "subtitle": "A novel",
-    "author": "R. Paiva",
+    "art": "capas/master.png", "out": "capas/en-US.png",
+    "title": "...", "subtitle": "...", "author": "...",
+    "genre": "thriller|romance|romantasy|...", "logo": ".../maremonti-white.png",
     "fonts_dir": "/.../canvas-design/canvas-fonts"
   }
 """
 import argparse
 import json
 import os
+import unicodedata
 from PIL import Image, ImageDraw, ImageFont
 
 W, H = 1600, 2560
-MARGIN_X = 140
+MARGIN_X = 150
 USABLE = W - 2 * MARGIN_X
-TITLE_TOP = int(H * 0.085)        # topo do bloco de título (fixo)
+TITLE_TOP = int(H * 0.085)
 TITLE_MAX_LINES = 3
-SUBTITLE_GAP = 36
-AUTHOR_BASELINE = H - 200         # autor ancorado (tamanho fixo) — quando NÃO há logo
-AUTHOR_SIZE = 60
-SUBTITLE_SIZE = 58
-RULE_W = 220                       # filete decorativo acima do autor
+SUBTITLE_SIZE = 54
+SUBTITLE_GAP = 34
 
-# Logo (centro-inferior, FIXO e IGUAL em todo livro)
-LOGO_W = 350                       # ~22% de 1600
-LOGO_MARGIN_BOTTOM = 100           # margem inferior fixa
-LOGO_AUTHOR_GAP = 44               # respiro entre autor e logo
+# Selo de rodapé (autor → filete → logo) — FIXO e IGUAL em todo livro
+AUTHOR_SIZE = 46
+RULE_W = 190
+LOGO_W = 300                       # ~19% de 1600 (selo discreto)
+LOGO_MARGIN_BOTTOM = 122
+SEAL_GAP_AUTHOR_RULE = 24
+SEAL_GAP_RULE_LOGO = 46
+
+WHITE = (246, 244, 239, 255)
+SOFT = (228, 225, 218, 255)
+
+
+def _norm(s):
+    return unicodedata.normalize("NFD", (s or "").lower()).encode("ascii", "ignore").decode()
+
+
+# Sistema tipográfico: gênero -> (fonte de título, corpo máx, fonte de autor, fonte de subtítulo)
+def pick_fonts(genre):
+    g = _norm(genre)
+    if any(k in g for k in ["romantasy", "fantas"]):
+        return ("Italiana-Regular.ttf", 186, "Outfit-Regular.ttf", "CrimsonPro-Italic.ttf")
+    if any(k in g for k in ["thriller", "suspense", "misterio", "policial", "crime", "techno", "tecno", "cienti", "sci-fi", "ficcao cientifica", "espionagem", "geopolit"]):
+        return ("BigShoulders-Bold.ttf", 214, "InstrumentSans-Bold.ttf", "InstrumentSans-Italic.ttf")
+    # literário / romance / drama / memória / histórico / desconhecido
+    return ("Gloock-Regular.ttf", 168, "Outfit-Regular.ttf", "CrimsonPro-Italic.ttf")
 
 
 def font(fonts_dir, name, size):
@@ -45,19 +67,16 @@ def font(fonts_dir, name, size):
 
 
 def cover_resize(img):
-    """Redimensiona a arte para preencher 1600x2560 (cover) e corta o centro."""
+    """Preenche 1600x2560 (cover) e corta o centro — NUNCA distorce."""
     img = img.convert("RGB")
     src_r = img.width / img.height
     dst_r = W / H
     if src_r > dst_r:
-        nh = H
-        nw = int(H * src_r)
+        nh, nw = H, int(H * src_r)
     else:
-        nw = W
-        nh = int(W / src_r)
+        nw, nh = W, int(W / src_r)
     img = img.resize((nw, nh), Image.LANCZOS)
-    left = (nw - W) // 2
-    top = (nh - H) // 2
+    left, top = (nw - W) // 2, (nh - H) // 2
     return img.crop((left, top, left + W, top + H))
 
 
@@ -67,21 +86,18 @@ def scrim(base):
     px = overlay.load()
     for y in range(H):
         a = 0
-        # topo: 165 -> 0 até 42% da altura
-        if y < H * 0.42:
-            a = int(165 * (1 - y / (H * 0.42)))
-        # base: 0 -> 205 a partir de 60%
-        if y > H * 0.60:
-            a = max(a, int(205 * ((y - H * 0.60) / (H * 0.40))))
+        if y < H * 0.44:
+            a = int(180 * (1 - y / (H * 0.44)))
+        if y > H * 0.56:
+            a = max(a, int(215 * ((y - H * 0.56) / (H * 0.44))))
         px[0, y] = a
     mask = overlay.resize((W, H))
-    black = Image.new("RGB", (W, H), (8, 10, 14))
+    black = Image.new("RGB", (W, H), (8, 10, 13))
     return Image.composite(black, base, mask)
 
 
 def wrap(draw, text, fnt, max_w):
-    words = text.split()
-    lines, cur = [], ""
+    words, lines, cur = text.split(), [], ""
     for w in words:
         t = (cur + " " + w).strip()
         if draw.textlength(t, font=fnt) <= max_w or not cur:
@@ -94,21 +110,22 @@ def wrap(draw, text, fnt, max_w):
     return lines
 
 
-def fit_title(draw, text, fonts_dir, max_w, max_lines):
-    """Maior corpo que cabe na largura em <= max_lines linhas."""
-    for size in range(176, 64, -4):
-        fnt = font(fonts_dir, "CrimsonPro-Bold.ttf", size)
+def fit_title(draw, text, fonts_dir, face, max_size, max_w, max_lines):
+    """Maior corpo da fonte do gênero que cabe em <= max_lines linhas."""
+    for size in range(max_size, 56, -4):
+        fnt = font(fonts_dir, face, size)
         lines = wrap(draw, text, fnt, max_w)
         if len(lines) <= max_lines and all(draw.textlength(l, font=fnt) <= max_w for l in lines):
             return fnt, lines, size
-    fnt = font(fonts_dir, "CrimsonPro-Bold.ttf", 68)
-    return fnt, wrap(draw, text, fnt, max_w)[:max_lines], 68
+    fnt = font(fonts_dir, face, 60)
+    return fnt, wrap(draw, text, fnt, max_w)[:max_lines], 60
 
 
-def draw_center(draw, y, text, fnt, fill, shadow=(0, 0, 0, 140)):
+def draw_center(draw, y, text, fnt, fill, shadow=(0, 0, 0, 150), dx=3, dy=3):
     w = draw.textlength(text, font=fnt)
     x = (W - w) / 2
-    draw.text((x + 4, y + 4), text, font=fnt, fill=shadow)
+    if shadow:
+        draw.text((x + dx, y + dy), text, font=fnt, fill=shadow)
     draw.text((x, y), text, font=fnt, fill=fill)
 
 
@@ -119,65 +136,65 @@ def tracked(s, spaces=1):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
-    ap.add_argument("--logo", default=None, help="PNG da logo (centro-inferior); ou via config['logo']")
+    ap.add_argument("--logo", default=None)
     args = ap.parse_args()
     cfg = json.load(open(args.config, encoding="utf-8"))
     fonts_dir = cfg["fonts_dir"]
+    title = (cfg.get("title") or "").strip()
+    subtitle = (cfg.get("subtitle") or "").strip()
+    author = (cfg.get("author") or "").strip()
+    title_face, title_max, author_face, subtitle_face = pick_fonts(cfg.get("genre"))
 
     base = scrim(cover_resize(Image.open(cfg["art"])))
     canvas = base.convert("RGBA")
     draw = ImageDraw.Draw(canvas)
 
-    WHITE = (245, 244, 240, 255)
-    title = (cfg.get("title") or "").strip()
-    subtitle = (cfg.get("subtitle") or "").strip()
-    author = (cfg.get("author") or "").strip()
-
-    # Logo (centro-inferior) — posição/tamanho FIXOS; o autor sobe para dar lugar.
+    # ---- Selo de rodapé: logo (base), filete acima, autor acima do filete ----
     logo_path = cfg.get("logo") or args.logo
     logo_img = None
-    author_baseline = AUTHOR_BASELINE
     if logo_path and os.path.exists(logo_path):
         lg = Image.open(logo_path).convert("RGBA")
         lh = max(1, round(LOGO_W * lg.height / lg.width))
         logo_img = lg.resize((LOGO_W, lh), Image.LANCZOS)
         logo_top = H - LOGO_MARGIN_BOTTOM - lh
-        author_baseline = logo_top - LOGO_AUTHOR_GAP - AUTHOR_SIZE
+    else:
+        logo_top = H - LOGO_MARGIN_BOTTOM  # sem logo: âncora do filete
 
-    # Título (auto-fit, centralizado, bloco no topo fixo)
-    tf, tlines, tsize = fit_title(draw, title, fonts_dir, USABLE, TITLE_MAX_LINES)
-    line_gap = int(tsize * 0.14)
+    rule_y = logo_top - SEAL_GAP_RULE_LOGO
+    author_baseline = rule_y - SEAL_GAP_AUTHOR_RULE - AUTHOR_SIZE
+
+    # ---- Título (fonte do gênero, auto-fit, bloco no topo) ----
+    tf, tlines, tsize = fit_title(draw, title, fonts_dir, title_face, title_max, USABLE, TITLE_MAX_LINES)
+    line_gap = int(tsize * 0.12)
     y = TITLE_TOP
     for ln in tlines:
         draw_center(draw, y, ln, tf, WHITE)
         y += tsize + line_gap
 
-    # Subtítulo (itálico, abaixo do título)
+    # ---- Subtítulo (itálico, discreto) ----
     if subtitle:
-        sf = font(fonts_dir, "CrimsonPro-Italic.ttf", SUBTITLE_SIZE)
+        sf = font(fonts_dir, subtitle_face, SUBTITLE_SIZE)
         for ln in wrap(draw, subtitle, sf, USABLE)[:2]:
             y += SUBTITLE_GAP
-            draw_center(draw, y, ln, sf, (230, 228, 222, 255))
+            draw_center(draw, y, ln, sf, SOFT, dx=2, dy=2)
             y += SUBTITLE_SIZE
 
-    # Filete + autor (tamanho fixo, ancorado acima da logo)
-    rule_y = author_baseline - 70
-    draw.line([(W / 2 - RULE_W / 2, rule_y), (W / 2 + RULE_W / 2, rule_y)], fill=(220, 218, 212, 220), width=3)
-    af = font(fonts_dir, "CrimsonPro-Regular.ttf", AUTHOR_SIZE)
-    draw_center(draw, author_baseline, tracked(author.upper(), 1), af, WHITE)
+    # ---- Autor (caixa-alta espaçada) ----
+    af = font(fonts_dir, author_face, AUTHOR_SIZE)
+    draw_center(draw, author_baseline, tracked(author.upper(), 1), af, WHITE, dx=2, dy=2)
 
-    # Logo Maremonti (branca/transparente) centralizada na base — IGUAL em todo livro
+    # ---- Filete fino (divisor do selo) ----
+    draw.line([(W / 2 - RULE_W / 2, rule_y), (W / 2 + RULE_W / 2, rule_y)], fill=(214, 211, 203, 210), width=2)
+
+    # ---- Logo Maremonti (branca/transparente), centralizada — selo da editora ----
     if logo_img is not None:
-        lx = (W - LOGO_W) // 2
-        ly = H - LOGO_MARGIN_BOTTOM - logo_img.height
-        canvas.alpha_composite(logo_img, (lx, ly))
+        canvas.alpha_composite(logo_img, ((W - LOGO_W) // 2, logo_top))
 
     os.makedirs(os.path.dirname(cfg["out"]) or ".", exist_ok=True)
     canvas.convert("RGB").save(cfg["out"], "PNG")
-    # PDF companheiro (mesma imagem)
     if cfg.get("pdf"):
         canvas.convert("RGB").save(cfg["pdf"], "PDF", resolution=300)
-    print("OK", cfg["out"])
+    print("OK", cfg["out"], "| fonte titulo:", title_face)
 
 
 if __name__ == "__main__":
