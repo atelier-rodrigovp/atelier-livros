@@ -956,7 +956,8 @@ async function gerarCapasOpcoes(job: Job, hb?: Heartbeat) {
   const brief = String(job.payload?.briefing || "").trim();
   const premissa = proj.briefing?.ideia_central || "";
   const n = Math.min(8, Math.max(2, Number(job.payload?.n ?? 5)));
-  const provLabel = providerLabel(providerAtivo());
+  const provPref = providerLabel(providerAtivo());
+  let provReal: string | null = null; // provedor que DE FATO entregou (pode cair no fallback)
 
   // edição de origem ancora as opções; limpa as opções antigas (db + storage best-effort)
   const ed = await ensureEdition(projectId, origem, true, "pendente");
@@ -966,12 +967,13 @@ async function gerarCapasOpcoes(job: Job, hb?: Heartbeat) {
 
   let geradas = 0;
   for (let i = 0; i < n; i++) {
-    await hb?.({ fase: "CAPA", etapa: `opção ${i + 1}/${n}`, provedor: provLabel });
-    await setProgress(job.id, { fase: "CAPA", etapa: `opção ${i + 1}/${n}`, provedor: provLabel, total: n, cap_atual: i });
+    await hb?.({ fase: "CAPA", etapa: `opção ${i + 1}/${n}`, provedor: provReal || provPref });
+    await setProgress(job.id, { fase: "CAPA", etapa: `opção ${i + 1}/${n}`, provedor: provReal || provPref, total: n, cap_atual: i });
     const seed = Math.floor(Math.random() * 1_000_000);
     const prompt = artPromptCapa(proj.genero || "", brief, premissa, COMPOSICOES[i % COMPOSICOES.length]);
     const r = await gerarImagem(prompt, { width: 1024, height: 1536, seed });
     if (!r) continue;
+    provReal = providerLabel(r.provider);
     const localPng = path.join(opcoesDir, `opcao-${i}.png`);
     await writeFile(localPng, r.bytes);
     const key = storageKey(projectId, "opcoes", `opcao-${i}.png`);
@@ -981,7 +983,7 @@ async function gerarCapasOpcoes(job: Job, hb?: Heartbeat) {
     geradas++;
   }
   if (!geradas) throw new Error("nenhuma opção de capa gerada (cadeia de imagem falhou). Verifique tokens em worker/.env ou tente de novo.");
-  await setProgress(job.id, { fase: "CAPA", etapa: "opções prontas", concluido: true, total: n, cap_atual: geradas, provedor: provLabel });
+  await setProgress(job.id, { fase: "CAPA", etapa: "opções prontas", concluido: true, total: n, cap_atual: geradas, provedor: provReal || provPref });
 }
 
 // ===========================================================================
