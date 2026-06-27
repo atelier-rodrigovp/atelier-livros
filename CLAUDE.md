@@ -26,6 +26,12 @@ pasta completa (SKILL.md + assets/references) desse cache para `~/.claude/skills
 Só os projetos `skill-dan-brown` (saga "A Biblioteca Afogada", autor Iago) usam
 hoje uma skill de autor; os demais estão com `skill_escrita = nenhuma`.
 
+**Edições de skill vivem em `worker/skill-patches/`** (fora de `~/.claude/skills/`,
+que não versiona e é sobrescrito num reinstall). Depois de reinstalar skills, rode
+`pwsh worker/skill-patches/instalar-skills.ps1` para reaplicar nossas edições (com
+backup). Hoje: `arquiteto-de-enredo` v6.3 (portão de ambição ≥8 + voz com
+assinatura positiva).
+
 ## Trava antivazamento (nenhum meta-texto chega ao livro)
 
 Camadas (ver `worker/README.md` e `docs/auditoria-vazamento.md`):

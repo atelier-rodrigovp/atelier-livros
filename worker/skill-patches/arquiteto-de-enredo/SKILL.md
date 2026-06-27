@@ -4,9 +4,9 @@ description: >-
   Transforma uma ideia crua de livro num projeto executável: conduz uma entrevista em blocos (perguntas em botões com recomendação), valida a fundação num portão de qualidade e gera o projeto (Bíblia, Mapa de Personagens, Estrutura, estado, cinco subagentes). Use quando o autor quiser começar um livro novo, estruturar um enredo, desenvolver uma premissa, 'montar a fundação', 'criar a bíblia da obra' ou 'estruturar a trama'. Ao fim, grava um ESTADO_LIVRO.json semente (fase ESCRITA) e entrega um prompt agêntico pronto para colar no Claude Code, que escreve o livro inteiro com o motor v2 e revisa com book-bestseller-review. NÃO dispara o /goal. Camada anti-maçada: anti-repetição (Mapa de Conhecimento do Leitor) e densidade por entrelaçamento. Agnóstica de gênero. NÃO use para escrever capítulos nem revisar manuscrito pronto (book-bestseller-review).
 ---
 
-# Arquiteto de Enredo — da ideia à fundação escrevível (v6.2)
+# Arquiteto de Enredo — da ideia à fundação escrevível (v6.3)
 
-> **Versão monolítica v6.2.** Esta SKILL.md é autossuficiente: todas as políticas
+> **Versão monolítica v6.3.** Esta SKILL.md é autossuficiente: todas as políticas
 > estão embutidas aqui (seções "REFERÊNCIA EMBUTIDA" no fim). Se os moldes dos
 > cinco agentes não existirem na instalação, reconstrua-os a partir da anatomia
 > descrita aqui.
@@ -139,8 +139,10 @@ Quando os 8 blocos fecharem, antes de gerar:
        Sem custo por ato = **< 8**.
      - **e) Voz: assinatura positiva** — "você reconheceria de olhos vendados?".
        Digital sintática/léxica/de-olhar específica e diferenciada por autor. Só
-       "não-genérica" (defesa negativa) é 6–7, **não** 8. (A SPEC de assinatura
-       positiva no `perfil-de-voz.md` é a fatia 2 deste refino.)
+       "não-genérica" (defesa negativa) é 6–7, **não** 8. SPEC completa em
+       **REFERÊNCIA EMBUTIDA C** (assinatura positiva + parágrafos-modelo +
+       diferenciação por autor); o gate de Voz pontua **distinção**, não só
+       ausência de genérico.
 
 3. **Diagnóstico de densidade:** `palavras-alvo ÷ fios ativos`. Se um fio sozinho
    carrega além de ~25–30k palavras, a fundação está magra — devolva ao Bloco 3/4
@@ -203,7 +205,10 @@ Quando os 8 blocos fecharem, antes de gerar:
    - `CLAUDE.md` — cola as três políticas (REFERÊNCIAS EMBUTIDAS A, B e economia v5).
 3. **Pastas:** `manuscrito/`, `specs/`, `capitulos-em-revisao/`, `contexto/`,
    `review/`.
-4. **Perfil de voz** → `perfil-de-voz.md`.
+4. **Perfil de voz** → `perfil-de-voz.md` — com **SEÇÃO DE ASSINATURA POSITIVA**
+   (REFERÊNCIA EMBUTIDA C): não só anti-maneirismo (defesa negativa), mas a digital
+   própria do autor — hábitos sintáticos, léxico, modo de ver, 2–3 parágrafos-modelo
+   e diferenciação explícita das outras vozes da casa.
 5. **Revisão única:** apresente o projeto + as políticas + a tabela de modelos;
    peça uma rodada de ajustes. **Confirme aqui:** `max_iteracoes_reescrita`
    (default 4), `gerar_epub` (sim/não), meta de nota (default 9.0) e idioma do
@@ -415,7 +420,58 @@ devagar".
 
 ---
 
+# REFERÊNCIA EMBUTIDA C — Perfil de Voz: Assinatura Positiva (v6.3)
+
+> A defesa de voz da v5–v6 é **negativa** (a auditoria caça "voz genérica"; o linter
+> corta maneirismo). Isso garante piso 6–7, **não** o 8–9. Voz de 9 é
+> **inconfundível** — e isso se **prescreve**, não se torce por "evite clichê". O
+> `perfil-de-voz.md` passa a declarar uma **assinatura positiva**: a digital que
+> faria o leitor reconhecer o autor de olhos vendados. Agnóstico de gênero.
+
+## Estrutura obrigatória do `perfil-de-voz.md`
+Além das seções atuais (referências, cadência, anti-maneirismo), o perfil ganha:
+
+### 1. Assinatura positiva
+- **Hábitos sintáticos:** comprimento/ritmo de frase típicos; subordinação vs.
+  parataxe; pontuação-assinatura (travessão, dois-pontos revelador, frase-fragmento
+  como ênfase) — **com QUANDO usar**, não só que existem.
+- **Léxico controlado:** 3–6 famílias de palavras que o autor habita; registro
+  (culto/coloquial/técnico) e o que ele **evita**.
+- **Um modo de VER:** por qual lente o narrador apreende o mundo (o que nota
+  primeiro numa cena — o corpo? o poder? o tempo? a culpa?). É isto, mais que a
+  sintaxe, que torna a voz inconfundível.
+
+### 2. Parágrafos-modelo (2–3)
+Dois a três parágrafos-**ALVO** que o `livro-escritor` imita como referência de
+TÉCNICA. Invioláveis:
+- **Emular técnica, NUNCA copiar** texto/personagens/mundo/enredo de obra
+  protegida. São exemplos **originais**, escritos para ESTE autor/livro, que
+  *demonstram* a assinatura — jamais trechos de terceiros.
+- Cada parágrafo vem anotado com **"o que aqui é assinatura"** (1 linha): o escritor
+  imita a técnica, descarta o conteúdo.
+
+### 3. Diferenciação por autor (digital própria)
+Cada autor da casa tem assinatura **distinta** — o perfil NÃO é um molde comum. Ao
+gerar, **contraste explicitamente** com as outras vozes do acervo para garantir
+distância (ex.: intimista ≠ seca-sensorial ≠ conspiratória ≠ romântica — declare em
+que ESTE perfil difere das demais). **Teste:** dois perfis da casa, lado a lado,
+reconhecíveis sem o rótulo.
+
+## No portão (Fase 1.5 — dimensão Voz e a de EXCELÊNCIA "voz-assinatura")
+A nota de Voz pontua **distinção**, não só ausência de genérico:
+- **< 6 (viabilidade):** voz genérica/indefinida → **não gera**.
+- **6–7:** competente, sem tique, mas **substituível** (poderia ser de qualquer um).
+- **≥ 8 (ambição):** assinatura presente — "reconheceria de olhos vendados?"; os
+  três itens acima definidos e digital distinta das demais vozes da casa. Abaixo de
+  8, devolva ao **Bloco 6** para cravar a assinatura, ou registre o teto honesto.
+
+---
+
 ## Registro de versões
+- **v6.3** — Refino C: `perfil-de-voz.md` deixa de ser só defesa negativa
+  (anti-maneirismo) e ganha **ASSINATURA POSITIVA** (REFERÊNCIA EMBUTIDA C):
+  hábitos sintáticos, léxico, modo de ver, 2–3 parágrafos-modelo (emular técnica,
+  nunca copiar) e diferenciação por autor. O gate de Voz pontua **distinção**.
 - **v6.2** — Portão em DOIS NÍVEIS (fatia 1 do refino de teto): mantém o gate de
   **viabilidade** (<6 → não gera) e adiciona um **GATE DE AMBIÇÃO** (≥8 nas
   dimensões que fixam o teto + 5 dimensões de **EXCELÊNCIA**: rereadability, fio

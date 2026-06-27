@@ -7,7 +7,7 @@ final de cada skill editada fica versionada aqui, com um passo de reinstalação
 ## Reaplicar depois de um reinstall
 
 ```powershell
-pwsh worker/skill-patches/reinstalar.ps1   # ou: powershell -File worker\skill-patches\reinstalar.ps1
+pwsh worker/skill-patches/instalar-skills.ps1   # ou: powershell -File worker\skill-patches\instalar-skills.ps1
 ```
 
 O script copia cada `worker/skill-patches/<skill>/` por cima de
@@ -15,7 +15,16 @@ O script copia cada `worker/skill-patches/<skill>/` por cima de
 
 ## Patches atuais
 
-### `arquiteto-de-enredo/` — Portão em DOIS NÍVEIS (v6.2, fatia 1 do refino de teto)
+### `arquiteto-de-enredo/` — Portão de ambição + voz com assinatura (v6.3)
+
+**v6.3 (Refino C):** `perfil-de-voz.md` deixa de ser só defesa negativa
+(anti-maneirismo) e ganha **assinatura positiva** (REFERÊNCIA EMBUTIDA C): hábitos
+sintáticos, léxico, modo de ver, **2–3 parágrafos-modelo** (emular técnica, nunca
+copiar obra protegida) e **diferenciação por autor** (Mia ≠ Aria ≠ Iago ≠ Lena). O
+gate de Voz pontua **distinção** ("reconheceria de olhos vendados?"), não só
+ausência de genérico.
+
+**v6.2 (Refino A+B):** Portão em DOIS NÍVEIS (fatia 1 do refino de teto)
 
 Empurra o teto da fundação de "competente" (7–8) para "excepcional" (8–9). O gate
 original mirava só **viabilidade** (qualquer dimensão maior `< 6` → não gera), o
@@ -32,6 +41,6 @@ Mudanças (ver `## Registro de versões` → v6.2 no SKILL.md):
 - Blocos 2 e 5 da entrevista passam a pedir **tema (fio temático)** e
   **controlling image**, que o novo gate pontua.
 
-Próximas fatias do plano (ainda NÃO aplicadas): (2) `perfil-de-voz.md` como
-assinatura positiva por autor; (3) passe de elevação + best-of-N nos picos
-(runner/`livro-do-zero-ao-epub`); (4) modo "excepcional" no `book-bestseller-review`.
+Próximas fatias do plano (ainda NÃO aplicadas): (3) passe de elevação + best-of-N
+nos picos (runner/`livro-do-zero-ao-epub`); (4) modo "excepcional" no
+`book-bestseller-review`. — Fatias 1 (gate A+B) e 2 (perfil-de-voz, Refino C): ✓.
