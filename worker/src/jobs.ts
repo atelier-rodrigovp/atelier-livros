@@ -25,6 +25,7 @@ import {
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
 import { sanitizarCapitulo, metaResidual } from "./sanitize.js";
 import { LimiteMaxError, limiteMaxRetryAt } from "./limite-max.js";
+import { contarManeirismos, resumoManeirismo, ORCAMENTO_POR_10K } from "./maneirismo.js";
 import { existsSync } from "node:fs";
 
 export interface Job {
@@ -531,6 +532,10 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
 
   const piso = Number(proj.piso_palavras ?? 1400);
   const meta = Number(proj.meta_nota ?? 9.0);
+  // Teto de reescritas por execução do runner. Mais passadas perseguem melhor a
+  // meta; com a auto-retomada do Max, não custam tempo. Configurável por projeto
+  // (payload.max_reescritas) ou env (MAX_REESCRITAS), default 6.
+  const maxReescritas = Math.max(1, Math.min(12, Number(job.payload?.max_reescritas ?? process.env.MAX_REESCRITAS ?? 6)));
   await sb.from("projects").update({ status: "escrevendo" }).eq("id", job.project_id!);
   // baseline para detectar progresso (escrita longa é retomável do disco)
   const capsAntes = (await chaptersOnDisk(path.join(dir, "manuscrito"), piso)).length;
@@ -555,7 +560,7 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     "--briefing", path.join(dir, "briefing.md"),
     "--epub",
     "--meta", String(meta),
-    "--max-reescritas", "4",
+    "--max-reescritas", String(maxReescritas),
     "--piso", String(piso),
     "--model", MODEL,
     "--claude-bin", CLAUDE_BIN,
@@ -818,6 +823,34 @@ function edicaoDir(dir: string, edicao: any): string {
   return edicao.is_origem ? path.join(dir, "manuscrito") : path.join(dir, "traducoes", edicao.idioma);
 }
 
+// Relatório de alcançabilidade HONESTO: quando platôa abaixo da meta, diz o que
+// segura a nota (dimensões < 8 + maneirismo) e que 9 costuma pedir polimento
+// humano. Anexado ao relatório da skill (renderizado como seção na UI).
+function montarAlcancabilidade(relTxt: string, nota: number | null, meta: number, manuscrito: string): string {
+  const dims: string[] = [];
+  for (const m of relTxt.matchAll(/^\|\s*\d+\s*\|\s*([^|]+?)\s*\|[^|]*\|\s*\*?\*?\s*([\d.,]+)\s*\*?\*?\s*\|/gm)) {
+    const n = Number(m[2].replace(",", "."));
+    if (!Number.isNaN(n) && n < 8) dims.push(`${m[1].trim()} (${n})`);
+  }
+  const lint = contarManeirismos(manuscrito);
+  const gap = nota != null ? Math.round((meta - nota) * 10) / 10 : null;
+  return [
+    "",
+    "## Alcançabilidade (worker)",
+    "",
+    nota != null
+      ? `- **Nota atual:** ${nota} · **meta:** ${meta}${gap != null && gap > 0 ? ` · **faltam ${gap}**` : " · meta atingida"}`
+      : `- **Meta:** ${meta}`,
+    dims.length ? `- **Dimensões abaixo de 8 (o que segura a nota):** ${dims.join("; ")}.` : "- Nenhuma dimensão major abaixo de 8.",
+    `- ${resumoManeirismo(lint)}`,
+    "",
+    gap != null && gap > 0
+      ? "Caminho honesto para subir: levantar as dimensões acima por passadas temáticas (botão \"Pedir melhorias\" — prosa/anti-maneirismo, coerência, gancho). Um 9 num avaliador rigoroso costuma exigir, além disso, polimento humano final; esta nota mede o que está na página agora."
+      : "Meta atingida na avaliação independente. Mudanças posteriores no texto pedem reavaliação.",
+    "",
+  ].join("\n");
+}
+
 async function avaliarEdicao(projectId: string, edicao: any, jobId?: string): Promise<number | null> {
   const dir = projDir(projectId);
   const sub = edicaoDir(dir, edicao);
@@ -836,20 +869,31 @@ async function avaliarEdicao(projectId: string, edicao: any, jobId?: string): Pr
     "- NÃO altere o manuscrito. NÃO dispare /goal.";
   await runClaude(prompt, dir);
 
-  if (!(await exists(path.join(dir, relRel)))) throw new Error(`avaliação não gerou ${relRel} (verifique a skill book-bestseller-review / saldo)`);
-  // upload do relatório como artifact "review"
-  const relKey = storageKey(projectId, edicao.idioma, `REVIEW-${edicao.idioma}.md`);
-  await uploadFile("manuscritos", relKey, path.join(dir, relRel));
-  await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "review", storage_path: relKey }));
+  const relPath = path.join(dir, relRel);
+  if (!(await exists(relPath))) throw new Error(`avaliação não gerou ${relRel} (verifique a skill book-bestseller-review / saldo)`);
 
   // nota: do JSON, com fallback para regex no relatório
+  let relTxt = await readText(relPath);
   let nota: number | null = null;
   const nj = await readText(path.join(dir, notaRel));
   if (nj) { try { const n = Number(JSON.parse(nj).nota); if (!Number.isNaN(n)) nota = n; } catch { /* ignore */ } }
   if (nota == null) {
-    const m = (await readText(path.join(dir, relRel))).match(/nota\s*(?:global)?\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*\/?\s*10/i);
+    const m = relTxt.match(/nota\s*(?:global)?\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*\/?\s*10/i);
     if (m) nota = Number(m[1].replace(",", "."));
   }
+
+  // anexa o relatório de alcançabilidade honesto (se ainda não houver)
+  if (!/##\s*Alcançabilidade/i.test(relTxt)) {
+    const meta = Number((await getProject(projectId)).meta_nota ?? 9);
+    relTxt += montarAlcancabilidade(relTxt, nota, meta, await lerManuscrito(sub));
+    await writeFile(relPath, relTxt, "utf8");
+  }
+
+  // upload do relatório (com a seção de alcançabilidade) como artifact "review"
+  const relKey = storageKey(projectId, edicao.idioma, `REVIEW-${edicao.idioma}.md`);
+  await uploadFile("manuscritos", relKey, relPath);
+  await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "review", storage_path: relKey }));
+
   await must(sb.from("editions").update({ nota_review: nota }).eq("id", edicao.id));
   if (jobId) await setProgress(jobId, { fase: "AVALIACAO", idioma: edicao.idioma, nota, concluido: true });
   return nota;
@@ -873,9 +917,31 @@ async function avaliar(job: Job, _hb?: Heartbeat) {
 }
 
 // ===========================================================================
-// revisar — revisão cirúrgica: reescreve SÓ os pontos fracos do último relatório
-// (+ instruções de foco opcionais), reupa o manuscrito e re-avalia.
+// revisar — revisão por DIMENSÃO: em vez de só remendar os itens citados (que
+// converge para um platô), faz passadas temáticas no livro inteiro — prosa/
+// anti-maneirismo, coerência, gancho/stakes — para levantar dimensões inteiras
+// (ataca o "teto distribuído"). Reupa o manuscrito e re-avalia.
 // ===========================================================================
+
+// Lê o manuscrito consolidado (MESTRE; senão concatena os capítulos do disco).
+async function lerManuscrito(sub: string): Promise<string> {
+  const m = await readText(path.join(sub, "MANUSCRITO-MESTRE.md"));
+  if (m) return m;
+  const cs = await chaptersOnDisk(sub, 1);
+  const partes = await Promise.all(cs.map((c) => readText(c.file)));
+  return partes.join("\n\n");
+}
+
+// Passadas temáticas, cada uma sob UMA lente, aplicadas ao livro todo.
+const PASSES_REVISAO = [
+  { key: "prosa", rotulo: "prosa & anti-maneirismo",
+    foco: "Elimine tiques e repetições de CONSTRUÇÃO no livro inteiro: antíteses mecânicas (\"não era X. Era Y.\"), fragmentos antitéticos, metáforas-clichê repetidas. Varie ritmo e sintaxe; preserve sentido e voz." },
+  { key: "coerencia", rotulo: "coerência & cronologia",
+    foco: "Resolva furos de continuidade e cronologia ponta a ponta (relógios temporais, FATOS, nomes, regras do mundo). Garanta que prazos/datas/instrumentos citados fechem entre si." },
+  { key: "gancho", rotulo: "gancho & stakes",
+    foco: "Encarne a ameaça mais cedo e fortaleça ganchos de capítulo e tensão: stakes concretos por cena, aberturas que fisgam e fechamentos que impulsionam. Foque onde o relatório aponta hook/final fracos." },
+];
+
 async function revisar(job: Job, _hb?: Heartbeat) {
   const edicao = await getEdition(job.edition_id!);
   const projectId = edicao.project_id;
@@ -885,22 +951,45 @@ async function revisar(job: Job, _hb?: Heartbeat) {
   if (!(await exists(path.join(dir, relRel)))) throw new Error("avalie a edição antes de pedir melhorias (relatório ausente)");
   const instrucoes = String(job.payload?.instrucoes ?? "").trim();
   const proj = await getProject(projectId);
+  const skill = edicao.is_origem ? proj.skill_escrita || "edicao-kindle" : "traducao-editorial";
+  const subRel = edicaoDir("", edicao).replace(/^[\\/]/, "");
 
-  await setProgress(job.id, { fase: "REVISAO", idioma: edicao.idioma, etapa: "reescrevendo pontos fracos" });
   await must(sb.from("editions").update({ status: "revisao" }).eq("id", edicao.id));
 
-  const subRel = edicaoDir("", edicao).replace(/^[\\/]/, "");
-  const prompt =
-    "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
-    `REVISÃO CIRÚRGICA da edição em ${edicao.idioma}. Use a skill \`${edicao.is_origem ? proj.skill_escrita || "edicao-kindle" : "traducao-editorial"}\`.\n` +
-    `- Leia o relatório ${relRel} e corrija SOMENTE os pontos fracos priorizados nele` +
-    (instrucoes ? `, dando prioridade a estas instruções do autor: """${instrucoes}""".\n` : ".\n") +
-    `- Edite os capítulos afetados em ${subRel}/capitulo-NN.md preservando tudo que já está bom (não reescreva o livro inteiro).\n` +
-    `- Reconsolide ${subRel}/MANUSCRITO-MESTRE.md (capítulos em ordem, headings preservados).\n` +
-    "- NÃO altere outras edições/idiomas. NÃO dispare /goal.";
-  const r = await runClaude(prompt, dir);
-  // Limite do Max durante a revisão → pausa/retoma sozinho (sem gastar tentativa).
-  lancarSeLimiteMax(`${r.err}\n${r.out}`, `revisão de ${edicao.idioma}`);
+  // Fila de passadas por dimensão (+ uma final para as instruções do autor).
+  const fila = [...PASSES_REVISAO];
+  if (instrucoes) fila.push({ key: "autor", rotulo: "instruções do autor", foco: `Aplique com prioridade estas instruções do autor: """${instrucoes}""".` });
+
+  const markerDir = path.join(dir, "review");
+  await mkdir(markerDir, { recursive: true });
+  for (let i = 0; i < fila.length; i++) {
+    const pass = fila[i];
+    const marker = path.join(markerDir, `_revpass-${job.id}-${pass.key}.done`);
+    if (await exists(marker)) continue; // já feita neste job (retoma após limite do Max sem refazer)
+    await setProgress(job.id, { fase: "REVISAO", idioma: edicao.idioma, etapa: `passada ${i + 1}/${fila.length}: ${pass.rotulo}`, total: fila.length, cap_atual: i });
+
+    let extra = "";
+    if (pass.key === "prosa") {
+      const lint = contarManeirismos(await lerManuscrito(sub));
+      if (lint.total) {
+        extra = `- Tiques a cortar (linter): ${lint.padroes.slice(0, 4).map((p) => `${p.nome} ${p.n}×`).join("; ")}. ` +
+          `Densidade atual ${lint.por10k}/10k — reduza para abaixo de ${ORCAMENTO_POR_10K}/10k palavras.\n`;
+      }
+    }
+    const prompt =
+      "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
+      `REVISÃO POR DIMENSÃO — ${pass.rotulo} — da edição em ${edicao.idioma}. Use a skill \`${skill}\`.\n` +
+      `- Leia o relatório ${relRel} (pontos fracos priorizados) e a fundação (Bíblia/Mapa/perfil-de-voz), se precisar.\n` +
+      `- ${pass.foco}\n` + extra +
+      `- Faça UMA passada no LIVRO TODO sob ESTA lente, editando os capítulos afetados em ${subRel}/capitulo-NN.md; preserve o que já está bom (não reescreva à toa).\n` +
+      `- Reconsolide ${subRel}/MANUSCRITO-MESTRE.md (capítulos em ordem, headings preservados).\n` +
+      "- NÃO altere outras edições/idiomas. NÃO dispare /goal.";
+    const r = await runClaude(prompt, dir);
+    // Limite do Max no meio de uma passada → pausa/retoma sozinho; o marcador
+    // garante que as passadas já concluídas não são refeitas na retomada.
+    lancarSeLimiteMax(`${r.err}\n${r.out}`, `revisão de ${edicao.idioma} (${pass.rotulo})`);
+    await writeFile(marker, new Date().toISOString(), "utf8");
+  }
 
   // reupload do manuscrito revisado (verdade do disco)
   const caps = await chaptersOnDisk(sub, 1);
@@ -925,6 +1014,8 @@ async function revisar(job: Job, _hb?: Heartbeat) {
   await setProgress(job.id, { fase: "REVISAO", idioma: edicao.idioma, etapa: "reavaliando" });
   const nota = await avaliarEdicao(projectId, edicao, job.id);
   await must(sb.from("editions").update({ status: "pronto" }).eq("id", edicao.id));
+  // limpa os marcadores de passada deste job (sucesso) — não acumular no projeto.
+  for (const pass of fila) { try { await rm(path.join(markerDir, `_revpass-${job.id}-${pass.key}.done`)); } catch {} }
   await setProgress(job.id, { fase: "REVISAO", idioma: edicao.idioma, nota, concluido: true });
 }
 
