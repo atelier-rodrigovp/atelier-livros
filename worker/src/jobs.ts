@@ -740,6 +740,16 @@ async function gerarEpub(job: Job) {
   await setProgress(job.id, { fase: "EPUB", concluido: true, versao, validado: v.code === 0 });
 }
 
+// Lança LimiteMaxError se a saída do `claude` indicar throttle do plano Max
+// (não é erro: o loop do worker pausa e retoma sozinho no reset, do disco).
+function lancarSeLimiteMax(saidaClaude: string, contexto: string): void {
+  const retryAt = limiteMaxRetryAt(saidaClaude);
+  if (retryAt) {
+    const hh = new Date(retryAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    throw new LimiteMaxError(`Limite de uso do plano Max atingido — ${contexto}. Retoma automaticamente ~${hh}.`, retryAt);
+  }
+}
+
 // ===========================================================================
 // traduzir — skill traducao-editorial (PT-BR -> idiomas-meta)
 // ===========================================================================
@@ -772,6 +782,8 @@ async function traduzir(job: Job, hb?: Heartbeat) {
     // Verdade do disco
     const transCaps = await chaptersOnDisk(destino, 1);
     if (transCaps.length < origemCaps.length) {
+      // Limite do Max → pausa/retoma sozinho (sem gastar tentativa). Senão, erro real.
+      lancarSeLimiteMax(`${r.err}\n${r.out}`, `tradução ${idioma} em ${transCaps.length}/${origemCaps.length}`);
       throw new Error(`tradução ${idioma} incompleta: ${transCaps.length}/${origemCaps.length} caps. rc=${r.code} ${r.err.slice(-300)}`);
     }
     for (const c of transCaps) {
@@ -883,7 +895,9 @@ async function revisar(job: Job, _hb?: Heartbeat) {
     `- Edite os capítulos afetados em ${subRel}/capitulo-NN.md preservando tudo que já está bom (não reescreva o livro inteiro).\n` +
     `- Reconsolide ${subRel}/MANUSCRITO-MESTRE.md (capítulos em ordem, headings preservados).\n` +
     "- NÃO altere outras edições/idiomas. NÃO dispare /goal.";
-  await runClaude(prompt, dir);
+  const r = await runClaude(prompt, dir);
+  // Limite do Max durante a revisão → pausa/retoma sozinho (sem gastar tentativa).
+  lancarSeLimiteMax(`${r.err}\n${r.out}`, `revisão de ${edicao.idioma}`);
 
   // reupload do manuscrito revisado (verdade do disco)
   const caps = await chaptersOnDisk(sub, 1);
