@@ -315,9 +315,12 @@ export default function Projeto() {
   if (!proj) return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   const hasActiveJob = jobs.some((j) => j.status === "queued" || j.status === "running");
   const sb = displayProjectStatus({ projectStatus: proj.status, hasActiveJob, workerOnline });
-  // Dados da saga (volumes extras a criar a partir deste volume).
+  // Dados da saga: estado da SÉRIE inteira (idêntico em qualquer volume aberto).
+  // Conta volumes distintos já criados (este + irmãos), não o nº do volume atual.
   const serieTotal = Number((proj.briefing as any)?.serie_total ?? 0);
-  const faltamVolumes = Math.max(0, serieTotal - (proj.volume ?? 1));
+  const volumesExistentes = new Set<number>([Number(proj.volume ?? 1), ...irmaos.map((v) => Number(v.volume))]).size;
+  const faltamVolumes = Math.max(0, serieTotal - volumesExistentes);
+  const sagaCompleta = serieTotal > 0 && faltamVolumes === 0;
   const fundacaoPronta = proj.status !== "rascunho" && !!origem;
   const capaDe = (ed: string) => artifacts.find((a) => a.edition_id === ed && a.tipo === "capa");
   // EPUBs de uma edição, ordenados por criação, com nº de versão (v1, v2, ...).
@@ -442,7 +445,7 @@ export default function Projeto() {
         </div>
       </div>
 
-      {proj.serie && faltamVolumes > 0 && (() => {
+      {proj.serie && serieTotal > 0 && (() => {
         const jv = jobMaisRecente(jobs, "criar_volumes");
         const criando = jv?.status === "queued" || jv?.status === "running";
         const erroAmigavel = (() => {
@@ -459,21 +462,32 @@ export default function Projeto() {
             <CardContent className="space-y-3 py-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-medium">Saga “{proj.serie}” — {serieTotal} volumes</p>
-                  <p className="text-xs text-muted-foreground">
-                    Faltam {faltamVolumes} volume(s). Cada um vira um projeto próprio, herdando a fundação
-                    deste volume (mundo, elenco, voz) e com estrutura nova que avança os arcos.
-                  </p>
+                  {sagaCompleta ? (
+                    <>
+                      <p className="text-sm font-medium">Saga “{proj.serie}” completa — {serieTotal}/{serieTotal} volumes</p>
+                      <p className="text-xs text-muted-foreground">Todos os volumes da série já foram criados.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm font-medium">Saga “{proj.serie}” — {serieTotal} volumes</p>
+                      <p className="text-xs text-muted-foreground">
+                        Faltam {faltamVolumes} volume(s). Cada um vira um projeto próprio, herdando a fundação
+                        deste volume (mundo, elenco, voz) e com estrutura nova que avança os arcos.
+                      </p>
+                    </>
+                  )}
                 </div>
-                <div className="flex items-center gap-3">
-                  <Button size="sm" disabled={criando} onClick={() => setVolDialogOpen(true)}>
-                    {criando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                    {criando ? "Criando volumes…" : `Criar volumes da saga (${faltamVolumes})`}
-                  </Button>
-                  {criando && <JobStatus job={jv} />}
-                </div>
+                {!sagaCompleta && (
+                  <div className="flex items-center gap-3">
+                    <Button size="sm" disabled={criando} onClick={() => setVolDialogOpen(true)}>
+                      {criando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                      {criando ? "Criando volumes…" : `Criar volumes da saga (${faltamVolumes})`}
+                    </Button>
+                    {criando && <JobStatus job={jv} />}
+                  </div>
+                )}
               </div>
-              {erroAmigavel && (
+              {!sagaCompleta && erroAmigavel && (
                 <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{erroAmigavel}</p>
               )}
               {irmaos.length > 0 && (
@@ -1079,7 +1093,7 @@ export default function Projeto() {
           <DialogHeader>
             <DialogTitle>Criar volumes da saga “{proj.serie}”</DialogTitle>
             <DialogDescription>
-              Vamos criar {faltamVolumes} novo(s) projeto(s) — os volumes {(proj.volume ?? 1) + 1} a {serieTotal} — sem alterar este volume {proj.volume}.
+              Vamos criar {faltamVolumes} novo(s) projeto(s) — os volumes que faltam da série (de {serieTotal}) — sem alterar este volume {proj.volume}. Volumes já existentes são pulados.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm">
