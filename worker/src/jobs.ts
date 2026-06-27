@@ -649,7 +649,10 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   }
 
   const nota = state?.ultima_nota != null ? Number(state.ultima_nota) : null;
-  await must(sb.from("editions").update({ status: "pronto", nota_review: nota }).eq("id", edicao.id));
+  // nota_review = AVALIAÇÃO independente (jobs avaliar/revisar). A auto-nota da
+  // escrita (state.ultima_nota) NÃO sobrescreve a nota oficial — fica só no
+  // progresso do job, rotulada como provisória na UI.
+  await must(sb.from("editions").update({ status: "pronto" }).eq("id", edicao.id));
   await must(sb.from("projects").update({ status: "pronto" }).eq("id", job.project_id!));
   await setProgress(job.id, { fase: "CONCLUIDO", cap_atual: caps.length, total, nota, palavras: state?.palavras_totais ?? 0 });
 }

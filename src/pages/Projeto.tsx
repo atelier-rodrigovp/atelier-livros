@@ -31,6 +31,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { ReviewReport } from "@/components/ReviewReport";
 
 interface Edition { id: string; idioma: string; status: string; is_origem: boolean; nota_review: number | null; }
 interface Artifact { id: string; edition_id: string | null; tipo: string; storage_path: string; url_publica: string | null; created_at?: string; meta?: any; }
@@ -50,7 +51,7 @@ function JobStatus({ job }: { job?: Job }) {
       {p.fase ? <span>{String(p.fase)}</span> : null}
       {p.etapa ? <span>· {String(p.etapa)}</span> : null}
       {p.cap_atual != null && p.total != null ? <span>· cap {String(p.cap_atual)}/{String(p.total)}</span> : null}
-      {p.nota != null ? <span>· nota {String(p.nota)}</span> : null}
+      {p.nota != null ? <span>· {job.tipo === "escrever_livro" ? "auto" : "nota"} {String(p.nota)}</span> : null}
       {job.erro ? <span className="text-destructive">· {job.erro.slice(0, 80)}</span> : null}
     </span>
   );
@@ -85,6 +86,7 @@ export default function Projeto() {
   const [relTitulo, setRelTitulo] = useState("");
   const [relTxt, setRelTxt] = useState("");
   const [relCarregando, setRelCarregando] = useState(false);
+  const [relRaw, setRelRaw] = useState(false);
   const [melhOpen, setMelhOpen] = useState(false);
   const [melhEd, setMelhEd] = useState<Edition | null>(null);
   const [melhTxt, setMelhTxt] = useState("");
@@ -332,11 +334,22 @@ export default function Projeto() {
   const pkgDe = (ed: string) => pkgs.find((p) => p.edition_id === ed);
   const reviewDe = (edId: string) => artifacts.find((a) => a.edition_id === edId && a.tipo === "review");
 
+  // nota_review = avaliação independente (jobs avaliar/revisar). Fica DESATUALIZADA
+  // se uma escrita (continuar/refinar) concluiu DEPOIS da última avaliação/refino.
+  function avaliacaoStale(edId: string): boolean {
+    const ref = jobs.find((j) => j.status === "done" && (j.tipo === "avaliar" || j.tipo === "revisar") && j.edition_id === edId);
+    const escrita = jobs.find((j) => j.status === "done" && j.tipo === "escrever_livro");
+    if (!ref || !escrita) return false;
+    const t = (j: Job) => j.updated_at ?? j.created_at ?? "";
+    return t(escrita) > t(ref);
+  }
+
   async function abrirRelatorio(e: Edition) {
     const rev = reviewDe(e.id);
     if (!rev) return;
     setRelTitulo(`Avaliação best-seller · ${e.idioma}`);
     setRelTxt("");
+    setRelRaw(false);
     setRelCarregando(true);
     setRelOpen(true);
     const txt = await downloadText("manuscritos", rev.storage_path);
@@ -362,7 +375,7 @@ export default function Projeto() {
     const completo = totalCaps > 0 ? (chapters[e.id] ?? 0) >= totalCaps : (chapters[e.id] ?? 0) > 0;
     return (
       <div className="space-y-3 rounded-lg border p-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Gauge className="h-4 w-4 text-primary" />
           <span className="text-sm font-medium">Avaliação best-seller</span>
           {e.nota_review != null ? (
@@ -370,11 +383,16 @@ export default function Projeto() {
           ) : (
             <span className="text-xs text-muted-foreground">ainda não avaliado</span>
           )}
+          {e.nota_review != null && avaliacaoStale(e.id) && (
+            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+              desatualizada — reavalie
+            </span>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
-            variant="outline"
+            variant={e.nota_review != null && avaliacaoStale(e.id) ? "default" : "outline"}
             disabled={ocupado || !completo}
             title={completo ? "" : `Avaliação só roda com o livro completo${totalCaps ? ` (${chapters[e.id] ?? 0}/${totalCaps})` : ""}`}
             onClick={() => enfileira("avaliar", {}, e.id)}
@@ -620,7 +638,13 @@ export default function Projeto() {
                 const total = Number(p.total ?? proj.total_capitulos ?? 0);
                 const feitos = escrevendo ? Number(p.cap_atual ?? 0) : origem ? chapters[origem.id] ?? 0 : 0;
                 const pct = total > 0 ? Math.min(100, Math.round((feitos / total) * 100)) : 0;
-                const nota = origem?.nota_review ?? (p.nota != null ? Number(p.nota) : null);
+                // Nota oficial = avaliação independente (nota_review). Auto-nota da
+                // escrita fica separada e rotulada como provisória.
+                const notaOficial = origem?.nota_review != null ? Number(origem.nota_review) : null;
+                const autoNota = p.nota != null ? Number(p.nota) : null;
+                const stale = origem ? avaliacaoStale(origem.id) : false;
+                const meta = Number(proj.meta_nota ?? 9);
+                const faltam = notaOficial != null ? Math.round((meta - notaOficial) * 10) / 10 : null;
                 const palavras = Number(p.palavras ?? 0);
                 const completo = total > 0 && feitos >= total;
                 // Rótulo sempre não-destrutivo (continua/refina, nunca "refaz tudo").
@@ -639,7 +663,17 @@ export default function Projeto() {
                     <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
                       <span><span className="text-muted-foreground">Capítulos:</span> <strong>{feitos}{total ? `/${total}` : ""}</strong></span>
                       {palavras > 0 && <span><span className="text-muted-foreground">Palavras:</span> <strong>{palavras.toLocaleString("pt-BR")}</strong></span>}
-                      {nota != null && <span><span className="text-muted-foreground">Nota:</span> <strong>{nota}/10</strong></span>}
+                      {notaOficial != null ? (
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-muted-foreground">Avaliação:</span> <strong>{notaOficial}/10</strong>
+                          {stale && <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">desatualizada — reavalie</span>}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">sem avaliação independente</span>
+                      )}
+                      {escrevendo && autoNota != null && (
+                        <span className="text-xs text-muted-foreground">auto-avaliação {autoNota} (provisória)</span>
+                      )}
                       <span className="text-muted-foreground">
                         {escrevendo ? (p.fase ? String(p.fase) : "escrevendo…") : feitos > 0 ? "concluído" : "não iniciado"}
                       </span>
@@ -656,6 +690,16 @@ export default function Projeto() {
                       </Button>
                       <JobStatus job={j} />
                     </div>
+                    {completo && (
+                      <p className="text-xs">
+                        <span className="text-muted-foreground">Meta {meta}</span>
+                        {stale
+                          ? <span className="text-amber-700 dark:text-amber-400"> · reavalie para comparar com a meta (avaliação desatualizada após mudanças).</span>
+                          : notaOficial != null
+                            ? <span className="text-muted-foreground"> · avaliação atual {notaOficial}{faltam != null && faltam > 0 ? ` · faltam ${faltam}` : " · meta atingida"}</span>
+                            : <span className="text-muted-foreground"> · avalie o livro para medir a distância até a meta.</span>}
+                      </p>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       {feitos > 0
                         ? "Continua de onde parou: lê os capítulos já escritos no disco e segue do próximo — não descarta nem reescreve o que já existe. Roda o Opus capítulo a capítulo até a meta de nota."
@@ -1128,15 +1172,24 @@ export default function Projeto() {
       </Dialog>
 
       <Dialog open={relOpen} onOpenChange={setRelOpen}>
-        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+        <DialogContent className="max-h-[88vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{relTitulo}</DialogTitle>
-            <DialogDescription>Relatório da skill book-bestseller-review (pontos fortes, fracos e nota).</DialogDescription>
+            <div className="flex items-center justify-between gap-3 pr-6">
+              <DialogTitle>{relTitulo}</DialogTitle>
+              {!relCarregando && relTxt && (
+                <Button variant="ghost" size="sm" className="h-7 shrink-0 text-xs" onClick={() => setRelRaw((v) => !v)}>
+                  {relRaw ? "Ver leitura" : "Ver original (.md)"}
+                </Button>
+              )}
+            </div>
+            <DialogDescription>Avaliação editorial independente (book-bestseller-review).</DialogDescription>
           </DialogHeader>
           {relCarregando ? (
             <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          ) : relRaw ? (
+            <pre className="whitespace-pre-wrap break-words rounded border bg-muted/30 p-3 text-xs leading-relaxed">{relTxt}</pre>
           ) : (
-            <pre className="whitespace-pre-wrap break-words rounded border bg-muted/30 p-3 text-sm leading-relaxed">{relTxt}</pre>
+            <ReviewReport md={relTxt} />
           )}
         </DialogContent>
       </Dialog>
