@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ChevronDown } from "lucide-react";
 import { IDIOMAS, type Job, type Project } from "@/lib/types";
-import { displayProjectStatus, jobStatusBadge } from "@/lib/status";
+import { displayProjectStatus, jobStatusBadgeEx } from "@/lib/status";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,7 +42,7 @@ function jobMaisRecente(jobs: Job[], tipo: string, editionId?: string) {
 
 function JobStatus({ job }: { job?: Job }) {
   if (!job) return null;
-  const b = jobStatusBadge(job.status);
+  const b = jobStatusBadgeEx(job);
   const p = job.progresso || {};
   return (
     <span className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -354,7 +354,9 @@ export default function Projeto() {
     const jAval = jobMaisRecente(jobs, "avaliar", e.id);
     const jRev = jobMaisRecente(jobs, "revisar", e.id);
     const ocupado = [jAval, jRev].some((j) => j?.status === "queued" || j?.status === "running");
-    const temManuscrito = (chapters[e.id] ?? 0) > 0;
+    // Avaliação só faz sentido em livro COMPLETO (não em manuscrito parcial).
+    const totalCaps = proj?.total_capitulos ?? 0;
+    const completo = totalCaps > 0 ? (chapters[e.id] ?? 0) >= totalCaps : (chapters[e.id] ?? 0) > 0;
     return (
       <div className="space-y-3 rounded-lg border p-3">
         <div className="flex items-center gap-2">
@@ -370,8 +372,8 @@ export default function Projeto() {
           <Button
             size="sm"
             variant="outline"
-            disabled={ocupado || !temManuscrito}
-            title={temManuscrito ? "" : "Escreva/traduza esta edição primeiro"}
+            disabled={ocupado || !completo}
+            title={completo ? "" : `Avaliação só roda com o livro completo${totalCaps ? ` (${chapters[e.id] ?? 0}/${totalCaps})` : ""}`}
             onClick={() => enfileira("avaliar", {}, e.id)}
           >
             {jAval?.status === "running" || jAval?.status === "queued" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardCheck className="h-4 w-4" />}

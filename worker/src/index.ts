@@ -3,6 +3,7 @@
 import "dotenv/config";
 import { sb, OWNER } from "./supabase.js";
 import { executarJob, type Job } from "./jobs.js";
+import { LimiteMaxError } from "./limite-max.js";
 
 // Usar a assinatura MAX (login OAuth do Claude Code), não créditos de API.
 // Se ANTHROPIC_API_KEY estiver no ambiente, o `claude` headless a prioriza e
@@ -76,8 +77,14 @@ async function pegarProximo(opts: { incluir?: string[]; excluir?: string[] } = {
   let q = sb.from("jobs").select("*").eq("owner", OWNER).eq("status", "queued");
   if (opts.incluir) q = q.in("tipo", opts.incluir);
   if (opts.excluir) q = q.not("tipo", "in", `(${opts.excluir.join(",")})`);
-  const { data: cand } = await q.order("created_at", { ascending: true }).limit(1);
-  const job = cand?.[0];
+  const { data: cand } = await q.order("created_at", { ascending: true }).limit(10);
+  // Pula jobs aguardando o reset do Max (progresso.retry_at no futuro). Pega o
+  // mais antigo elegível — jobs em espera não bloqueiam a fila.
+  const agora = Date.now();
+  const job = (cand ?? []).find((j: any) => {
+    const ra = j.progresso?.retry_at;
+    return !ra || Number.isNaN(Date.parse(ra)) || Date.parse(ra) <= agora;
+  });
   if (!job) return null;
   // claim condicional: só vence quem ainda vê status='queued'
   const { data: claimed } = await sb
@@ -139,6 +146,17 @@ async function processarJob(job: Job) {
     await finalizar(job.id, { status: "done", erro: null, locked_by: null, locked_at: null });
     console.log(`[job ${job.id}] done`);
   } catch (e: any) {
+    // Limite do plano Max = throttle temporário, NÃO erro: pausa o job (mantém
+    // 'queued' com retry_at no progresso) e NÃO consome max_attempts. O picker o
+    // re-dispara sozinho quando retry_at passar (retoma do disco).
+    if (e instanceof LimiteMaxError || e?.name === "LimiteMaxError") {
+      const retryAt = (e as LimiteMaxError).retryAt;
+      const { data: cur } = await sb.from("jobs").select("progresso").eq("id", job.id).single();
+      const progresso = { ...((cur?.progresso as Record<string, unknown>) ?? {}), aguardando_reset: true, retry_at: retryAt, motivo: "limite do plano Max" };
+      await finalizar(job.id, { status: "queued", erro: null, progresso, locked_by: null, locked_at: null });
+      console.log(`[job ${job.id}] limite do Max — aguardando reset até ${retryAt} (não conta tentativa)`);
+      return;
+    }
     const msg = String(e?.message ?? e).slice(0, 2000);
     const { data } = await sb.from("jobs").select("attempts,max_attempts").eq("id", job.id).single();
     const attempts = (data?.attempts ?? 0) + 1;

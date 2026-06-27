@@ -29,6 +29,40 @@ export function jobStatusBadge(status: JobStatus): {
   }
 }
 
+// Hora curta "HH:MM" a partir de ISO (apresentação). null se inválida.
+export function horaCurta(iso?: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+// Job pausado aguardando o reset do plano Max (status='queued' +
+// progresso.aguardando_reset). NÃO é erro — throttle temporário.
+export function aguardandoResetMax(
+  status: string,
+  progresso?: Record<string, unknown> | null
+): { retryAt: string | null } | null {
+  if (status !== "queued") return null;
+  const p = progresso as any;
+  if (p && p.aguardando_reset) return { retryAt: (p.retry_at as string) ?? null };
+  return null;
+}
+
+// Badge de job ciente do progresso: mostra "Aguardando reset do Max — retoma
+// ~HH:MM" (âmbar) em vez de vermelho/erro. Reaproproveita jobStatusBadge.
+export function jobStatusBadgeEx(job: {
+  status: JobStatus;
+  progresso?: Record<string, unknown> | null;
+}): { label: string; variant: BadgeVariant } {
+  const esp = aguardandoResetMax(job.status, job.progresso);
+  if (esp) {
+    const h = horaCurta(esp.retryAt);
+    return { label: h ? `Aguardando reset do Max — retoma ~${h}` : "Aguardando reset do Max", variant: "warning" };
+  }
+  return jobStatusBadge(job.status);
+}
+
 export function projectStatusBadge(status: ProjectStatus): {
   label: string;
   variant: BadgeVariant;

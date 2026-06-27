@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { displayProjectStatus, jobAtivoReal, jobStatusBadge, projectStatusBadge, tipoLabel, workerOnline } from "./status";
+import { aguardandoResetMax, displayProjectStatus, horaCurta, jobAtivoReal, jobStatusBadge, jobStatusBadgeEx, projectStatusBadge, tipoLabel, workerOnline } from "./status";
 
 describe("jobStatusBadge", () => {
   it("mapeia todos os status de job", () => {
@@ -8,6 +8,27 @@ describe("jobStatusBadge", () => {
     expect(jobStatusBadge("done").variant).toBe("success");
     expect(jobStatusBadge("error").variant).toBe("destructive");
     expect(jobStatusBadge("canceled").label).toBe("Cancelado");
+  });
+});
+
+describe("aguardandoResetMax / jobStatusBadgeEx", () => {
+  const retry = "2026-06-27T01:40:00";
+  it("detecta job em espera do reset do Max (queued + flag)", () => {
+    expect(aguardandoResetMax("queued", { aguardando_reset: true, retry_at: retry })).toEqual({ retryAt: retry });
+  });
+  it("não confunde queued normal nem outros status", () => {
+    expect(aguardandoResetMax("queued", {})).toBeNull();
+    expect(aguardandoResetMax("error", { aguardando_reset: true })).toBeNull();
+  });
+  it("badge âmbar com horário, NÃO vermelho", () => {
+    const b = jobStatusBadgeEx({ status: "queued", progresso: { aguardando_reset: true, retry_at: retry } });
+    expect(b.variant).toBe("warning");
+    expect(b.label).toContain("Aguardando reset do Max");
+    expect(b.label).toContain(horaCurta(retry)!);
+  });
+  it("job comum cai no badge padrão", () => {
+    expect(jobStatusBadgeEx({ status: "error" }).variant).toBe("destructive");
+    expect(jobStatusBadgeEx({ status: "running" }).variant).toBe("warning");
   });
 });
 

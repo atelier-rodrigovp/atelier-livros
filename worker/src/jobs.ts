@@ -24,6 +24,7 @@ import {
 } from "./lib.js";
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
 import { sanitizarCapitulo, metaResidual } from "./sanitize.js";
+import { LimiteMaxError, limiteMaxRetryAt } from "./limite-max.js";
 import { existsSync } from "node:fs";
 
 export interface Job {
@@ -592,17 +593,25 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // re-enfileira para continuar (interrupção/limite de sessão não mata o livro). Só falha
   // de verdade se não escreveu NENHUM capítulo novo (travamento real).
   if (!completo) {
+    // Avançou sem completar: interrupção comum (fim de sessão) → re-enfileira já
+    // (retoma do disco). Não inspeciona limite aqui para não pausar run saudável
+    // por uma linha antiga no log.
     if (caps.length > capsAntes) {
       await must(sb.from("jobs").insert({ owner: OWNER, tipo: "escrever_livro", project_id: job.project_id, status: "queued" }));
       await setProgress(job.id, { fase: "ESCRITA", cap_atual: caps.length, total, continua: true });
       return;
     }
-    const log = (await readText(path.join(dir, "runner.log"))).slice(-700);
-    if (/hit your session limit|session limit/i.test(log)) {
-      const m = log.match(/resets?\s+([0-9apm:. ]+)/i);
-      throw new Error(
-        `Limite de uso do plano Max atingido${m ? ` (reseta ${m[1].trim()})` : ""}. ` +
-          `A escrita parou em ${caps.length}/${total} capítulos; clique em "Escrever livro" após o reset — ela retoma do disco.`
+    // 0 progresso neste run: limite do Max (throttle) ou erro real?
+    const log = (await readText(path.join(dir, "runner.log"))).slice(-1500);
+    // Limite do Max NÃO é erro: pausa e retoma sozinho no reset, sem gastar
+    // tentativas (tratado no loop do worker via LimiteMaxError).
+    const retryAt = limiteMaxRetryAt(log);
+    if (retryAt) {
+      const hh = new Date(retryAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      throw new LimiteMaxError(
+        `Limite de uso do plano Max atingido. Escrita em ${caps.length}/${total} capítulos; ` +
+          `retoma automaticamente ~${hh} (do disco).`,
+        retryAt
       );
     }
     throw new Error(`escrita não avançou em ${caps.length}/${total} (rc=${r.code}). ${log.slice(-300)}`);
@@ -833,6 +842,17 @@ async function avaliarEdicao(projectId: string, edicao: any, jobId?: string): Pr
 
 async function avaliar(job: Job, _hb?: Heartbeat) {
   const edicao = await getEdition(job.edition_id!);
+  // Avaliação só roda em livro COMPLETO — nunca em manuscrito parcial (ex.: 3/32).
+  const proj = await getProject(edicao.project_id);
+  const sub = edicaoDir(projDir(edicao.project_id), edicao);
+  const state = await readState(projDir(edicao.project_id));
+  const total = Number(state?.total_capitulos_previstos ?? proj.total_capitulos ?? 0);
+  const have = (await chaptersOnDisk(sub, edicao.is_origem ? Number(proj.piso_palavras ?? 1) : 1)).length;
+  if (total > 0 && have < total) {
+    throw new Error(
+      `Avaliação só roda com o livro completo — atualmente ${have}/${total} capítulos. Conclua a escrita antes de avaliar.`
+    );
+  }
   await setProgress(job.id, { fase: "AVALIACAO", idioma: edicao.idioma });
   await avaliarEdicao(edicao.project_id, edicao, job.id);
 }

@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { useSession } from "@/hooks/useSession";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
 import { enqueueJob, supabase } from "@/lib/supabase";
-import { jobAtivoReal, jobStatusBadge, tipoLabel } from "@/lib/status";
+import { jobAtivoReal, jobStatusBadgeEx, tipoLabel } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { Job } from "@/lib/types";
 
@@ -302,7 +302,7 @@ export default function Configuracoes() {
               <ul className="divide-y text-sm">
               {jobs.map((j) => {
                 const orfao = j.status === "running" && !jobAtivoReal({ status: j.status, workerOnline: online, lockedAt: j.locked_at });
-                const b = orfao ? { label: "Interrompido", variant: "warning" as const } : jobStatusBadge(j.status);
+                const b = orfao ? { label: "Interrompido", variant: "warning" as const } : jobStatusBadgeEx(j);
                 const pl = projLabel(j.project_id);
                 const dica = orfao ? "O worker caiu durante esta tarefa. Religue o worker para retomar." : undefined;
                 const inner = (
