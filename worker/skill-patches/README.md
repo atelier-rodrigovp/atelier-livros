@@ -70,5 +70,17 @@ o limite **não incrementa** o contador de estagnação, grava marca limpa
 encerra para o worker pausar+retomar. O contador de estagnação é **resetado no
 início de cada run** (não herda envenenamento de runs anteriores barrados pelo Max).
 
+**Palavra-muleta ("coisa") + micro-loop por capítulo:**
+- **Léxico de muletas** (`_MULETAS`, espelha `maneirismo.ts`): conta palavra inteira
+  ("coisa"/"coisas", "meio que", "na verdade"…) com orçamento APERTADO ("coisa" ≤1/cap,
+  ~4/10k book-wide). Entra no gate por capítulo E na fase DESMANEIRISMO. ("coisa" batia
+  ~1 a cada 200 palavras — 572× na Biblioteca Afogada — e passava batido antes.)
+- **Frente 2 — micro-loop escritor→revisor→editor por capítulo** (`--revisao-por-capitulo`,
+  default OFF; opt-in via env `REVISAO_POR_CAPITULO=1`): na ESCRITA, após escrever o
+  capítulo, um revisor leve (`livro-revisor`, sonnet) critica spec/continuidade/muletas/voz
+  e o editor (`livro-editor`) aplica edições + grava o estado-narrativo, ANTES de aceitar.
+  Reentrante (marcadores `review/_revcap-NN.done`); `--max-edicoes-por-cap`. Porta a
+  arquitetura de papéis da Saga; o `book-bestseller-review` final segue intacto.
+
 Testes: `python tools/test_desmaneirismo.py` e `python tools/test_runner_limite.py`.
 (Patch é só `assets/livro_runner.py`; o instalador mescla por cima do skill.)

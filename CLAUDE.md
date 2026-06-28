@@ -34,7 +34,9 @@ assinatura positiva) e `livro-do-zero-ao-epub` (gate de maneirismo no runner:
 **por capítulo** na ESCRITA + **book-wide** na fase `DESMANEIRISMO`, que itera
 contando→reescrevendo→recontando até abaixo do orçamento global antes de
 EPUB/CONCLUIR) + distingue **throttle do Max de estagnação** (não envenena o
-contador; emite `RUNNER_LIMITE_MAX`). O detector de repetição vive em
+contador; emite `RUNNER_LIMITE_MAX`) + **léxico de muletas** ("coisa" ≤1/cap) no
+gate + **micro-loop escritor→revisor→editor por capítulo** (`--revisao-por-capitulo`,
+opt-in via env `REVISAO_POR_CAPITULO=1`). O detector de repetição/muleta vive em
 `worker/src/maneirismo.ts` (TS, testado) e espelhado no runner.
 
 ## Trava antivazamento (nenhum meta-texto chega ao livro)

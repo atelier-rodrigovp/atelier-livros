@@ -153,6 +153,19 @@ def proximo_capitulo_pendente(projeto, total, piso):
     return None
 
 
+def _marcador_revcap(projeto, n):
+    return os.path.join(projeto, DIR_REVIEW, "_revcap-{:02d}.done".format(int(n)))
+
+
+def primeiro_cap_nao_revisado(projeto, total, piso):
+    """Micro-loop: 1o capitulo VALIDO (escrito) ainda sem marcador de revisao.
+    Reentrante via disco — se o Max bater no meio, a revisao re-roda do ponto."""
+    for n in capitulos_validos(projeto, total, piso):
+        if not os.path.exists(_marcador_revcap(projeto, n)):
+            return n
+    return None
+
+
 def sincroniza_contadores_do_disco(projeto, state, piso):
     """Sobrescreve capitulos_aprovados a partir do disco. O agente não manda
     nesse número — o disco manda."""
@@ -229,6 +242,7 @@ def ensure_fields(state, args):
         state["max_desmaneirismo"] = int(getattr(args, "max_desmaneirismo", 3) or 3)
     except (TypeError, ValueError):
         state["max_desmaneirismo"] = 3
+    state["revisao_por_capitulo"] = bool(getattr(args, "revisao_por_capitulo", False))
     if args.epub:
         state["gerar_epub"] = True
     if state.get("fase_atual") not in FASES_VALIDAS:
@@ -294,7 +308,13 @@ def done_condition(projeto, fase, s, iter_before, piso):
                 and _i(s.get("total_capitulos_previstos")) > 0)
     if fase == "ESCRITA":
         tot = _i(s.get("total_capitulos_previstos"))
-        return tot > 0 and len(capitulos_validos(projeto, tot, piso)) >= tot
+        if not (tot > 0 and len(capitulos_validos(projeto, tot, piso)) >= tot):
+            return False
+        # Micro-loop ligado: so conclui ESCRITA quando todos os capitulos validos
+        # tambem foram REVISADOS (escritor->revisor->editor).
+        if s.get("revisao_por_capitulo") and primeiro_cap_nao_revisado(projeto, tot, piso) is not None:
+            return False
+        return True
     if fase == "CONSOLIDACAO":
         return existe(projeto, ARQ_MANUSCRITO) and _i(s.get("palavras_totais")) > 0
     if fase == "REVIEW":
@@ -414,6 +434,32 @@ def prompt_escrita_capitulo(n, piso):
         "NAO escreva nenhum outro capitulo. NAO toque em capitulos ja existentes. "
         "O runner so aceita este capitulo se '{arq}' tiver >= {piso} palavras.\n"
     ).format(n=n, arq=nome_cap(n).replace("\\", "/"), piso=piso)
+
+
+def prompt_revisao_capitulo(n, args, piso):
+    """Micro-loop por capitulo (Frente 2): revisor leve -> editor, ANTES de aceitar.
+    Porta a arquitetura de papeis da Saga (livro-revisor / livro-editor) para o motor."""
+    arq = nome_cap(n).replace("\\", "/")
+    maxed = int(getattr(args, "max_edicoes_por_cap", 6))
+    return (
+        PREAMBULO +
+        "\nFASE ESCRITA - REVISAO POR CAPITULO do {arq} (micro-loop revisor->editor). "
+        "Este capitulo JA foi escrito; antes de aceita-lo, rode um time agentico via Task:\n"
+        "1) REVISOR (subagente `livro-revisor`, CIRURGICO e barato - sonnet): critique "
+        "SOMENTE o {arq} contra: (a) a spec do Capitulo {n} (Estrutura-do-Livro.md) e a "
+        "Biblia/Mapa/perfil-de-voz; (b) o estado/estado-narrativo.md (fios, FATOS, "
+        "relogios - continuidade); (c) maneirismos e MULETAS sobre-usadas (sobretudo "
+        "'coisa' - no maximo 1 no capitulo; troque pelo referente concreto); (d) voz "
+        "fora do perfil; (e) cena que RESUME em vez de dramatizar. Devolva uma LISTA de "
+        "no maximo {maxed} EDICOES PONTUAIS (trecho -> correcao). NAO e recontacao nem o "
+        "review book-wide (esse fica no fim).\n"
+        "2) EDITOR (subagente `livro-editor`): aplique as edicoes no {arq}, podendo "
+        "ELEVAR 1 movimento (drama/tensao/subtexto) que agregue valor SEM contrariar a "
+        "spec. Troque TODA 'coisa' generica pelo referente concreto. PRESERVE sentido e "
+        "voz; nao reescreva a cena a toa.\n"
+        "3) Atualize estado/estado-narrativo.md (o que mudou, fios tocados, pistas "
+        "plantadas/pagas, MCL). Regrave o MESMO {arq} (>= {piso} palavras). Encerre.\n"
+    ).format(arq=arq, n=n, maxed=maxed, piso=piso)
 
 
 def prompt_review(k):
@@ -540,6 +586,30 @@ def maneirismos_acima(texto):
     return out
 
 
+# LEXICO DE MULETAS (palavra inteira, case-insensitive). Espelha worker/src/maneirismo.ts.
+# "coisa" e a pior (~1 a cada ~200 palavras): orcamento APERTADO. Tupla:
+# (nome, regex, budget_por_capitulo, orcamento_por_10k_global).
+_MULETAS = [
+    (u"coisa/coisas", re.compile(u"\\bcoisas?\\b", re.I | re.U), 1, 4.0),
+    (u"algo", re.compile(u"\\balgo\\b", re.I | re.U), 3, 8.0),
+    (u"'meio que'", re.compile(u"\\bmeio que\\b", re.I | re.U), 1, 3.0),
+    (u"simplesmente", re.compile(u"\\bsimplesmente\\b", re.I | re.U), 1, 3.0),
+    (u"'de repente'", re.compile(u"\\bde repente\\b", re.I | re.U), 1, 4.0),
+    (u"'na verdade'", re.compile(u"\\bna verdade\\b", re.I | re.U), 1, 4.0),
+    (u"'parecia que'", re.compile(u"\\bparecia que\\b", re.I | re.U), 1, 3.0),
+]
+
+
+def muletas_acima_cap(texto):
+    """Muletas acima do orcamento POR CAPITULO. 'coisa' estoura facil (budget 1)."""
+    out = []
+    for nome, rx, budget, _ in _MULETAS:
+        n = len(rx.findall(texto or ""))
+        if n > budget:
+            out.append((nome, n, budget))
+    return out
+
+
 def gate_maneirismo_capitulo(projeto, n, args):
     """Depois de escrever o capitulo n: se algum molde estourou o orcamento,
     dispara UMA reescrita-alvo (bounded: 0 ou 1 por escrita, nao bloqueia o
@@ -548,20 +618,22 @@ def gate_maneirismo_capitulo(projeto, n, args):
     if not txt:
         return
     offs = maneirismos_acima(txt)
-    if not offs:
+    muls = muletas_acima_cap(txt)
+    if not offs and not muls:
         return
-    lista = "; ".join("{} {}x".format(nome, cnt) for nome, cnt in offs)
+    lista = "; ".join(["{} {}x".format(nome, cnt) for nome, cnt in offs] +
+                      ["MULETA {} {}x (alvo <= {})".format(nome, cnt, b) for nome, cnt, b in muls])
     arq = nome_cap(n).replace("\\", "/")
-    log(projeto, "GATE MANEIRISMO cap {}: acima do orcamento -> reescrevendo ({}).".format(n, lista))
+    log(projeto, "GATE CAP {}: acima do orcamento -> reescrevendo ({}).".format(n, lista))
     prompt = (
         "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n"
-        "REVISAO DE PROSA do {arq}: os MOLDES abaixo estao SOBRE-REPRESENTADOS neste "
-        "capitulo (contagem real). Reduza CADA UM para no maximo {b} ocorrencia, "
-        "DESADENSANDO o tique (reescreva a construcao repetida com sintaxe variada), "
-        "PRESERVANDO sentido e voz. NAO reescreva a cena a toa; so desfaca o tique. "
-        "Regrave o MESMO arquivo {arq}.\n"
-        "Molde(s) acima do orcamento ({b}/capitulo): {lista}\n"
-    ).format(arq=arq, b=PER_CAP_BUDGET, lista=lista)
+        "REVISAO DE PROSA do {arq}: os itens abaixo estao SOBRE-REPRESENTADOS neste "
+        "capitulo (contagem real). Reduza CADA UM ao alvo. Para MULETAS (ex.: 'coisa'), "
+        "TROQUE pela coisa concreta a que se refere (objeto, ideia, gesto) — nunca deixe "
+        "'coisa' generica. Para MOLDES, desadense o tique com sintaxe variada. PRESERVE "
+        "sentido e voz; NAO reescreva a cena a toa. Regrave o MESMO arquivo {arq}.\n"
+        "Itens acima do orcamento: {lista}\n"
+    ).format(arq=arq, lista=lista)
     run_claude(projeto, prompt, args)
 
 
@@ -650,6 +722,13 @@ def diagnostico_book_wide(projeto, total):
         if n > alvo:
             acima.append("molde \"{}\": {}x -> reduza para <= {}".format(nome, n, alvo))
         relatorio.append("{} {}: {}x (alvo <= {})".format("[X]" if n > alvo else "[ ]", nome, n, alvo))
+    # MULETAS (book-wide): 'coisa' & cia. com orcamento por 10k. Troque pelo referente.
+    for nome, rx, _budget, orc10k in _MULETAS:
+        n = len(rx.findall(full))
+        alvo = max(1, int(round(orc10k * palavras / 10000.0)))
+        if n > alvo:
+            acima.append("MULETA \"{}\": {}x -> reduza para <= {} (troque pela coisa concreta a que se refere)".format(nome, n, alvo))
+            relatorio.append("[X] muleta {}: {}x (alvo <= {})".format(nome, n, alvo))
     fecho = _fecho_isolado(caps)
     fecho_alvo = max(1, int(len(caps) * FECHO_MAX_FRACAO))
     if len(fecho) > fecho_alvo:
@@ -730,18 +809,28 @@ def executar(projeto, args):
         iter_before = _i(state.get("iteracoes_review"))
 
         # Monta o prompt da fase
+        alvo = None            # capitulo a ESCREVER neste passo (se houver)
+        revisando_cap = None   # capitulo a REVISAR neste passo (micro-loop)
         if fase == "ESTRUTURA":
             prompt = PROMPT_ESTRUTURA
         elif fase == "ESCRITA":
             tot = _i(state.get("total_capitulos_previstos"))
-            alvo = proximo_capitulo_pendente(projeto, tot, piso)
-            if alvo is None:
-                state["fase_atual"] = "CONSOLIDACAO"
-                save_state(projeto, state)
-                continue
-            log(projeto, "--- ESCRITA: capitulo alvo = {} (validos={}/{}) ---".format(
-                alvo, len(capitulos_validos(projeto, tot, piso)), tot))
-            prompt = prompt_escrita_capitulo(alvo, piso)
+            # Micro-loop (Frente 2): antes de escrever o proximo, REVISA o 1o capitulo
+            # valido ainda nao revisado (escritor->revisor->editor). Reentrante (marcador).
+            if getattr(args, "revisao_por_capitulo", False):
+                revisando_cap = primeiro_cap_nao_revisado(projeto, tot, piso)
+            if revisando_cap is not None:
+                log(projeto, "--- ESCRITA/REVISAO por capitulo: revisando cap {} (micro-loop) ---".format(revisando_cap))
+                prompt = prompt_revisao_capitulo(revisando_cap, args, piso)
+            else:
+                alvo = proximo_capitulo_pendente(projeto, tot, piso)
+                if alvo is None:
+                    state["fase_atual"] = "CONSOLIDACAO"
+                    save_state(projeto, state)
+                    continue
+                log(projeto, "--- ESCRITA: capitulo alvo = {} (validos={}/{}) ---".format(
+                    alvo, len(capitulos_validos(projeto, tot, piso)), tot))
+                prompt = prompt_escrita_capitulo(alvo, piso)
         elif fase == "REVIEW":
             prompt = prompt_review(iter_before + 1)
         elif fase == "REESCRITA":
@@ -773,9 +862,23 @@ def executar(projeto, args):
             return 0
 
         # Portao de maneirismo na ORIGEM: se o capitulo recem-escrito estourou o
-        # orcamento de tiques, dispara UMA reescrita-alvo (bounded; nao bloqueia).
+        # orcamento de tiques/muletas, dispara UMA reescrita-alvo (bounded; nao bloqueia).
         if fase == "ESCRITA" and alvo is not None:
             gate_maneirismo_capitulo(projeto, alvo, args)
+
+        # Micro-loop: terminou a REVISAO do capitulo -> marca (reentrante) e conta como
+        # progresso (revisar nao muda a assinatura do disco, mas E avanco do livro).
+        if fase == "ESCRITA" and revisando_cap is not None:
+            try:
+                os.makedirs(os.path.join(projeto, DIR_REVIEW), exist_ok=True)
+                with open(_marcador_revcap(projeto, revisando_cap), "w", encoding="utf-8") as fh:
+                    fh.write(agora())
+            except OSError:
+                pass
+            state["_runner"]["tentativas_sem_progresso"] = 0
+            save_state(projeto, state)
+            log(projeto, "Capitulo {} revisado (micro-loop escritor->revisor->editor) -> aceito.".format(revisando_cap))
+            continue
 
         # DESMANEIRISMO: reconsolida o MESTRE dos capitulos editados e conta de novo;
         # cada passada incrementa o contador (= progresso, reentrante via disco).
@@ -854,6 +957,8 @@ def build_argparser():
     p.add_argument("--max-reescritas", type=int, default=4, help="Rodadas de reescrita (default 4).")
     p.add_argument("--max-estagnacao", type=int, default=3, help="Tentativas sem progresso antes de parar (default 3).")
     p.add_argument("--max-desmaneirismo", type=int, default=3, help="Iteracoes da fase DESMANEIRISMO book-wide (default 3).")
+    p.add_argument("--revisao-por-capitulo", action="store_true", help="Micro-loop escritor->revisor->editor por capitulo na ESCRITA (mais caro; default off).")
+    p.add_argument("--max-edicoes-por-cap", type=int, default=6, help="Maximo de edicoes pontuais do revisor por capitulo (default 6).")
     p.add_argument("--piso", type=int, default=PISO_PALAVRAS_DEFAULT,
                    help="Piso de palavras por capitulo (default {}).".format(PISO_PALAVRAS_DEFAULT))
     p.add_argument("--fase-timeout", type=int, default=0, help="Timeout por chamada (s; 0 = sem).")

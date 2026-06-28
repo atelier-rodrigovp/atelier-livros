@@ -595,6 +595,11 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     "--model", MODEL,
     "--claude-bin", CLAUDE_BIN,
   ];
+  // Micro-loop escritor→revisor→editor por capítulo (Frente 2). Mais caro: opt-in
+  // por env REVISAO_POR_CAPITULO=1 ou payload.revisao_por_capitulo. Default off.
+  if (process.env.REVISAO_POR_CAPITULO === "1" || job.payload?.revisao_por_capitulo) {
+    args.push("--revisao-por-capitulo");
+  }
   let r;
   try {
     r = await run(PY_BIN, args, { cwd: dir });
@@ -1008,6 +1013,7 @@ async function passeProsaCountDriven(job: Job, dir: string, sub: string, subRel:
       break;
     }
     const alvos = [
+      ...diag.muletas.map((m) => `- MULETA ${m.termo}: ${m.n}× (${m.por10k}/10k) → reduza para ≤ ${m.alvo} (troque pela coisa concreta a que se refere; nunca "coisa").`),
       ...diag.moldes.map((m) => `- ${m.nome}: ${m.n}× (${m.por10k}/10k) → reduza para ≤ ${m.alvo}.`),
       diag.fecho.acima ? `- Fecho epigramático isolado (frase curta sozinha no fim do capítulo): ${diag.fecho.n}/${diag.fecho.total} capítulos → ≤ ${Math.ceil(diag.fecho.total / 3)} (varie os fechamentos).` : "",
       ...diag.ngramas.slice(0, 6).map((h) => `- repetição "${h.gram}": ${h.n}× → varie/reduza.`),

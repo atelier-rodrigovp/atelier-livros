@@ -44,6 +44,13 @@ check(len(acima) > 0, "detecta algum molde acima do orcamento (got %d)" % len(ac
 check(any("do jeito" in a for a in acima), "flag 'do jeito que/de'")
 check(any("fecho" in a for a in acima), "flag fecho epigramatico (2/2 caps curtos)")
 
+print("\nMULETA 'coisa' (palavra inteira, orcamento apertado)")
+proj_c = _mini_projeto([u"# Cap\n" + u"coisa " * 10 + u"texto util e variado aqui no capitulo. " * 20])
+ac_c, _ = m.diagnostico_book_wide(proj_c, 1)
+check(any("coisa" in a.lower() for a in ac_c), "flag MULETA 'coisa' acima do orcamento")
+check(m.muletas_acima_cap(u"coisa coisa coisa"), "per-capitulo: 3x 'coisa' estoura (budget 1)")
+check(not m.muletas_acima_cap(u"coisinha coisinha coisinha"), "NAO conta 'coisinha' (substring)")
+
 print("\nFALSO-POSITIVO: prosa limpa e VARIADA NAO e flagada")
 limpos = [
     u"# Cap 1\nA manha chegou devagar sobre a cidade adormecida. Ela seguiu pela rua larga ate o "

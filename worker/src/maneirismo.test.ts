@@ -1,8 +1,34 @@
 import { describe, it, expect } from "vitest";
 import {
   contarManeirismos, resumoManeirismo, fechoEpigramatico,
-  ngramasSobrerepresentados, diagnosticarRepeticao,
+  ngramasSobrerepresentados, diagnosticarRepeticao, contarMuletas,
 } from "./maneirismo.js";
+
+describe("contarMuletas — palavra-muleta ('coisa')", () => {
+  it("conta 'coisa'/'coisas' como palavra inteira, case-insensitive", () => {
+    const r = contarMuletas("A coisa era estranha. Coisas assim. COISA de novo.");
+    const c = r.find((m) => /coisa/.test(m.termo));
+    expect(c?.n).toBe(3);
+  });
+  it("NÃO conta substrings ('coisinha', 'coisas' dentro de outra palavra)", () => {
+    const r = contarMuletas("Uma coisinha pequena, coisíssima, recoisado — nada disso conta.");
+    expect(r.find((m) => /coisa/.test(m.termo))).toBeUndefined(); // 0 → filtrado
+  });
+  it("orçamento APERTADO: 'coisa' estoura fácil (alvo baixo)", () => {
+    // 6× 'coisa' em ~12 palavras → muito acima do alvo
+    const r = contarMuletas("coisa coisa coisa coisa coisa coisa e mais texto aqui ok fim");
+    const c = r.find((m) => /coisa/.test(m.termo))!;
+    expect(c.acima).toBe(true);
+  });
+  it("conta expressões-muleta ('meio que', 'na verdade')", () => {
+    const r = contarMuletas("Ele meio que sumiu. Na verdade, meio que voltou.");
+    expect(r.find((m) => /meio que/.test(m.termo))?.n).toBe(2);
+    expect(r.find((m) => /na verdade/.test(m.termo))?.n).toBe(1);
+  });
+  it("prosa sem muletas → lista vazia", () => {
+    expect(contarMuletas("A manhã clara desceu sobre o cais e os barcos.")).toEqual([]);
+  });
+});
 
 describe("contarManeirismos — moldes nomeados", () => {
   it("conta antíteses 'não era X. Era Y.' (várias formas)", () => {

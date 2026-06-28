@@ -120,6 +120,39 @@ export function ngramasSobrerepresentados(
 }
 
 // ---------------------------------------------------------------------------
+// 4) LÉXICO DE MULETAS: palavras/expressões sobre-usadas (palavra INTEIRA,
+//    case-insensitive). "coisa" é a pior (~1 a cada 200 palavras nos livros) e
+//    tem orçamento APERTADO. Configurável: cada item traz o orçamento por 10k.
+// ---------------------------------------------------------------------------
+export interface Muleta { termo: string; re: RegExp; orc10k: number }
+
+export const MULETAS: Muleta[] = [
+  { termo: "coisa/coisas", re: /\bcoisas?\b/gi, orc10k: 4 },   // ~1 a cada 2500 palavras
+  { termo: "algo", re: /\balgo\b/gi, orc10k: 8 },
+  { termo: '"meio que"', re: /\bmeio que\b/gi, orc10k: 3 },
+  { termo: "simplesmente", re: /\bsimplesmente\b/gi, orc10k: 3 },
+  { termo: '"de repente"', re: /\bde repente\b/gi, orc10k: 4 },
+  { termo: '"na verdade"', re: /\bna verdade\b/gi, orc10k: 4 },
+  { termo: '"parecia que"', re: /\bparecia que\b/gi, orc10k: 3 },
+  { termo: '"de certa forma/maneira"', re: /\bde certa (?:forma|maneira)\b/gi, orc10k: 2 },
+];
+
+export interface MuletaContagem { termo: string; n: number; por10k: number; alvo: number; acima: boolean }
+
+export function contarMuletas(texto: string, lexico: Muleta[] = MULETAS): MuletaContagem[] {
+  const t = texto ?? "";
+  const palavras = (t.match(/\S+/g) ?? []).length;
+  return lexico
+    .map(({ termo, re, orc10k }) => {
+      const n = (t.match(re) ?? []).length;
+      const alvo = Math.max(1, Math.round((orc10k * palavras) / 10_000));
+      return { termo, n, por10k: palavras ? Math.round((n / palavras) * 10_000 * 10) / 10 : 0, alvo, acima: n > alvo };
+    })
+    .filter((m) => m.n > 0)
+    .sort((a, b) => b.n - a.n);
+}
+
+// ---------------------------------------------------------------------------
 // Resumos
 // ---------------------------------------------------------------------------
 export function resumoManeirismo(r: ResultadoManeirismo): string {
@@ -131,6 +164,7 @@ export function resumoManeirismo(r: ResultadoManeirismo): string {
 // Diagnóstico completo (book-wide): moldes + fecho + n-gramas genéricos acima do alvo.
 export interface DiagnosticoRepeticao {
   moldes: PadraoContagem[];           // só os ACIMA do alvo
+  muletas: MuletaContagem[];          // só as ACIMA do alvo
   fecho: FechoResultado & { acima: boolean };
   ngramas: NgramHit[];
   algumAcima: boolean;
@@ -139,12 +173,14 @@ export interface DiagnosticoRepeticao {
 export function diagnosticarRepeticao(textoCompleto: string, capitulos: string[]): DiagnosticoRepeticao {
   const r = contarManeirismos(textoCompleto);
   const moldesAcima = r.padroes.filter((p) => p.acima);
+  const muletasAcima = contarMuletas(textoCompleto).filter((m) => m.acima);
   const fecho = fechoEpigramatico(capitulos);
   const ngramas = ngramasSobrerepresentados(textoCompleto);
   return {
     moldes: moldesAcima,
+    muletas: muletasAcima,
     fecho,
     ngramas,
-    algumAcima: moldesAcima.length > 0 || fecho.acima || ngramas.length > 0,
+    algumAcima: moldesAcima.length > 0 || muletasAcima.length > 0 || fecho.acima || ngramas.length > 0,
   };
 }
