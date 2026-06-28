@@ -63,7 +63,7 @@ import sys
 # Constantes da máquina de estados
 # ----------------------------------------------------------------------------
 FASES_VALIDAS = ["ESTRUTURA", "ESCRITA", "CONSOLIDACAO", "REVIEW",
-                 "REESCRITA", "EPUB", "CONCLUIDO"]
+                 "REESCRITA", "DESMANEIRISMO", "EPUB", "CONCLUIDO"]
 
 ARQ_ESTADO = "ESTADO_LIVRO.json"
 ARQ_BIBLIA = "Biblia-da-Obra.md"
@@ -224,6 +224,11 @@ def ensure_fields(state, args):
         state["piso_palavras_cap"] = int(state.get("piso_palavras_cap") or args.piso)
     except (TypeError, ValueError):
         state["piso_palavras_cap"] = int(args.piso)
+    state.setdefault("desmaneirismo_iters", 0)
+    try:
+        state["max_desmaneirismo"] = int(getattr(args, "max_desmaneirismo", 3) or 3)
+    except (TypeError, ValueError):
+        state["max_desmaneirismo"] = 3
     if args.epub:
         state["gerar_epub"] = True
     if state.get("fase_atual") not in FASES_VALIDAS:
@@ -276,6 +281,7 @@ def signature(projeto, s, piso):
         total,
         existe(projeto, ARQ_MANUSCRITO),
         existe(projeto, ARQ_BIBLIA),
+        s.get("desmaneirismo_iters"),  # cada passada de DESMANEIRISMO = progresso
     )
 
 
@@ -295,6 +301,13 @@ def done_condition(projeto, fase, s, iter_before, piso):
         return s.get("ultima_nota") is not None and _i(s.get("iteracoes_review")) > iter_before
     if fase == "REESCRITA":
         return _i(s.get("ultima_reescrita_iteracao")) >= _i(s.get("iteracoes_review"))
+    if fase == "DESMANEIRISMO":
+        # pronto = nenhum molde acima do orcamento global OU teto de iteracoes.
+        total = _i(s.get("total_capitulos_previstos"))
+        acima, _ = diagnostico_book_wide(projeto, total)
+        if not acima:
+            return True
+        return _i(s.get("desmaneirismo_iters")) >= _i(s.get("max_desmaneirismo"))
     if fase == "EPUB":
         return bool(s.get("epub_gerado"))
     return False
@@ -311,15 +324,17 @@ def next_phase(fase, s):
         nota = float(s.get("ultima_nota"))
         meta = float(s.get("meta_nota"))
         if nota >= meta:
-            if s.get("gerar_epub") and not s.get("epub_gerado"):
-                return "EPUB"
-            return "CONCLUIDO"
+            return "DESMANEIRISMO"   # gate book-wide antes de concluir/EPUB
         if _i(s.get("iteracoes_review")) <= _i(s.get("max_iteracoes_reescrita")):
             return "REESCRITA"
         s["teto_atingido"] = True
-        return "CONCLUIDO"
+        return "DESMANEIRISMO"        # concluindo por teto: ainda passa pelo gate
     if fase == "REESCRITA":
         return "CONSOLIDACAO"
+    if fase == "DESMANEIRISMO":
+        if s.get("gerar_epub") and not s.get("epub_gerado"):
+            return "EPUB"
+        return "CONCLUIDO"
     if fase == "EPUB":
         return "CONCLUIDO"
     return "CONCLUIDO"
@@ -534,6 +549,119 @@ def gate_maneirismo_capitulo(projeto, n, args):
 
 
 # ----------------------------------------------------------------------------
+# Detector BOOK-WIDE de maneirismo (espelha worker/src/maneirismo.ts) + orcamento
+# global CUMULATIVO. O gate por capitulo reduz a carga; este e a garantia dura:
+# nenhum molde acumula acima do alvo no livro inteiro.
+# ----------------------------------------------------------------------------
+# Orcamento por molde em ocorrencias por 10 mil palavras (mesmos alvos do TS).
+ORC10K_GLOBAL = {
+    "antitese 'nao era X. Era Y.'": 1.5,
+    "aposto antitetico": 1.0,
+    "antitese 'nao X, mas Y'": 1.5,
+    "fragmento antitetico": 1.5,
+    "'do jeito que/de'": 2.5,
+}
+FECHO_MAX_FRACAO = 0.25       # fecho epigramatico isolado em no maximo 1/4 dos capitulos
+NGRAM_MIN = 8                 # n-grama generico: >= 8 ocorrencias no livro
+NGRAM_LIMIAR_POR10K = 3.0
+NGRAM_TOP = 8
+_STOP_PT = set((
+    u"a o as os um uma uns umas de da do das dos e em no na nos nas que se com por para "
+    u"ao à às aos seu sua seus suas é era foi fora ele ela eles elas isso isto lhe lhes me te "
+    u"mas como mais já não sim ou nem entre sobre sem até onde quando quem qual cada todo toda "
+    u"dele dela deles delas num numa pelo pela pelos pelas").split())
+
+
+def _ler_caps(projeto, total):
+    caps = []
+    for n in range(1, int(total) + 1):
+        p = os.path.join(projeto, nome_cap(n))
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8") as fh:
+                caps.append(fh.read())
+        else:
+            caps.append("")
+    return caps
+
+
+def _fecho_isolado(caps, max_pal=8):
+    idx = []
+    for i, cap in enumerate(caps, 1):
+        linhas = [l.strip() for l in (cap or "").strip().split("\n") if l.strip()]
+        if not linhas:
+            continue
+        ult = linhas[-1]
+        if 0 < len(ult.split()) <= max_pal and not ult.startswith("#") and re.search(u"[.!?…][\"'”’)]?$", ult, re.U):
+            idx.append(i)
+    return idx
+
+
+def _ngramas_sobrerep(texto):
+    palavras = [w.lower() for w in re.findall(u"[A-Za-zÀ-ÿ’'\\-]+", texto or "", re.U)]
+    total = len(palavras)
+    freq = {}
+    for n in (4, 5):
+        for i in range(0, len(palavras) - n + 1):
+            sl = palavras[i:i + n]
+            if sum(1 for w in sl if w not in _STOP_PT) < 2:
+                continue
+            g = " ".join(sl)
+            freq[g] = freq.get(g, 0) + 1
+    hits = []
+    for g, c in freq.items():
+        if c < NGRAM_MIN:
+            continue
+        por10k = round(c / total * 10000, 1) if total else 0
+        if por10k >= NGRAM_LIMIAR_POR10K:
+            hits.append((g, c, por10k))
+    hits.sort(key=lambda x: -x[1])
+    return hits[:NGRAM_TOP]
+
+
+def diagnostico_book_wide(projeto, total):
+    """Conta moldes + fecho + n-gramas no manuscrito INTEIRO (verdade do disco).
+    Retorna (acima, relatorio) — acima = lista de descricoes ACIMA do orcamento."""
+    caps = _ler_caps(projeto, total)
+    full = "\n\n".join(caps)
+    palavras = len(full.split())
+    acima, relatorio = [], []
+    for nome, rx in _MOLDES_CAP:
+        if nome not in ORC10K_GLOBAL:
+            continue
+        n = len(rx.findall(full))
+        alvo = max(1, int(round(ORC10K_GLOBAL[nome] * palavras / 10000.0)))
+        if n > alvo:
+            acima.append("molde \"{}\": {}x -> reduza para <= {}".format(nome, n, alvo))
+        relatorio.append("{} {}: {}x (alvo <= {})".format("[X]" if n > alvo else "[ ]", nome, n, alvo))
+    fecho = _fecho_isolado(caps)
+    fecho_alvo = max(1, int(len(caps) * FECHO_MAX_FRACAO))
+    if len(fecho) > fecho_alvo:
+        acima.append("fecho epigramatico isolado em {}/{} capitulos -> <= {} (varie os fechamentos; caps: {})".format(
+            len(fecho), len(caps), fecho_alvo, ",".join(map(str, fecho[:12]))))
+    for g, c, d in _ngramas_sobrerep(full):
+        acima.append("repeticao \"{}\": {}x ({}/10k) -> varie".format(g, c, d))
+    return acima, "\n".join(relatorio)
+
+
+def prompt_desmaneirismo(projeto, state, piso):
+    total = _i(state.get("total_capitulos_previstos"))
+    acima, _rel = diagnostico_book_wide(projeto, total)
+    alvos = "\n".join("- " + a for a in acima[:16])
+    return (
+        PREAMBULO +
+        "\nFASE DESMANEIRISMO (anti-repeticao, LIVRO INTEIRO). Os MOLDES abaixo estao "
+        "SOBRE-REPRESENTADOS no manuscrito consolidado (contagem REAL do detector). "
+        "Reduza CADA UM ao alvo, DESADENSANDO o tique: delegue ao subagente "
+        "`livro-revisor` (ou `livro-escritor`) em opus via Task, que reescreve a "
+        "construcao repetida com sintaxe variada, PRESERVANDO sentido, fatos e voz. "
+        "NAO reescreva cena a toa; so desfaca a repeticao. Edite os capitulo-NN.md "
+        "afetados (cada um deve continuar com >= {piso} palavras) e NAO deixe "
+        "meta-texto/comentario. Encerre a passada quando reduzir os moldes.\n"
+        "MOLDES ACIMA DO ORCAMENTO (book-wide):\n{alvos}\n"
+    ).format(piso=piso, alvos=alvos)
+
+
+# ----------------------------------------------------------------------------
 # Loop principal
 # ----------------------------------------------------------------------------
 def executar(projeto, args):
@@ -590,6 +718,8 @@ def executar(projeto, args):
             prompt = prompt_review(iter_before + 1)
         elif fase == "REESCRITA":
             prompt = PROMPT_REESCRITA
+        elif fase == "DESMANEIRISMO":
+            prompt = prompt_desmaneirismo(projeto, state, piso)
         elif fase == "EPUB":
             prompt = PROMPT_EPUB
         else:
@@ -604,6 +734,16 @@ def executar(projeto, args):
         # orcamento de tiques, dispara UMA reescrita-alvo (bounded; nao bloqueia).
         if fase == "ESCRITA" and alvo is not None:
             gate_maneirismo_capitulo(projeto, alvo, args)
+
+        # DESMANEIRISMO: reconsolida o MESTRE dos capitulos editados e conta de novo;
+        # cada passada incrementa o contador (= progresso, reentrante via disco).
+        if fase == "DESMANEIRISMO":
+            consolida(projeto, state, piso)
+            state["desmaneirismo_iters"] = _i(state.get("desmaneirismo_iters")) + 1
+            save_state(projeto, state)
+            acima, _rel = diagnostico_book_wide(projeto, _i(state.get("total_capitulos_previstos")))
+            log(projeto, "DESMANEIRISMO iter {}/{}: {} item(s) ainda acima do orcamento.".format(
+                state["desmaneirismo_iters"], _i(state.get("max_desmaneirismo")), len(acima)))
 
         # REVIEW: só aceita com ARTEFATO real no disco; nota vem do arquivo.
         if fase == "REVIEW":
@@ -671,6 +811,7 @@ def build_argparser():
     p.add_argument("--meta", type=float, default=9.0, help="Nota minima (default 9.0).")
     p.add_argument("--max-reescritas", type=int, default=4, help="Rodadas de reescrita (default 4).")
     p.add_argument("--max-estagnacao", type=int, default=3, help="Tentativas sem progresso antes de parar (default 3).")
+    p.add_argument("--max-desmaneirismo", type=int, default=3, help="Iteracoes da fase DESMANEIRISMO book-wide (default 3).")
     p.add_argument("--piso", type=int, default=PISO_PALAVRAS_DEFAULT,
                    help="Piso de palavras por capitulo (default {}).".format(PISO_PALAVRAS_DEFAULT))
     p.add_argument("--fase-timeout", type=int, default=0, help="Timeout por chamada (s; 0 = sem).")

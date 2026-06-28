@@ -45,11 +45,23 @@ Próximas fatias do plano (ainda NÃO aplicadas): (3) passe de elevação + best
 nos picos (runner/`livro-do-zero-ao-epub`); (4) modo "excepcional" no
 `book-bestseller-review`. — Fatias 1 (gate A+B) e 2 (perfil-de-voz, Refino C): ✓.
 
-### `livro-do-zero-ao-epub/assets/livro_runner.py` — portão de maneirismo por capítulo
+### `livro-do-zero-ao-epub/assets/livro_runner.py` — gate de maneirismo (capítulo + book-wide)
 
-Na fase ESCRITA, depois de cada capítulo, o runner conta os moldes mecânicos
-(antíteses "não era X. Era Y.", fragmentos, "do jeito que/de") e, se algum passar
-do orçamento por-capítulo (≤1 cada), dispara **uma** reescrita-alvo desadensando o
-tique (bounded: 0 ou 1 por escrita, não bloqueia o avanço). Espelha
-`worker/src/maneirismo.ts`. Pega o tique na origem, nos N capítulos, não só no fim.
-(Patch é só o `assets/livro_runner.py`; o instalador mescla por cima do skill.)
+Duas travas determinísticas (espelham `worker/src/maneirismo.ts`):
+
+1. **Por capítulo (ESCRITA):** após cada capítulo, conta os moldes e, se algum
+   passar do orçamento por-capítulo (≤1 cada), dispara **uma** reescrita-alvo
+   (bounded; não bloqueia o avanço). Reduz a carga na origem.
+2. **Book-wide (fase `DESMANEIRISMO`, garantia dura):** quando a REVIEW passa
+   (`nota ≥ meta`) — e também ao concluir por teto — antes de EPUB/CONCLUIR, conta
+   no manuscrito INTEIRO os moldes nomeados + fecho epigramático isolado + um
+   **detector GENÉRICO de n-gramas 3–5 palavras sobre-representados** (pega tiques
+   novos). Se acima do **orçamento global cumulativo** (`ORC10K_GLOBAL` por molde,
+   fecho ≤¼ dos caps), dispara uma passada dirigida por contagem (delega ao
+   `livro-revisor`/`livro-escritor` em opus com os moldes+contagens), reconsolida o
+   MESTRE, **re-conta e itera até abaixo do orçamento** ou `--max-desmaneirismo`
+   (default 3). Determinístico (verificado por recontagem), reentrante (lê do disco,
+   sobrevive à auto-retomada do Max), preserva piso/voz e passa pelo sanitizador.
+
+Teste do detector: `python tools/test_desmaneirismo.py`.
+(Patch é só `assets/livro_runner.py`; o instalador mescla por cima do skill.)

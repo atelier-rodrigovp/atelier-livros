@@ -30,9 +30,11 @@ hoje uma skill de autor; os demais estão com `skill_escrita = nenhuma`.
 que não versiona e é sobrescrito num reinstall). Depois de reinstalar skills, rode
 `pwsh worker/skill-patches/instalar-skills.ps1` para reaplicar nossas edições (com
 backup). Hoje: `arquiteto-de-enredo` v6.3 (portão de ambição ≥8 + voz com
-assinatura positiva) e `livro-do-zero-ao-epub` (portão de maneirismo por capítulo
-no runner). O detector de repetição vive em `worker/src/maneirismo.ts` (TS, testado)
-e espelhado no runner.
+assinatura positiva) e `livro-do-zero-ao-epub` (gate de maneirismo no runner:
+**por capítulo** na ESCRITA + **book-wide** na fase `DESMANEIRISMO`, que itera
+contando→reescrevendo→recontando até abaixo do orçamento global antes de
+EPUB/CONCLUIR). O detector de repetição vive em `worker/src/maneirismo.ts` (TS,
+testado) e espelhado no runner.
 
 ## Trava antivazamento (nenhum meta-texto chega ao livro)
 
