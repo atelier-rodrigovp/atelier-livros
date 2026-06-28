@@ -24,7 +24,7 @@ import {
 } from "./lib.js";
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
 import { sanitizarCapitulo, metaResidual } from "./sanitize.js";
-import { LimiteMaxError, limiteMaxRetryAt } from "./limite-max.js";
+import { LimiteMaxError, limiteMaxRetryAt, pareceLimiteMax } from "./limite-max.js";
 import { contarManeirismos, resumoManeirismo, diagnosticarRepeticao } from "./maneirismo.js";
 import { existsSync } from "node:fs";
 
@@ -518,6 +518,30 @@ async function criarVolumes(job: Job, hb?: Heartbeat) {
 // ===========================================================================
 // escrever_livro — livro_runner.py (opus) até CONCLUIDO; verdade do disco
 // ===========================================================================
+// Re-enfileira escrever_livro de um projeto SEM duplicar: se já existe um job
+// queued aberto desse projeto, não cria outro (mata os "2× Na fila").
+async function enfileirarEscritaSeNovo(projectId: string): Promise<void> {
+  const { data } = await sb.from("jobs").select("id").eq("owner", OWNER)
+    .eq("project_id", projectId).eq("tipo", "escrever_livro").eq("status", "queued").limit(1);
+  if ((data?.length ?? 0) > 0) return;
+  await must(sb.from("jobs").insert({ owner: OWNER, tipo: "escrever_livro", project_id: projectId, status: "queued" }));
+}
+
+// Upsert de capítulo resiliente: um erro de rede transitório ("fetch failed") não
+// pode abortar a sincronização dos demais capítulos. Tenta 3×, depois loga e segue.
+async function upsertCapResiliente(row: Record<string, unknown>): Promise<void> {
+  for (let i = 1; i <= 3; i++) {
+    try {
+      const { error } = await sb.from("chapters").upsert(row, { onConflict: "edition_id,numero" });
+      if (!error) return;
+      if (i === 3) return void console.error(`[chapters] upsert falhou após 3 tentativas: ${error.message}`);
+    } catch (e: any) {
+      if (i === 3) return void console.error(`[chapters] upsert exceção após 3 tentativas: ${String(e?.message ?? e)}`);
+    }
+    await new Promise((res) => setTimeout(res, 800 * i));
+  }
+}
+
 async function escreverLivro(job: Job, hb?: Heartbeat) {
   if (!RUNNER_PATH) throw new Error("RUNNER_PATH não configurado no worker/.env");
   const proj = await getProject(job.project_id!);
@@ -539,6 +563,12 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   await sb.from("projects").update({ status: "escrevendo" }).eq("id", job.project_id!);
   // baseline para detectar progresso (escrita longa é retomável do disco)
   const capsAntes = (await chaptersOnDisk(path.join(dir, "manuscrito"), piso)).length;
+  // Grava a contagem REAL do disco JÁ no início (antes do poller de 20s). Run curto
+  // que aborta em ~13s não pode mais reportar "0/N" com capítulos no disco.
+  await setProgress(job.id, {
+    fase: "ESCRITA", cap_atual: capsAntes,
+    total: Number(proj.total_capitulos ?? 0), continua: true,
+  });
 
   // Poller de progresso (verdade do disco) enquanto o runner roda
   const poll = setInterval(async () => {
@@ -588,22 +618,33 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     await uploadFile("manuscritos", key, c.file);
     const txt = await readText(c.file);
     const titulo = txt.split("\n").find((l) => l.startsWith("#"))?.replace(/^#+\s*/, "").trim() ?? null;
-    await must(sb.from("chapters").upsert(
-      { owner: OWNER, edition_id: edicao.id, numero: c.numero, titulo, palavras: countWords(txt), storage_path: key },
-      { onConflict: "edition_id,numero" }
-    ));
+    await upsertCapResiliente({ owner: OWNER, edition_id: edicao.id, numero: c.numero, titulo, palavras: countWords(txt), storage_path: key });
   }
+  // Reporta a contagem REAL do disco APÓS o run, antes de qualquer branch/throw —
+  // assim a UI nunca fica em "0/N" mesmo num run curto que pausa/erra.
+  await setProgress(job.id, {
+    fase: state?.fase_atual ?? "ESCRITA", cap_atual: caps.length, total,
+    nota: state?.ultima_nota ?? null, palavras: state?.palavras_totais ?? 0,
+    continua: !completo,
+  });
 
   // Incompleto: escrita longa é retomável (verdade do disco). Se ESTA execução avançou,
   // re-enfileira para continuar (interrupção/limite de sessão não mata o livro). Só falha
   // de verdade se não escreveu NENHUM capítulo novo (travamento real).
   if (!completo) {
-    // Limite do Max detectado pela TERMINAÇÃO desta execução: o runner faz print()
-    // de cada log, então r.out/r.err contêm SÓ a saída deste run (não o log
-    // acumulado) — sem o falso-positivo de "linha antiga". Vale TENHA AVANÇADO OU
-    // NÃO: limite é throttle, pausa e retoma no reset sem gastar tentativa.
-    const saidaRun = `${r.out}\n${r.err}`.slice(-2500);
-    const retryAt = limiteMaxRetryAt(saidaRun);
+    // LIMITE DO MAX por QUALQUER de 3 fontes (defesa em profundidade — não confiar
+    // só no tail volátil do CLI): (a) saída deste run, (b) marca limpa do runner
+    // (RUNNER_LIMITE_MAX / estado.aguardando_reset), (c) tail do runner.log.
+    const saidaRun = `${r.out}\n${r.err}`.slice(-3000);
+    const marca = /RUNNER_LIMITE_MAX\s+reset=(\S+)/.exec(r.out || "");
+    const logTail = (await readText(path.join(dir, "runner.log"))).slice(-2000);
+    const backoff = () => new Date(Date.now() + 35 * 60_000).toISOString();
+    let retryAt: string | null = limiteMaxRetryAt(saidaRun);
+    if (!retryAt && (marca || (state as any)?.aguardando_reset)) {
+      const hint = marca?.[1] || (state as any)?.reset_at || "";
+      retryAt = limiteMaxRetryAt("usage limit reached. resets at " + hint) ?? backoff();
+    }
+    if (!retryAt && pareceLimiteMax(logTail)) retryAt = limiteMaxRetryAt(logTail) ?? backoff();
     if (retryAt) {
       const hh = new Date(retryAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
       throw new LimiteMaxError(
@@ -612,13 +653,24 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
         retryAt
       );
     }
-    // Sem limite, mas avançou: interrupção comum (fim de sessão) → re-enfileira já.
+    // Avançou: re-enfileira (com dedupe) e segue.
     if (caps.length > capsAntes) {
-      await must(sb.from("jobs").insert({ owner: OWNER, tipo: "escrever_livro", project_id: job.project_id, status: "queued" }));
+      await enfileirarEscritaSeNovo(job.project_id!);
       await setProgress(job.id, { fase: "ESCRITA", cap_atual: caps.length, total, continua: true });
       return;
     }
-    const log = (await readText(path.join(dir, "runner.log"))).slice(-300);
+    // NÃO avançou, mas o livro está ÍNTEGRO e incompleto (caps>0): num livro longo
+    // "0 capítulos novos neste run" é quase sempre throttle/interrupção, NÃO
+    // travamento. Re-tenta com BACKOFF (~15min) SEM queimar tentativa (reusa a
+    // pausa do LimiteMaxError). Só vira erro real por assinatura genuína.
+    if (caps.length > 0) {
+      throw new LimiteMaxError(
+        `Escrita não avançou neste run em ${caps.length}/${total} (livro íntegro). ` +
+          `Re-tentando em ~15min, sem queimar tentativa.`,
+        new Date(Date.now() + 15 * 60_000).toISOString()
+      );
+    }
+    const log = logTail.slice(-300);
     throw new Error(`escrita não avançou em ${caps.length}/${total} (rc=${r.code}). ${(r.err || r.out || log).slice(-300)}`);
   }
 
@@ -633,7 +685,7 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // Se houve meta-texto NESTE run, o EPUB construído pelo runner é suspeito:
   // NÃO publica manuscrito/EPUB; re-enfileira para remontar do texto já limpo.
   if (sujeiraAposRunner) {
-    await must(sb.from("jobs").insert({ owner: OWNER, tipo: "escrever_livro", project_id: job.project_id, status: "queued" }));
+    await enfileirarEscritaSeNovo(job.project_id!);
     await setProgress(job.id, { fase: "ESCRITA", cap_atual: caps.length, total, sanitizado: true, continua: true });
     console.log("[sanitize] meta-texto removido neste run; EPUB não publicado, re-enfileirado para rebuild limpo.");
     return;

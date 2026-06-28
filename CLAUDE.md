@@ -33,8 +33,9 @@ backup). Hoje: `arquiteto-de-enredo` v6.3 (portão de ambição ≥8 + voz com
 assinatura positiva) e `livro-do-zero-ao-epub` (gate de maneirismo no runner:
 **por capítulo** na ESCRITA + **book-wide** na fase `DESMANEIRISMO`, que itera
 contando→reescrevendo→recontando até abaixo do orçamento global antes de
-EPUB/CONCLUIR). O detector de repetição vive em `worker/src/maneirismo.ts` (TS,
-testado) e espelhado no runner.
+EPUB/CONCLUIR) + distingue **throttle do Max de estagnação** (não envenena o
+contador; emite `RUNNER_LIMITE_MAX`). O detector de repetição vive em
+`worker/src/maneirismo.ts` (TS, testado) e espelhado no runner.
 
 ## Trava antivazamento (nenhum meta-texto chega ao livro)
 

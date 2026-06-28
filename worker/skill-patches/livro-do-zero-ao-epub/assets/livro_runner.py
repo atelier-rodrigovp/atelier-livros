@@ -497,6 +497,23 @@ def run_claude(projeto, prompt, args):
     return proc.returncode, out, proc.stderr or ""
 
 
+# Assinatura do LIMITE DO MAX (espelha worker/src/limite-max.ts). E throttle, NAO erro.
+_RE_LIMITE_MAX = re.compile(
+    u"hit your (?:session|usage) limit|(?:session|usage) limit reached|usage limit|"
+    u"limit reached|limite de uso do plano max|plano max atingido", re.I | re.U)
+_RE_RESET_HORA = re.compile(
+    u"(?:reset[s]?|reseta)\\s*(?:at\\s+)?(\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?\\s*m\\.?|\\d{1,2}:\\d{2})", re.I | re.U)
+
+
+def detecta_limite_max(texto):
+    return bool(texto) and bool(_RE_LIMITE_MAX.search(texto))
+
+
+def hora_reset(texto):
+    m = _RE_RESET_HORA.search(texto or "")
+    return m.group(1).strip() if m else ""
+
+
 # ----------------------------------------------------------------------------
 # Portao de maneirismo por capitulo (deterministico, na origem)
 # ----------------------------------------------------------------------------
@@ -671,6 +688,17 @@ def executar(projeto, args):
                  "epub={} ===".format(state["fase_atual"], state["meta_nota"],
                  state["max_iteracoes_reescrita"], piso, state["gerar_epub"]))
 
+    # Cada invocacao do runner e um run NOVO. O contador de estagnacao conta passos
+    # SEM PROGRESSO DENTRO deste run — nao atraves de re-enfileiramentos do worker.
+    # Throttle do Max em runs anteriores nao pode envenenar este: reseta no inicio.
+    s0 = ensure_fields(load_state(projeto), args)
+    if _i(s0["_runner"].get("tentativas_sem_progresso")) or s0.get("aguardando_reset"):
+        log(projeto, "Inicio do run: reset do contador de estagnacao (era {}) e aguardando_reset.".format(
+            s0["_runner"].get("tentativas_sem_progresso")))
+    s0["_runner"]["tentativas_sem_progresso"] = 0
+    s0["aguardando_reset"] = False
+    save_state(projeto, s0)
+
     while True:
         state = ensure_fields(load_state(projeto), args)
         state = sincroniza_contadores_do_disco(projeto, state, piso)  # disco manda
@@ -729,6 +757,20 @@ def executar(projeto, args):
         rc, out, err = run_claude(projeto, prompt, args)
         state = ensure_fields(load_state(projeto), args)
         state = sincroniza_contadores_do_disco(projeto, state, piso)
+
+        # LIMITE DO MAX: throttle, NAO estagnacao. Nao incrementa o contador; grava
+        # marca limpa e parseavel (estado + stdout) e encerra para o worker pausar e
+        # retomar do disco (sem queimar tentativa). Nao confiar no eco volatil do CLI.
+        if detecta_limite_max((out or "") + "\n" + (err or "")):
+            reset = hora_reset((out or "") + "\n" + (err or ""))
+            state["_runner"]["tentativas_sem_progresso"] = 0
+            state["aguardando_reset"] = True
+            state["reset_at"] = reset
+            save_state(projeto, state)
+            log(projeto, "LIMITE DO MAX na fase {} (reset={}). Throttle != estagnacao: "
+                         "encerrando para o worker pausar e retomar.".format(fase, reset or "?"))
+            print("RUNNER_LIMITE_MAX reset={}".format(reset or "?"), flush=True)
+            return 0
 
         # Portao de maneirismo na ORIGEM: se o capitulo recem-escrito estourou o
         # orcamento de tiques, dispara UMA reescrita-alvo (bounded; nao bloqueia).

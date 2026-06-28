@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { LimiteMaxError, parseHoraReset, limiteMaxRetryAt, pareceLimiteMax } from "./limite-max.js";
+import { LimiteMaxError, parseHoraReset, limiteMaxRetryAt, pareceLimiteMax, deveRecuperar } from "./limite-max.js";
 
 const AGORA = new Date("2026-06-27T00:30:00"); // 00:30 local
 
@@ -73,6 +73,21 @@ describe("pareceLimiteMax — recuperação de jobs mortos", () => {
     expect(pareceLimiteMax("fundação ausente — rode criar_fundacao antes de escrever_livro")).toBe(false);
     expect(pareceLimiteMax("MANUSCRITO-MESTRE.md ausente para pt-BR")).toBe(false);
     expect(pareceLimiteMax("")).toBe(false);
+  });
+});
+
+describe("deveRecuperar — recupera Max E 'não avançou em N/total' (N>0)", () => {
+  it("recupera limite do Max", () => {
+    expect(deveRecuperar("Limite de uso do plano Max atingido (reseta 7:20pm).")).toBe(true);
+  });
+  it("recupera 'escrita não avançou em 20/32' (livro longo íntegro)", () => {
+    expect(deveRecuperar("escrita não avançou em 20/32 (rc=2). ...")).toBe(true);
+    expect(deveRecuperar("escrita não avançou em 4/32 (rc=2).")).toBe(true);
+  });
+  it("NÃO recupera 0/N (nenhum capítulo) nem erros reais", () => {
+    expect(deveRecuperar("escrita não avançou em 0/32 (rc=1).")).toBe(false);
+    expect(deveRecuperar("fundação ausente — rode criar_fundacao")).toBe(false);
+    expect(deveRecuperar("Credit balance is too low")).toBe(false);
   });
 });
 

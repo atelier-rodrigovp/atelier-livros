@@ -70,3 +70,12 @@ export function limiteMaxRetryAt(
 export function pareceLimiteMax(texto: string): boolean {
   return !!texto && LIMITE_RE.test(texto);
 }
+
+// Job morto que MERECE recuperação (re-enfileirar): limite do Max OU o erro
+// genérico "escrita não avançou em N/total" com N>0 — num livro longo íntegro,
+// "0 capítulos novos neste run" é throttle/interrupção, não travamento real.
+export function deveRecuperar(erro: string): boolean {
+  if (pareceLimiteMax(erro)) return true;
+  const m = /escrita n[ãa]o avan[çc]ou em (\d+)\s*\/\s*\d+/i.exec(erro || "");
+  return !!m && Number(m[1]) > 0;
+}

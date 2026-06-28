@@ -636,7 +636,11 @@ export default function Projeto() {
                 const escrevendo = j?.status === "queued" || j?.status === "running";
                 const p: any = j?.progresso || {};
                 const total = Number(p.total ?? proj.total_capitulos ?? 0);
-                const feitos = escrevendo ? Number(p.cap_atual ?? 0) : origem ? chapters[origem.id] ?? 0 : 0;
+                // Verdade do disco: nunca sub-reportar abaixo do que já está
+                // sincronizado em `chapters`. Run curto que pausa antes do poller
+                // deixava cap_atual=0 → mostrava "0/N" com capítulos no disco.
+                const sincronizados = origem ? chapters[origem.id] ?? 0 : 0;
+                const feitos = escrevendo ? Math.max(Number(p.cap_atual ?? 0), sincronizados) : sincronizados;
                 const pct = total > 0 ? Math.min(100, Math.round((feitos / total) * 100)) : 0;
                 // Nota oficial = avaliação independente (nota_review). Auto-nota da
                 // escrita fica separada e rotulada como provisória.

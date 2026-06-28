@@ -63,5 +63,12 @@ Duas travas determinísticas (espelham `worker/src/maneirismo.ts`):
    (default 3). Determinístico (verificado por recontagem), reentrante (lê do disco,
    sobrevive à auto-retomada do Max), preserva piso/voz e passa pelo sanitizador.
 
-Teste do detector: `python tools/test_desmaneirismo.py`.
+**Confiabilidade da escrita longa (Max):** o runner distingue **throttle do Max**
+de **estagnação real** — `detecta_limite_max()` (espelha `limite-max.ts`); ao bater
+o limite **não incrementa** o contador de estagnação, grava marca limpa
+(`RUNNER_LIMITE_MAX reset=…` no stdout + `aguardando_reset`/`reset_at` no estado) e
+encerra para o worker pausar+retomar. O contador de estagnação é **resetado no
+início de cada run** (não herda envenenamento de runs anteriores barrados pelo Max).
+
+Testes: `python tools/test_desmaneirismo.py` e `python tools/test_runner_limite.py`.
 (Patch é só `assets/livro_runner.py`; o instalador mescla por cima do skill.)

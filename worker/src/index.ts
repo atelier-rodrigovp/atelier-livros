@@ -3,7 +3,7 @@
 import "dotenv/config";
 import { sb, OWNER } from "./supabase.js";
 import { executarJob, type Job } from "./jobs.js";
-import { LimiteMaxError, pareceLimiteMax } from "./limite-max.js";
+import { LimiteMaxError, deveRecuperar } from "./limite-max.js";
 
 // Usar a assinatura MAX (login OAuth do Claude Code), não créditos de API.
 // Se ANTHROPIC_API_KEY estiver no ambiente, o `claude` headless a prioriza e
@@ -30,28 +30,37 @@ async function heartbeat(extra: Record<string, unknown> = {}) {
   if (error) console.error("[heartbeat] erro:", error.message);
 }
 
-// Recupera jobs que morreram como 'error' por LIMITE DO MAX (classificação antiga,
-// ou run que avançou e bateu o limite). Volta para 'queued', limpa o erro, zera
-// attempts e os deixa rodar AGORA (a janela do Max do erro antigo já reabriu; se
-// reabater o limite, o escreverLivro novo pausa corretamente com retry_at). NÃO
-// toca em erros reais (fundação ausente, disco, etc.) — só a assinatura do Max.
+// Recupera jobs que morreram como 'error' por LIMITE DO MAX ou por "não avançou
+// em N/total" (N>0) num livro longo íntegro — throttle/interrupção, não travamento.
+// Volta para 'queued', limpa o erro, zera attempts. NÃO toca em erros reais
+// (fundação ausente, crédito, disco). Dedupe: 1 recuperado por projeto (e pula se
+// o projeto já tem um job queued aberto) — mata os "2× Na fila".
 async function recuperarLimiteMax() {
   const { data, error } = await sb
     .from("jobs")
-    .select("id,tipo,erro,progresso")
+    .select("id,tipo,project_id,erro,progresso")
     .eq("owner", OWNER)
     .eq("status", "error")
     .not("erro", "is", null);
   if (error) return;
+  // projetos que já têm escrever_livro queued aberto → não recuperar (evita duplicar)
+  const { data: abertos } = await sb.from("jobs").select("project_id")
+    .eq("owner", OWNER).eq("tipo", "escrever_livro").eq("status", "queued");
+  const jaAberto = new Set((abertos ?? []).map((a: any) => a.project_id));
   for (const j of data ?? []) {
-    if (!pareceLimiteMax(String((j as any).erro ?? ""))) continue;
-    const progresso = { ...(((j as any).progresso as Record<string, unknown>) ?? {}), aguardando_reset: false, retry_at: null, motivo: "limite do Max (recuperado)" };
+    if (!deveRecuperar(String((j as any).erro ?? ""))) continue;
+    const pid = (j as any).project_id;
+    if (pid && jaAberto.has(pid)) continue; // dedupe por projeto
+    const progresso = { ...(((j as any).progresso as Record<string, unknown>) ?? {}), aguardando_reset: false, retry_at: null, motivo: "limite/interrupção do Max (recuperado)" };
     const { error: upErr } = await sb
       .from("jobs")
       .update({ status: "queued", erro: null, attempts: 0, progresso, locked_by: null, locked_at: null })
       .eq("id", (j as any).id)
       .eq("status", "error");
-    if (!upErr) console.log(`[recuperação] ${(j as any).tipo} ${(j as any).id} estava 'error' por limite do Max → re-enfileirado.`);
+    if (!upErr) {
+      if (pid) jaAberto.add(pid);
+      console.log(`[recuperação] ${(j as any).tipo} ${(j as any).id} (proj ${pid}) era 'error' por Max/interrupção → re-enfileirado.`);
+    }
   }
 }
 
