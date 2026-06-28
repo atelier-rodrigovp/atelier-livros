@@ -72,5 +72,21 @@ proj3 = _mini_projeto(grande)
 acima3, _ = m.diagnostico_book_wide(proj3, 1)
 check(not any("nao era" in a.lower() for a in acima3), "1 antitese em 5000 palavras nao estoura")
 
+print("\nMICRO-LOOP padrao: done_condition da ESCRITA exige REVISOES feitas")
+import os as _os
+mp = _mini_projeto([u"# Cap\n" + (u"palavra " * 1500) for _ in range(2)])
+st = {"total_capitulos_previstos": 2, "revisao_por_capitulo": True}
+check(m.done_condition(mp, "ESCRITA", st, 0, 1400) is False,
+      "2 caps escritos mas NAO revisados -> ESCRITA nao conclui (default ligado)")
+_os.makedirs(_os.path.join(mp, "review"), exist_ok=True)
+for n in (1, 2):
+    open(m._marcador_revcap(mp, n), "w").write("x")
+check(m.done_condition(mp, "ESCRITA", st, 0, 1400) is True,
+      "apos revisar os 2 -> ESCRITA conclui")
+st_off = {"total_capitulos_previstos": 2, "revisao_por_capitulo": False}
+mp2 = _mini_projeto([u"# Cap\n" + (u"palavra " * 1500) for _ in range(2)])
+check(m.done_condition(mp2, "ESCRITA", st_off, 0, 1400) is True,
+      "com revisao DESLIGADA -> nao exige marcadores (escape hatch)")
+
 print("\n=== %s ===" % ("TODOS OK" if not falhas else "%d FALHA(S)" % len(falhas)))
 raise SystemExit(1 if falhas else 0)

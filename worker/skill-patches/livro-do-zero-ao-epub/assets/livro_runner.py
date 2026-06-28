@@ -166,6 +166,14 @@ def primeiro_cap_nao_revisado(projeto, total, piso):
     return None
 
 
+def revisao_ligada(args):
+    """Time por capitulo (escritor->revisor->editor) e o PADRAO. Desliga so com
+    --sem-revisao-por-capitulo ou env REVISAO_POR_CAPITULO=0 (escape hatch)."""
+    if os.environ.get("REVISAO_POR_CAPITULO") == "0":
+        return False
+    return not getattr(args, "sem_revisao_por_capitulo", False)
+
+
 def sincroniza_contadores_do_disco(projeto, state, piso):
     """Sobrescreve capitulos_aprovados a partir do disco. O agente não manda
     nesse número — o disco manda."""
@@ -242,7 +250,7 @@ def ensure_fields(state, args):
         state["max_desmaneirismo"] = int(getattr(args, "max_desmaneirismo", 3) or 3)
     except (TypeError, ValueError):
         state["max_desmaneirismo"] = 3
-    state["revisao_por_capitulo"] = bool(getattr(args, "revisao_por_capitulo", False))
+    state["revisao_por_capitulo"] = revisao_ligada(args)
     if args.epub:
         state["gerar_epub"] = True
     if state.get("fase_atual") not in FASES_VALIDAS:
@@ -817,7 +825,7 @@ def executar(projeto, args):
             tot = _i(state.get("total_capitulos_previstos"))
             # Micro-loop (Frente 2): antes de escrever o proximo, REVISA o 1o capitulo
             # valido ainda nao revisado (escritor->revisor->editor). Reentrante (marcador).
-            if getattr(args, "revisao_por_capitulo", False):
+            if revisao_ligada(args):
                 revisando_cap = primeiro_cap_nao_revisado(projeto, tot, piso)
             if revisando_cap is not None:
                 log(projeto, "--- ESCRITA/REVISAO por capitulo: revisando cap {} (micro-loop) ---".format(revisando_cap))
@@ -957,7 +965,8 @@ def build_argparser():
     p.add_argument("--max-reescritas", type=int, default=4, help="Rodadas de reescrita (default 4).")
     p.add_argument("--max-estagnacao", type=int, default=3, help="Tentativas sem progresso antes de parar (default 3).")
     p.add_argument("--max-desmaneirismo", type=int, default=3, help="Iteracoes da fase DESMANEIRISMO book-wide (default 3).")
-    p.add_argument("--revisao-por-capitulo", action="store_true", help="Micro-loop escritor->revisor->editor por capitulo na ESCRITA (mais caro; default off).")
+    p.add_argument("--revisao-por-capitulo", action="store_true", help="(compat) o time por capitulo ja e o PADRAO.")
+    p.add_argument("--sem-revisao-por-capitulo", action="store_true", help="DESLIGA o micro-loop escritor->revisor->editor por capitulo (baratear). Tambem via env REVISAO_POR_CAPITULO=0.")
     p.add_argument("--max-edicoes-por-cap", type=int, default=6, help="Maximo de edicoes pontuais do revisor por capitulo (default 6).")
     p.add_argument("--piso", type=int, default=PISO_PALAVRAS_DEFAULT,
                    help="Piso de palavras por capitulo (default {}).".format(PISO_PALAVRAS_DEFAULT))

@@ -87,6 +87,12 @@ export default function Projeto() {
   const [relTxt, setRelTxt] = useState("");
   const [relCarregando, setRelCarregando] = useState(false);
   const [relRaw, setRelRaw] = useState(false);
+  // Time por capítulo (escritor→revisor→editor) é o PADRÃO; toggle para desligar.
+  const [semRevisao, setSemRevisao] = useState(() => localStorage.getItem(`semrev-${id}`) === "1");
+  function alternarRevisaoCap(off: boolean) {
+    setSemRevisao(off);
+    localStorage.setItem(`semrev-${id}`, off ? "1" : "0");
+  }
   const [melhOpen, setMelhOpen] = useState(false);
   const [melhEd, setMelhEd] = useState<Edition | null>(null);
   const [melhTxt, setMelhTxt] = useState("");
@@ -688,11 +694,24 @@ export default function Projeto() {
                       </div>
                     )}
                     <div className="flex items-center gap-3">
-                      <Button title={dicaRefino} disabled={escrevendo || escritaPausada} onClick={() => enfileira("escrever_livro", {})}>
+                      <Button title={dicaRefino} disabled={escrevendo || escritaPausada} onClick={() => enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {})}>
                         {escrevendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenLine className="h-4 w-4" />}
                         {rotulo}
                       </Button>
                       <JobStatus job={j} />
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed p-2.5">
+                      <div className="space-y-0.5 pr-3">
+                        <p className="text-xs font-medium">
+                          Time por capítulo {semRevisao ? "(desligado)" : "— escritor → revisor → editor"}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {semRevisao
+                            ? "Mais barato (só escritor). O revisor/editor por capítulo está desligado para este livro."
+                            : "Padrão: cada capítulo é revisado e editado antes de ser aceito (corta muleta/maneirismo, checa continuidade e voz). Mais caro no Max — desligue para baratear."}
+                        </p>
+                      </div>
+                      <Switch checked={!semRevisao} onCheckedChange={(on) => alternarRevisaoCap(!on)} aria-label="Time por capítulo" />
                     </div>
                     {completo && (
                       <p className="text-xs">

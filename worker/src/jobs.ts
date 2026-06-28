@@ -595,10 +595,11 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     "--model", MODEL,
     "--claude-bin", CLAUDE_BIN,
   ];
-  // Micro-loop escritor→revisor→editor por capítulo (Frente 2). Mais caro: opt-in
-  // por env REVISAO_POR_CAPITULO=1 ou payload.revisao_por_capitulo. Default off.
-  if (process.env.REVISAO_POR_CAPITULO === "1" || job.payload?.revisao_por_capitulo) {
-    args.push("--revisao-por-capitulo");
+  // Micro-loop escritor→revisor→editor por capítulo é o PADRÃO (camada central de
+  // qualidade). Escape hatch para baratear: env REVISAO_POR_CAPITULO=0 ou
+  // payload.sem_revisao_por_capitulo → desliga.
+  if (process.env.REVISAO_POR_CAPITULO === "0" || job.payload?.sem_revisao_por_capitulo) {
+    args.push("--sem-revisao-por-capitulo");
   }
   let r;
   try {

@@ -75,8 +75,8 @@ início de cada run** (não herda envenenamento de runs anteriores barrados pelo
   ("coisa"/"coisas", "meio que", "na verdade"…) com orçamento APERTADO ("coisa" ≤1/cap,
   ~4/10k book-wide). Entra no gate por capítulo E na fase DESMANEIRISMO. ("coisa" batia
   ~1 a cada 200 palavras — 572× na Biblioteca Afogada — e passava batido antes.)
-- **Frente 2 — micro-loop escritor→revisor→editor por capítulo** (`--revisao-por-capitulo`,
-  default OFF; opt-in via env `REVISAO_POR_CAPITULO=1`): na ESCRITA, após escrever o
+- **Frente 2 — micro-loop escritor→revisor→editor por capítulo (PADRÃO ON)**; escape
+  hatch `--sem-revisao-por-capitulo` / env `REVISAO_POR_CAPITULO=0`: na ESCRITA, após escrever o
   capítulo, um revisor leve (`livro-revisor`, sonnet) critica spec/continuidade/muletas/voz
   e o editor (`livro-editor`) aplica edições + grava o estado-narrativo, ANTES de aceitar.
   Reentrante (marcadores `review/_revcap-NN.done`); `--max-edicoes-por-cap`. Porta a
