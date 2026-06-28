@@ -25,7 +25,7 @@ import {
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
 import { sanitizarCapitulo, metaResidual } from "./sanitize.js";
 import { LimiteMaxError, limiteMaxRetryAt } from "./limite-max.js";
-import { contarManeirismos, resumoManeirismo, ORCAMENTO_POR_10K } from "./maneirismo.js";
+import { contarManeirismos, resumoManeirismo, diagnosticarRepeticao } from "./maneirismo.js";
 import { existsSync } from "node:fs";
 
 export interface Job {
@@ -942,6 +942,37 @@ const PASSES_REVISAO = [
     foco: "Encarne a ameaça mais cedo e fortaleça ganchos de capítulo e tensão: stakes concretos por cena, aberturas que fisgam e fechamentos que impulsionam. Foque onde o relatório aponta hook/final fracos." },
 ];
 
+// Passe de prosa DIRIGIDO POR CONTAGEM: reescreve reduzindo os moldes
+// sobre-representados e RE-CONTA, iterando até tudo ficar abaixo do orçamento (ou
+// um teto de iterações). Determinístico — a saída é verificável, não prometida.
+const MAX_PROSA_ITERS = 3;
+async function passeProsaCountDriven(job: Job, dir: string, sub: string, subRel: string, skill: string, idioma: string) {
+  for (let it = 1; it <= MAX_PROSA_ITERS; it++) {
+    const caps = await chaptersOnDisk(sub, 1);
+    const textos = await Promise.all(caps.map((c) => readText(c.file)));
+    const diag = diagnosticarRepeticao(textos.join("\n\n"), textos);
+    if (!diag.algumAcima) {
+      console.log(`[prosa] iter ${it}: dentro do orçamento — encerra.`);
+      break;
+    }
+    const alvos = [
+      ...diag.moldes.map((m) => `- ${m.nome}: ${m.n}× (${m.por10k}/10k) → reduza para ≤ ${m.alvo}.`),
+      diag.fecho.acima ? `- Fecho epigramático isolado (frase curta sozinha no fim do capítulo): ${diag.fecho.n}/${diag.fecho.total} capítulos → ≤ ${Math.ceil(diag.fecho.total / 3)} (varie os fechamentos).` : "",
+      ...diag.ngramas.slice(0, 6).map((h) => `- repetição "${h.gram}": ${h.n}× → varie/reduza.`),
+    ].filter(Boolean).join("\n");
+    await setProgress(job.id, { fase: "REVISAO", idioma, etapa: `prosa: desadensando tiques (iter ${it}/${MAX_PROSA_ITERS})`, repeticao: { moldes: diag.moldes.length, fecho: diag.fecho.n } });
+    const prompt =
+      "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
+      `REVISÃO DE PROSA — anti-repetição, edição em ${idioma}. Use a skill \`${skill}\`.\n` +
+      "- Os MOLDES abaixo estão SOBRE-REPRESENTADOS (contagem real do detector). Reduza CADA UM ao alvo, no LIVRO TODO, DESADENSANDO o tique: reescreva a construção repetida com sintaxe variada, PRESERVANDO sentido e voz. NÃO reescreva cena à toa — só desfaça o tique.\n" +
+      alvos + "\n" +
+      `- Edite os capítulos afetados em ${subRel}/capitulo-NN.md e reconsolide ${subRel}/MANUSCRITO-MESTRE.md.\n` +
+      "- NÃO altere outras edições/idiomas. NÃO dispare /goal.";
+    const r = await runClaude(prompt, dir);
+    lancarSeLimiteMax(`${r.err}\n${r.out}`, `revisão de ${idioma} (prosa iter ${it})`);
+  }
+}
+
 async function revisar(job: Job, _hb?: Heartbeat) {
   const edicao = await getEdition(job.edition_id!);
   const projectId = edicao.project_id;
@@ -968,26 +999,23 @@ async function revisar(job: Job, _hb?: Heartbeat) {
     if (await exists(marker)) continue; // já feita neste job (retoma após limite do Max sem refazer)
     await setProgress(job.id, { fase: "REVISAO", idioma: edicao.idioma, etapa: `passada ${i + 1}/${fila.length}: ${pass.rotulo}`, total: fila.length, cap_atual: i });
 
-    let extra = "";
     if (pass.key === "prosa") {
-      const lint = contarManeirismos(await lerManuscrito(sub));
-      if (lint.total) {
-        extra = `- Tiques a cortar (linter): ${lint.padroes.slice(0, 4).map((p) => `${p.nome} ${p.n}×`).join("; ")}. ` +
-          `Densidade atual ${lint.por10k}/10k — reduza para abaixo de ${ORCAMENTO_POR_10K}/10k palavras.\n`;
-      }
+      // Prosa = passe verificado por contagem (itera até abaixo do orçamento).
+      await passeProsaCountDriven(job, dir, sub, subRel, skill, edicao.idioma);
+    } else {
+      const prompt =
+        "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
+        `REVISÃO POR DIMENSÃO — ${pass.rotulo} — da edição em ${edicao.idioma}. Use a skill \`${skill}\`.\n` +
+        `- Leia o relatório ${relRel} (pontos fracos priorizados) e a fundação (Bíblia/Mapa/perfil-de-voz), se precisar.\n` +
+        `- ${pass.foco}\n` +
+        `- Faça UMA passada no LIVRO TODO sob ESTA lente, editando os capítulos afetados em ${subRel}/capitulo-NN.md; preserve o que já está bom (não reescreva à toa).\n` +
+        `- Reconsolide ${subRel}/MANUSCRITO-MESTRE.md (capítulos em ordem, headings preservados).\n` +
+        "- NÃO altere outras edições/idiomas. NÃO dispare /goal.";
+      const r = await runClaude(prompt, dir);
+      // Limite do Max no meio de uma passada → pausa/retoma sozinho; o marcador
+      // garante que as passadas já concluídas não são refeitas na retomada.
+      lancarSeLimiteMax(`${r.err}\n${r.out}`, `revisão de ${edicao.idioma} (${pass.rotulo})`);
     }
-    const prompt =
-      "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
-      `REVISÃO POR DIMENSÃO — ${pass.rotulo} — da edição em ${edicao.idioma}. Use a skill \`${skill}\`.\n` +
-      `- Leia o relatório ${relRel} (pontos fracos priorizados) e a fundação (Bíblia/Mapa/perfil-de-voz), se precisar.\n` +
-      `- ${pass.foco}\n` + extra +
-      `- Faça UMA passada no LIVRO TODO sob ESTA lente, editando os capítulos afetados em ${subRel}/capitulo-NN.md; preserve o que já está bom (não reescreva à toa).\n` +
-      `- Reconsolide ${subRel}/MANUSCRITO-MESTRE.md (capítulos em ordem, headings preservados).\n` +
-      "- NÃO altere outras edições/idiomas. NÃO dispare /goal.";
-    const r = await runClaude(prompt, dir);
-    // Limite do Max no meio de uma passada → pausa/retoma sozinho; o marcador
-    // garante que as passadas já concluídas não são refeitas na retomada.
-    lancarSeLimiteMax(`${r.err}\n${r.out}`, `revisão de ${edicao.idioma} (${pass.rotulo})`);
     await writeFile(marker, new Date().toISOString(), "utf8");
   }
 

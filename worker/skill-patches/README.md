@@ -44,3 +44,12 @@ Mudanças (ver `## Registro de versões` → v6.2 no SKILL.md):
 Próximas fatias do plano (ainda NÃO aplicadas): (3) passe de elevação + best-of-N
 nos picos (runner/`livro-do-zero-ao-epub`); (4) modo "excepcional" no
 `book-bestseller-review`. — Fatias 1 (gate A+B) e 2 (perfil-de-voz, Refino C): ✓.
+
+### `livro-do-zero-ao-epub/assets/livro_runner.py` — portão de maneirismo por capítulo
+
+Na fase ESCRITA, depois de cada capítulo, o runner conta os moldes mecânicos
+(antíteses "não era X. Era Y.", fragmentos, "do jeito que/de") e, se algum passar
+do orçamento por-capítulo (≤1 cada), dispara **uma** reescrita-alvo desadensando o
+tique (bounded: 0 ou 1 por escrita, não bloqueia o avanço). Espelha
+`worker/src/maneirismo.ts`. Pega o tique na origem, nos N capítulos, não só no fim.
+(Patch é só o `assets/livro_runner.py`; o instalador mescla por cima do skill.)

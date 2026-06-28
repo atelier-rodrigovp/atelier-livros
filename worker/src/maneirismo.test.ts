@@ -1,34 +1,81 @@
 import { describe, it, expect } from "vitest";
-import { contarManeirismos, resumoManeirismo } from "./maneirismo.js";
+import {
+  contarManeirismos, resumoManeirismo, fechoEpigramatico,
+  ngramasSobrerepresentados, diagnosticarRepeticao,
+} from "./maneirismo.js";
 
-describe("contarManeirismos", () => {
-  it("conta antíteses 'não era X. Era Y.' e fragmentos", () => {
-    const t = "Não era medo. Era algo pior. Ela correu. Não correu por covardia. Correu por instinto.";
+describe("contarManeirismos — moldes nomeados", () => {
+  it("conta antíteses 'não era X. Era Y.' (várias formas)", () => {
+    const t = "Não era medo. Era algo pior. Não foi sorte. Foi cálculo. Não era pergunta; era ordem.";
     const r = contarManeirismos(t);
-    expect(r.total).toBeGreaterThanOrEqual(2);
-    expect(r.padroes.length).toBeGreaterThan(0);
+    expect(r.total).toBeGreaterThanOrEqual(3);
+    expect(r.padroes.some((p) => /antítese|aposto/.test(p.nome))).toBe(true);
   });
 
-  it("conta clichês recorrentes", () => {
-    const r = contarManeirismos("O mar de chumbo. Um silêncio ensurdecedor caiu.");
-    expect(r.padroes.some((p) => /clich/i.test(p.nome))).toBe(true);
-    expect(r.total).toBe(2);
+  it("conta o molde 'do jeito que/de'", () => {
+    const r = contarManeirismos("Ela fez do jeito que sempre fez, do jeito de antes, do jeito como mandava.");
+    const m = r.padroes.find((p) => /do jeito/.test(p.nome));
+    expect(m?.n).toBe(3);
   });
 
-  it("prosa limpa → zero e não estoura orçamento", () => {
-    const r = contarManeirismos("A manhã chegou devagar sobre a cidade adormecida, e ela seguiu pela rua.");
-    expect(r.total).toBe(0);
-    expect(r.acimaDoOrcamento).toBe(false);
-  });
-
-  it("densidade por 10k e estouro de orçamento", () => {
-    const r = contarManeirismos("Não era X. Era Y.", 1); // texto curto, muitos tiques/palavra
-    expect(r.por10k).toBeGreaterThan(0);
+  it("marca 'acima' quando passa do alvo proporcional ao tamanho", () => {
+    // texto curto → alvo=1; 3 ocorrências do mesmo molde → acima
+    const r = contarManeirismos("Não era A. Era B. Não era C. Era D. Não era E. Era F.");
+    const m = r.padroes.find((p) => /antítese "não era/.test(p.nome));
+    expect(m?.n).toBeGreaterThanOrEqual(3);
+    expect(m?.acima).toBe(true);
     expect(r.acimaDoOrcamento).toBe(true);
   });
 
+  it("prosa limpa → nada acima do orçamento", () => {
+    const r = contarManeirismos("A manhã chegou devagar sobre a cidade, e ela seguiu pela rua tranquila até o cais.");
+    expect(r.acimaDoOrcamento).toBe(false);
+  });
+
   it("resumo legível", () => {
-    expect(resumoManeirismo(contarManeirismos("Não era frio. Era pânico."))).toMatch(/Maneirismo:/);
-    expect(resumoManeirismo(contarManeirismos("Texto limpo e calmo."))).toMatch(/nenhum tique/);
+    expect(resumoManeirismo(contarManeirismos("Não era frio. Era pânico. Não era frio. Era pânico."))).toMatch(/Maneirismo:/);
+    expect(resumoManeirismo(contarManeirismos("Texto calmo e claro."))).toMatch(/nenhum tique/);
+  });
+});
+
+describe("fechoEpigramatico", () => {
+  it("flag quando >1/3 dos capítulos terminam em frase curta isolada", () => {
+    const caps = [
+      "Começo do capítulo um, com várias palavras de prosa normal aqui.\n\nE então tudo mudou.",
+      "Capítulo dois seguia o rio abaixo por linhas e linhas de texto comum.\n\nEla sabia.",
+      "Capítulo três, longo e detalhado, terminava de um jeito expansivo e completo sem corte seco.",
+    ];
+    const f = fechoEpigramatico(caps);
+    expect(f.n).toBe(2);
+    expect(f.acima).toBe(true); // 2/3 > 1/3
+    expect(f.capitulos).toEqual([1, 2]);
+  });
+
+  it("não flag quando fechos são longos", () => {
+    const caps = ["Texto.\n\nO fim deste capítulo se estende numa frase longa e respirada que não é epigrama."];
+    expect(fechoEpigramatico(caps).acima).toBe(false);
+  });
+});
+
+describe("ngramasSobrerepresentados — genérico", () => {
+  it("pega um n-grama de conteúdo repetido acima do limiar", () => {
+    const frase = "a luz fria do amanhecer caía sobre tudo. ";
+    const hits = ngramasSobrerepresentados(frase.repeat(6), { min: 4, limiarPor10k: 1 });
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].gram).toContain("luz fria");
+  });
+
+  it("ignora n-gramas quase-só stopword", () => {
+    const hits = ngramasSobrerepresentados("e a cada um dos que se ".repeat(8), { min: 4, limiarPor10k: 1 });
+    expect(hits.length).toBe(0);
+  });
+});
+
+describe("diagnosticarRepeticao — agregado", () => {
+  it("junta moldes acima + fecho + n-gramas", () => {
+    const cap = "Não era paz. Era guerra. Não era paz. Era guerra. A sombra longa do muro.";
+    const d = diagnosticarRepeticao(cap.repeat(3), [cap, cap, cap]);
+    expect(d.algumAcima).toBe(true);
+    expect(d.moldes.length).toBeGreaterThan(0);
   });
 });
