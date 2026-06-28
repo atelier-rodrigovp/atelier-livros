@@ -4,6 +4,7 @@ import "dotenv/config";
 import { sb, OWNER } from "./supabase.js";
 import { executarJob, type Job } from "./jobs.js";
 import { LimiteMaxError, deveRecuperar } from "./limite-max.js";
+import { escolherProximo, normalizarMaxParalelo, type ProjInfo } from "./fila.js";
 
 // Usar a assinatura MAX (login OAuth do Claude Code), não créditos de API.
 // Se ANTHROPIC_API_KEY estiver no ambiente, o `claude` headless a prioriza e
@@ -105,6 +106,41 @@ async function escritaPausada(): Promise<boolean> {
 
 // Jobs interativos rodam numa faixa PARALELA (não esperam atrás de jobs pesados).
 const INTERATIVOS = ["entrevistar", "ping"];
+// Linhas de controle (nunca reivindicadas como trabalho).
+const CONTROLE = ["controle_escrita", "config_producao"];
+
+// Concorrência: nº de projetos pesados simultâneos (schema-free: linha de config em
+// `jobs` tipo='config_producao'; fallback env MAX_PARALLEL_HEAVY; default 1).
+async function maxParalelo(): Promise<number> {
+  const { data, error } = await sb.from("jobs").select("payload")
+    .eq("owner", OWNER).eq("tipo", "config_producao").eq("status", "paused").limit(1);
+  const bruto = error ? undefined : (data?.[0]?.payload as any)?.max_paralelo;
+  return normalizarMaxParalelo(bruto ?? process.env.MAX_PARALLEL_HEAVY ?? 1);
+}
+
+// Picker da faixa PESADA com prioridade/pausa por projeto e exclusão de concorrência
+// (nunca 2 jobs do mesmo project_id). Schema-free: lê prioridade/pausa de
+// projects.briefing (degrade gracioso: chaves ausentes → defaults). Lock atômico.
+async function pegarProximoPesado(excluir: string[], projetosRodando: Set<string>): Promise<Job | null> {
+  const { data: cand } = await sb.from("jobs").select("*").eq("owner", OWNER).eq("status", "queued")
+    .not("tipo", "in", `(${excluir.join(",")})`).order("created_at", { ascending: true }).limit(40);
+  if (!cand?.length) return null;
+  const pids = [...new Set((cand as any[]).map((j) => j.project_id).filter(Boolean))] as string[];
+  const proj = new Map<string, ProjInfo>();
+  if (pids.length) {
+    const { data: ps } = await sb.from("projects").select("id,briefing").eq("owner", OWNER).in("id", pids);
+    for (const p of ps ?? []) {
+      const b: any = (p as any).briefing ?? {};
+      proj.set((p as any).id, { prioridade: Number(b?.prioridade ?? 0) || 0, pausada: b?.producao_pausada === true });
+    }
+  }
+  const escolhido = escolherProximo(cand as any[], proj, projetosRodando);
+  if (!escolhido) return null;
+  const { data: claimed } = await sb.from("jobs")
+    .update({ status: "running", locked_by: WORKER_ID, locked_at: new Date().toISOString() })
+    .eq("id", escolhido.id).eq("status", "queued").select();
+  return claimed && claimed.length ? (claimed[0] as Job) : null;
+}
 
 // Lock: pega 1 job queued (filtrável por tipo) e marca running atomicamente.
 async function pegarProximo(opts: { incluir?: string[]; excluir?: string[] } = {}): Promise<Job | null> {
@@ -209,9 +245,12 @@ async function processarJob(job: Job) {
   }
 }
 
-// Faixa pesada: 1 job por vez (escrita, tradução, capa, epub, pacote, fundação).
+// Faixa pesada: até `max_paralelo` jobs simultâneos, SEMPRE de projetos distintos
+// (o runner escreve em WORK_DIR/<project_id> e o estado.json não é concorrente-seguro).
 let _ultimaRecupLimite = 0;
 async function loopPesado() {
+  const ativos = new Map<string, Promise<void>>();  // jobId -> execução em andamento
+  const projetosRodando = new Set<string>();        // exclusão de concorrência por projeto
   for (;;) {
     try {
       await recuperarOrfaos();
@@ -225,17 +264,28 @@ async function loopPesado() {
         await sleep(POLL);
         continue;
       }
-      // Se a escrita estiver pausada, não reivindica escrever_livro (mas segue
-      // processando os demais jobs pesados normalmente).
-      const excluir = (await escritaPausada())
-        ? [...INTERATIVOS, "escrever_livro"]
-        : INTERATIVOS;
-      const job = await pegarProximo({ excluir });
-      if (!job) {
+      const maxP = await maxParalelo();
+      // Preenche os slots livres com jobs de projetos DISTINTOS (e não pausados),
+      // ordenando por prioridade. A escrita pausada (global) exclui escrever_livro.
+      while (ativos.size < maxP) {
+        const excluir = [...INTERATIVOS, ...CONTROLE, ...((await escritaPausada()) ? ["escrever_livro"] : [])];
+        const job = await pegarProximoPesado(excluir, projetosRodando);
+        if (!job) break;
+        if (job.project_id) projetosRodando.add(job.project_id);
+        const exec = processarJob(job)
+          .catch((e) => console.error(`[job ${job.id}] exceção não tratada:`, e))
+          .finally(() => {
+            ativos.delete(job.id);
+            if (job.project_id) projetosRodando.delete(job.project_id);
+          });
+        ativos.set(job.id, exec);
+      }
+      if (ativos.size === 0) {
         await sleep(POLL);
         continue;
       }
-      await processarJob(job);
+      // Espera ALGUM job terminar (ou um poll curto) para reavaliar slots/prioridade.
+      await Promise.race([...ativos.values(), sleep(POLL)]);
     } catch (outer) {
       console.error("[worker] erro no loop pesado:", outer);
       await sleep(POLL);

@@ -1,5 +1,21 @@
 # CLAUDE.md — Atelier de Livros IA (regras do projeto)
 
+## Controles de produção (schema-free)
+
+Sem DDL (não há conexão Postgres/CLI/PAT no ambiente — ver [[project-ddl-migrations]]):
+- **Prioridade** e **pausa por projeto** vivem em `projects.briefing` (jsonb):
+  `briefing.prioridade` (int, maior = mais cedo) e `briefing.producao_pausada` (bool).
+- **Concorrência** (`max_paralelo`) numa linha de config em `jobs`
+  (`tipo='config_producao'`, `payload.max_paralelo`); fallback env `MAX_PARALLEL_HEAVY`.
+- Picker puro em `worker/src/fila.ts` (`escolherProximo`): ordena por prioridade DESC,
+  empate por created_at ASC; pula projeto pausado, projeto já em execução
+  (concorrência nunca roda 2 jobs do MESMO project_id) e retry_at futuro. Degrade
+  gracioso (chaves ausentes → defaults). UI: "Produzir agora"/pausa na aba Escrita;
+  seletor de simultâneos + aviso de custo do Max em Configurações.
+- `supabase/producao.sql` é OPCIONAL (promover a colunas reais um dia); o código
+  funciona sem ele.
+
+
 Plataforma que orquestra agentes do Claude Code para produzir livros (front
 React+Vite+TS; Supabase; worker local em `worker/` via fila de jobs; deploy em
 GitHub Pages). Verdade do disco: o worker confere arquivos reais antes de gravar.

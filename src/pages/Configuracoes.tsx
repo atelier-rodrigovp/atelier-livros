@@ -26,6 +26,7 @@ export default function Configuracoes() {
   const [enviando, setEnviando] = useState(false);
   const [ativo, setAtivo] = useState(true);
   const [salvandoCtl, setSalvandoCtl] = useState(false);
+  const [maxPar, setMaxPar] = useState(1); // projetos simultâneos (concorrência)
   const [jobs, setJobs] = useState<Job[]>([]);
   const [projetos, setProjetos] = useState<Record<string, ProjInfo>>({});
 
@@ -43,13 +44,33 @@ export default function Configuracoes() {
       .select("enabled")
       .maybeSingle();
     setAtivo(data ? data.enabled !== false : true);
+    // concorrência (linha de config em jobs; schema-free)
+    const { data: cfg } = await supabase
+      .from("jobs")
+      .select("payload")
+      .eq("tipo", "config_producao")
+      .limit(1)
+      .maybeSingle();
+    const n = Number((cfg?.payload as any)?.max_paralelo ?? 1);
+    setMaxPar(Number.isFinite(n) ? Math.max(1, Math.min(4, Math.floor(n))) : 1);
   }, []);
+
+  async function definirConcorrencia(n: number) {
+    setMaxPar(n); // otimista
+    const { data: existente } = await supabase.from("jobs").select("id").eq("tipo", "config_producao").limit(1).maybeSingle();
+    if (existente?.id) {
+      await supabase.from("jobs").update({ payload: { max_paralelo: n } }).eq("id", existente.id);
+    } else {
+      await supabase.from("jobs").insert({ owner: session?.user?.id, tipo: "config_producao", status: "paused", payload: { max_paralelo: n } });
+    }
+    toast.success(`Produção simultânea: ${n} projeto${n > 1 ? "s" : ""} ao mesmo tempo.`);
+  }
 
   const carregarJobs = useCallback(async () => {
     const { data } = await supabase
       .from("jobs")
       .select("*")
-      .neq("tipo", "controle_escrita")
+      .not("tipo", "in", "(controle_escrita,config_producao)")
       .order("created_at", { ascending: false })
       .limit(30);
     setJobs((data as Job[]) ?? []);
@@ -278,6 +299,26 @@ export default function Configuracoes() {
                 : "Produção pausada: o worker está rodando, mas não processa a fila. Religue para retomar."}
             </p>
           )}
+
+          {/* Concorrência: nº de projetos pesados ao mesmo tempo. */}
+          <div className="rounded-lg border p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="space-y-0.5 pr-3">
+                <p className="text-sm font-medium">Projetos simultâneos</p>
+                <p className="text-xs text-muted-foreground">Quantos livros o worker produz ao mesmo tempo (sempre projetos distintos).</p>
+              </div>
+              <div className="flex items-center gap-1">
+                {[1, 2, 3].map((n) => (
+                  <Button key={n} size="sm" variant={maxPar === n ? "default" : "outline"} className="h-8 w-8 p-0" onClick={() => definirConcorrencia(n)}>
+                    {n}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <p className="mt-2 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+              ⚠ Cada projeto simultâneo consome sua cota do plano Max <strong>em paralelo</strong>: 2 livros gastam a janela ~2× mais rápido e podem causar mais pausas “aguardando reset”. A auto-retomada cobre (ninguém vira Erro), mas o throughput não dobra de graça.
+            </p>
+          </div>
         </CardContent>
       </Card>
 

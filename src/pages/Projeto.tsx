@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, BookOpen, Check, ClipboardCheck, Copy, Download, FileText, Gauge, Image, Languages, Loader2, Maximize2, Pencil, PenLine, Play, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { ArrowLeft, ArrowUp, BookOpen, Check, ClipboardCheck, Copy, Download, FileText, Gauge, Image, Languages, Loader2, Maximize2, Pencil, PenLine, Play, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
 import { signedUrl, downloadText, deleteProject } from "@/lib/storage";
@@ -189,6 +189,21 @@ export default function Projeto() {
     const { error } = await supabase.from("projects").update({ author_id: author_id || null }).eq("id", id);
     if (error) { toast.error(error.message); return; }
     setProj((p) => (p ? { ...p, author_id: author_id || null } : p));
+  }
+
+  // Controles de produção (schema-free: vivem em projects.briefing).
+  async function atualizarBriefing(patch: Record<string, unknown>) {
+    if (!id || !proj) return;
+    const novo = { ...((proj.briefing as any) ?? {}), ...patch };
+    const { error } = await supabase.from("projects").update({ briefing: novo }).eq("id", id);
+    if (error) { toast.error(error.message); return; }
+    setProj((p) => (p ? { ...p, briefing: novo } : p));
+  }
+  async function produzirAgora() {
+    const { data } = await supabase.from("projects").select("briefing").eq("owner", proj?.owner ?? "").neq("id", id ?? "");
+    const maxOutros = Math.max(0, ...((data ?? []).map((p: any) => Number(p.briefing?.prioridade ?? 0) || 0)));
+    await atualizarBriefing({ prioridade: maxOutros + 1 });
+    toast.success(`"${proj?.titulo}" vai furar a fila (prioridade ${maxOutros + 1}).`);
   }
 
   const origem = useMemo(() => editions.find((e) => e.is_origem), [editions]);
@@ -699,6 +714,25 @@ export default function Projeto() {
                         {rotulo}
                       </Button>
                       <JobStatus job={j} />
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-2.5">
+                      <div className="space-y-0.5 pr-3">
+                        <p className="flex items-center gap-2 text-xs font-medium">
+                          Produção deste projeto
+                          {(proj.briefing as any)?.producao_pausada === true ? (
+                            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">pausada</span>
+                          ) : Number((proj.briefing as any)?.prioridade ?? 0) > 0 ? (
+                            <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-medium text-primary">prioridade {Number((proj.briefing as any)?.prioridade)}</span>
+                          ) : null}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">Pause este livro sem parar os outros, ou mande furar a fila.</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm" className="h-7 text-xs" disabled={(proj.briefing as any)?.producao_pausada === true} onClick={produzirAgora}>
+                          <ArrowUp className="h-3.5 w-3.5" /> Produzir agora
+                        </Button>
+                        <Switch checked={(proj.briefing as any)?.producao_pausada !== true} onCheckedChange={(on) => atualizarBriefing({ producao_pausada: !on })} aria-label="Produção deste projeto" />
+                      </div>
                     </div>
                     <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed p-2.5">
                       <div className="space-y-0.5 pr-3">
