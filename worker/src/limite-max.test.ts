@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { LimiteMaxError, parseHoraReset, limiteMaxRetryAt } from "./limite-max.js";
+import { LimiteMaxError, parseHoraReset, limiteMaxRetryAt, pareceLimiteMax } from "./limite-max.js";
 
 const AGORA = new Date("2026-06-27T00:30:00"); // 00:30 local
 
@@ -49,6 +49,30 @@ describe("limiteMaxRetryAt", () => {
   it("erro real (skill/disco) NÃO é tratado como limite", () => {
     expect(limiteMaxRetryAt("Skill 'x' não instalada no worker", AGORA)).toBeNull();
     expect(limiteMaxRetryAt("escrita não avançou em 3/32 (rc=1)", AGORA)).toBeNull();
+  });
+
+  it("PROGRESSO + limite no fim do output → classifica como limite (não erro)", () => {
+    // run que ESCREVEU capítulos e DEPOIS bateu o limite (o caso do bug)
+    const out =
+      "[..] --- ESCRITA: capitulo alvo = 6 ---\n" +
+      "[..] capitulo-06.md gravado (1500 palavras).\n" +
+      "[..] stderr: Claude usage limit reached. Your limit will reset at 7:20pm.\n";
+    const agora = new Date("2026-06-27T15:00:00"); // perto do reset (7:20pm), dentro do cap de 6h
+    const iso = limiteMaxRetryAt(out, agora);
+    expect(iso).not.toBeNull();           // pausa, não erro
+    expect(new Date(iso!).getHours()).toBe(19);
+  });
+});
+
+describe("pareceLimiteMax — recuperação de jobs mortos", () => {
+  it("casa a assinatura antiga do worker e a do CLI", () => {
+    expect(pareceLimiteMax("Limite de uso do plano Max atingido (reseta 7:20pm). A escrita parou em 6/32.")).toBe(true);
+    expect(pareceLimiteMax("You've hit your usage limit. Resets at 1:40am.")).toBe(true);
+  });
+  it("NÃO casa erros reais (não recupera)", () => {
+    expect(pareceLimiteMax("fundação ausente — rode criar_fundacao antes de escrever_livro")).toBe(false);
+    expect(pareceLimiteMax("MANUSCRITO-MESTRE.md ausente para pt-BR")).toBe(false);
+    expect(pareceLimiteMax("")).toBe(false);
   });
 });
 

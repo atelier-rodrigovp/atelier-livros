@@ -3,7 +3,7 @@
 import "dotenv/config";
 import { sb, OWNER } from "./supabase.js";
 import { executarJob, type Job } from "./jobs.js";
-import { LimiteMaxError } from "./limite-max.js";
+import { LimiteMaxError, pareceLimiteMax } from "./limite-max.js";
 
 // Usar a assinatura MAX (login OAuth do Claude Code), não créditos de API.
 // Se ANTHROPIC_API_KEY estiver no ambiente, o `claude` headless a prioriza e
@@ -28,6 +28,31 @@ async function heartbeat(extra: Record<string, unknown> = {}) {
     { onConflict: "owner,worker_id" }
   );
   if (error) console.error("[heartbeat] erro:", error.message);
+}
+
+// Recupera jobs que morreram como 'error' por LIMITE DO MAX (classificação antiga,
+// ou run que avançou e bateu o limite). Volta para 'queued', limpa o erro, zera
+// attempts e os deixa rodar AGORA (a janela do Max do erro antigo já reabriu; se
+// reabater o limite, o escreverLivro novo pausa corretamente com retry_at). NÃO
+// toca em erros reais (fundação ausente, disco, etc.) — só a assinatura do Max.
+async function recuperarLimiteMax() {
+  const { data, error } = await sb
+    .from("jobs")
+    .select("id,tipo,erro,progresso")
+    .eq("owner", OWNER)
+    .eq("status", "error")
+    .not("erro", "is", null);
+  if (error) return;
+  for (const j of data ?? []) {
+    if (!pareceLimiteMax(String((j as any).erro ?? ""))) continue;
+    const progresso = { ...(((j as any).progresso as Record<string, unknown>) ?? {}), aguardando_reset: false, retry_at: null, motivo: "limite do Max (recuperado)" };
+    const { error: upErr } = await sb
+      .from("jobs")
+      .update({ status: "queued", erro: null, attempts: 0, progresso, locked_by: null, locked_at: null })
+      .eq("id", (j as any).id)
+      .eq("status", "error");
+    if (!upErr) console.log(`[recuperação] ${(j as any).tipo} ${(j as any).id} estava 'error' por limite do Max → re-enfileirado.`);
+  }
 }
 
 // Recupera jobs 'running' órfãos (worker caiu) -> volta para 'queued'.
@@ -120,6 +145,7 @@ async function verificarConexao() {
 async function loop() {
   if (!OWNER) throw new Error("OWNER_USER_ID não configurado no worker/.env");
   await verificarConexao();
+  await recuperarLimiteMax(); // na inicialização: ressuscita jobs mortos por limite do Max
   await heartbeat({ estado: "online" });
   console.log(
     `[worker ${WORKER_ID}] conectado. owner=${OWNER} poll=${POLL}ms stale=${STALE_MIN}min`
@@ -175,10 +201,16 @@ async function processarJob(job: Job) {
 }
 
 // Faixa pesada: 1 job por vez (escrita, tradução, capa, epub, pacote, fundação).
+let _ultimaRecupLimite = 0;
 async function loopPesado() {
   for (;;) {
     try {
       await recuperarOrfaos();
+      // Periodicamente (~60s): ressuscita jobs mortos por limite do Max.
+      if (Date.now() - _ultimaRecupLimite > 60_000) {
+        _ultimaRecupLimite = Date.now();
+        await recuperarLimiteMax();
+      }
       if (!(await processamentoAtivo())) {
         await heartbeat({ estado: "paused" });
         await sleep(POLL);

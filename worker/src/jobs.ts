@@ -598,19 +598,12 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // re-enfileira para continuar (interrupção/limite de sessão não mata o livro). Só falha
   // de verdade se não escreveu NENHUM capítulo novo (travamento real).
   if (!completo) {
-    // Avançou sem completar: interrupção comum (fim de sessão) → re-enfileira já
-    // (retoma do disco). Não inspeciona limite aqui para não pausar run saudável
-    // por uma linha antiga no log.
-    if (caps.length > capsAntes) {
-      await must(sb.from("jobs").insert({ owner: OWNER, tipo: "escrever_livro", project_id: job.project_id, status: "queued" }));
-      await setProgress(job.id, { fase: "ESCRITA", cap_atual: caps.length, total, continua: true });
-      return;
-    }
-    // 0 progresso neste run: limite do Max (throttle) ou erro real?
-    const log = (await readText(path.join(dir, "runner.log"))).slice(-1500);
-    // Limite do Max NÃO é erro: pausa e retoma sozinho no reset, sem gastar
-    // tentativas (tratado no loop do worker via LimiteMaxError).
-    const retryAt = limiteMaxRetryAt(log);
+    // Limite do Max detectado pela TERMINAÇÃO desta execução: o runner faz print()
+    // de cada log, então r.out/r.err contêm SÓ a saída deste run (não o log
+    // acumulado) — sem o falso-positivo de "linha antiga". Vale TENHA AVANÇADO OU
+    // NÃO: limite é throttle, pausa e retoma no reset sem gastar tentativa.
+    const saidaRun = `${r.out}\n${r.err}`.slice(-2500);
+    const retryAt = limiteMaxRetryAt(saidaRun);
     if (retryAt) {
       const hh = new Date(retryAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
       throw new LimiteMaxError(
@@ -619,7 +612,14 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
         retryAt
       );
     }
-    throw new Error(`escrita não avançou em ${caps.length}/${total} (rc=${r.code}). ${log.slice(-300)}`);
+    // Sem limite, mas avançou: interrupção comum (fim de sessão) → re-enfileira já.
+    if (caps.length > capsAntes) {
+      await must(sb.from("jobs").insert({ owner: OWNER, tipo: "escrever_livro", project_id: job.project_id, status: "queued" }));
+      await setProgress(job.id, { fase: "ESCRITA", cap_atual: caps.length, total, continua: true });
+      return;
+    }
+    const log = (await readText(path.join(dir, "runner.log"))).slice(-300);
+    throw new Error(`escrita não avançou em ${caps.length}/${total} (rc=${r.code}). ${(r.err || r.out || log).slice(-300)}`);
   }
 
   // Manuscrito-mestre — sanitiza (o runner pode tê-lo montado de capítulos sujos)

@@ -64,3 +64,9 @@ export function limiteMaxRetryAt(
   if (iso && Date.parse(iso) - agora.getTime() <= 6 * 3600_000) return iso;
   return new Date(agora.getTime() + backoffMs).toISOString();
 }
+
+// Só classifica: o texto indica limite do Max? (sem calcular retry). Usado para
+// recuperar jobs que morreram como 'error' por limite (classificação antiga).
+export function pareceLimiteMax(texto: string): boolean {
+  return !!texto && LIMITE_RE.test(texto);
+}
