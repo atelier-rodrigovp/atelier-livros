@@ -110,6 +110,26 @@ export default function Configuracoes() {
     return partes.join(" · ");
   }
 
+  // Descrição específica para a linha de atividade: prefere o `resumo` humano
+  // gravado pelo worker; sem ele, monta de `detalheProgresso` (que cai para tipoLabel).
+  function descricaoJob(j: Job): string {
+    const r = (j.progresso as any)?.resumo;
+    return typeof r === "string" && r.trim() ? r : detalheProgresso(j);
+  }
+
+  // Campos crus para tooltip (fase, cap, palavras, nota, retry_at, tentativas).
+  function dicaProgresso(j: Job): string {
+    const p: any = j.progresso || {};
+    const linhas: string[] = [];
+    if (p.fase) linhas.push(`fase ${p.fase}`);
+    if (p.cap_atual != null && p.total != null) linhas.push(`cap ${p.cap_atual}/${p.total}`);
+    if (p.palavras) linhas.push(`${Number(p.palavras).toLocaleString("pt-BR")} palavras`);
+    if (p.nota != null) linhas.push(`nota ${p.nota}`);
+    if (p.retry_at) linhas.push(`aguarda reset ${new Date(p.retry_at).toLocaleString()}`);
+    if (j.attempts) linhas.push(`tentativa ${j.attempts}/${j.max_attempts}`);
+    return linhas.join("\n");
+  }
+
   async function reenfileirar(j: Job) {
     const { error } = await supabase
       .from("jobs")
@@ -239,7 +259,7 @@ export default function Configuracoes() {
                 ) : (
                   <span className="font-medium">{tipoLabel(jobRodando.tipo)}</span>
                 )}
-                <p className="mt-0.5 text-sm text-muted-foreground">{detalheProgresso(jobRodando)}</p>
+                <p className="mt-0.5 text-sm text-muted-foreground" title={dicaProgresso(jobRodando) || undefined}>{descricaoJob(jobRodando)}</p>
                 {(() => {
                   const p: any = jobRodando.progresso || {};
                   if (p.cap_atual == null || !p.total) return null;
@@ -349,7 +369,7 @@ export default function Configuracoes() {
                 const inner = (
                   <>
                     <div className="min-w-0">
-                      <span className="font-medium">{tipoLabel(j.tipo)}</span>
+                      <span className="font-medium" title={dicaProgresso(j) || undefined}>{descricaoJob(j)}</span>
                       {pl ? <span className="text-muted-foreground"> · {pl}</span> : null}
                       {orfao && <p className="text-xs text-amber-600 dark:text-amber-400">{dica}</p>}
                       {j.erro && !orfao && <p className="truncate text-xs text-destructive" title={j.erro}>{j.erro}</p>}

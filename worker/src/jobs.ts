@@ -136,8 +136,50 @@ async function getEdition(id: string) {
   if (error) throw new Error("edição não encontrada: " + error.message);
   return data;
 }
+// Resumo humano e curto do progresso (linha autoexplicativa na UI, persiste mesmo
+// depois de concluído). Derivado dos campos crus por fase; conservador — devolve
+// undefined quando não reconhece a fase, e aí a UI cai para detalheProgresso/tipoLabel.
+function resumoProgresso(p: Record<string, any>): string | undefined {
+  const fase = p.fase ? String(p.fase) : "";
+  const cap = p.cap_atual != null && p.total ? `cap ${p.cap_atual}/${p.total}` : null;
+  const idiomas = Array.isArray(p.idiomas) ? p.idiomas.map((x: unknown) => String(x).toUpperCase()).join(", ") : null;
+  const idi = p.idioma ? String(p.idioma).toUpperCase() : null;
+  switch (fase) {
+    // — pré-escrita / fundação —
+    case "PING": return "Teste do worker (ping)";
+    case "ENTREVISTA": return p.completo ? "Entrevista de fundação concluída" : "Entrevista de fundação";
+    case "ESTRUTURA":
+      return p.concluido || p.total_capitulos
+        ? `Estrutura pronta · ${p.total_capitulos ?? "?"} caps`
+        : `Fundação · ${p.etapa ?? "estrutura"}`;
+    case "REFINO": return p.concluido ? "Fundação refinada" : `Fundação · ${p.etapa ?? "refino"}`;
+    case "VOLUMES": return p.concluido ? `${p.criados ?? 0} volume(s) criado(s)` : `Criando vol. ${p.volume ?? "?"}`;
+    // — escrita (fases do runner) —
+    case "ESCRITA": return cap ? `${cap} · escrevendo` : "Escrevendo capítulos";
+    case "CONSOLIDACAO": return "Consolidando manuscrito";
+    case "REVIEW": return "Avaliando (book-bestseller-review)";
+    case "REESCRITA": return "Reescrevendo (pós-review)";
+    case "DESMANEIRISMO": return "Desmaneirização (book-wide)";
+    case "EPUB": return p.versao ? `EPUB ${p.versao} gerado` : "Gerando EPUB";
+    case "CONCLUIDO": return p.nota != null ? `Livro pronto · nota ${p.nota}` : "Livro pronto";
+    // — pós-produção (jobs próprios) —
+    case "TRADUCAO":
+      return p.concluido
+        ? `Tradução pronta${idiomas ? ` · ${idiomas}` : ""}`
+        : `Traduzindo${idi ? ` · ${idi}` : ""}${cap ? ` · ${cap}` : ""}`;
+    case "AVALIACAO": return p.nota != null ? `book-bestseller-review · nota ${p.nota}` : `Avaliando${idi ? ` · ${idi}` : ""}`;
+    case "REVISAO": return p.concluido ? `Revisão pronta${p.nota != null ? ` · nota ${p.nota}` : ""}` : `Revisão${p.etapa ? ` · ${p.etapa}` : ""}`;
+    case "CAPA": return p.concluido ? "Capa pronta" : `Capa · ${p.etapa ?? "gerando"}`;
+    case "PACOTE": return "Pacote comercial pronto";
+    case "VENDAS": return `Planilha de vendas${p.linhas != null ? ` · ${p.linhas} linhas` : ""}`;
+    case "POST": return p.etapa === "pronto" ? `Posts gerados${p.variacoes != null ? ` · ${p.variacoes}` : ""}` : `Post${p.etapa ? ` · ${p.etapa}` : ""}`;
+    default: return undefined;
+  }
+}
 async function setProgress(jobId: string, progresso: Record<string, unknown>) {
-  await sb.from("jobs").update({ progresso, locked_at: new Date().toISOString() }).eq("id", jobId);
+  const resumo = resumoProgresso(progresso as Record<string, any>);
+  const comResumo = resumo ? { ...progresso, resumo } : progresso;
+  await sb.from("jobs").update({ progresso: comResumo, locked_at: new Date().toISOString() }).eq("id", jobId);
 }
 async function ensureEdition(projectId: string, idioma: string, isOrigem: boolean, status = "pendente") {
   const { data } = await must(
