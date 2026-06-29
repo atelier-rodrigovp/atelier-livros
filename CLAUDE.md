@@ -68,8 +68,13 @@ não a emite por padrão, então `worker/src/voz-regra4.ts` (`normalizarVozRegra
 testado) garante a seção de cota (fragmento ≤1–2 nunca colado, itálico ≤2–3, retórica
 ≤1–2, anti-"coisa") no `perfil-de-voz.md` + a política dura nas Notas de Execução da
 `Estrutura-do-Livro.md`. Roda **após `criar_fundacao`** e **no início de
-`escrever_livro`** (idempotente; não duplica). Sweep: `npx tsx
-worker/scripts/normalizar-voz-regra4.ts [<project_id>]`.
+`escrever_livro`** (idempotente via marcador `<!-- COTA-CADENCIA v1 -->`; reconhece
+também injeções legadas sem marcador, p.ex. a edição manual de A Espiral). Sweep:
+`npx tsx worker/scripts/normalizar-voz-regra4.ts [<project_id>]`. **Vive no worker, NÃO
+na prosa do `arquiteto-de-enredo`** (cujo SKILL.md tem encoding corrompido — não
+editar). Os números da cota **batem com os orçamentos do detector** (`ORC_CADENCIA`:
+fragEnfase 2/colados 0, italico 3, retorica 2, anafora/clipe 1; muleta "coisa" orc10k 4
+≈1/cap) — o alvo que o escritor recebe é o mesmo que o gate cobra.
 
 ## Modelo por papel (subagentes livro-*) + orquestrador
 
