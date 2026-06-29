@@ -9,7 +9,11 @@ export const WORK_DIR = process.env.WORK_DIR || "./atelier-work";
 export const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
 export const PY_BIN = process.env.PY_BIN || "python";
 export const RUNNER_PATH = process.env.RUNNER_PATH || "";
-export const MODEL = process.env.MODEL || "opus";
+export const MODEL = process.env.MODEL || "opus"; // PESADO: escritor (subagente), REVIEW/REESCRITA inline, jobs interativos
+// Orquestrador da escrita longa: só roteia/delega a prosa ao subagente escritor
+// (opus, via frontmatter). Sonnet aqui economiza Max sem rebaixar a prosa. As fases
+// inline pesadas (ESTRUTURA/REVIEW/REESCRITA) o runner sobe para MODEL via --model-pesado.
+export const MODEL_ORQUESTRADOR = process.env.MODEL_ORQUESTRADOR || "sonnet";
 
 // Pasta de trabalho de um projeto (verdade do disco).
 export function projDir(projectId: string) {

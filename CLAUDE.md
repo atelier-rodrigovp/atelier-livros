@@ -57,6 +57,27 @@ central de qualidade; escape hatch `--sem-revisao-por-capitulo` / env
 baratear no Max). O detector de repetição/muleta vive em `worker/src/maneirismo.ts`
 (TS, testado) e espelhado no runner.
 
+## Modelo por papel (subagentes livro-*) + orquestrador
+
+No Claude Code, um subagente **sem `model:` no frontmatter HERDA o modelo do pai**
+(o orquestrador). Como o arquiteto gera os agentes por prosa, o `model:` saía
+não-determinístico (o editor já apareceu em opus, encarecendo o micro-loop à toa).
+Política pinada deterministicamente em `worker/src/modelos-agentes.ts` (testado):
+**escritor=opus** (inegociável — a prosa nasce nele), **revisor=sonnet**,
+**editor=haiku** (tarefa barata: aplicar edições + gravar estado-narrativo),
+**contextualizador=haiku**, **arquiteto-comercial=sonnet**. `normalizarModelosAgentes()`
+roda **após `criar_fundacao`** (todo projeto novo nasce certo) e **no início de
+`escrever_livro`** (corrige projetos vivos; idempotente). Sweep avulso:
+`npx tsx worker/scripts/normalizar-modelos-agentes.ts`.
+
+**Orquestrador da escrita longa = sonnet por padrão** (`MODEL_ORQUESTRADOR`, default
+`sonnet`): ele só roteia/delega a prosa ao subagente escritor (opus via frontmatter),
+então não precisa de opus. As fases **inline** que NÃO delegam — `ESTRUTURA`,
+`REVIEW` (book-bestseller-review) e `REESCRITA` (prosa cirúrgica) — o runner sobe
+para o modelo **pesado** (`--model-pesado`, default opus) via `modelo_da_fase()`, para
+não rebaixar nem o avaliador nem a prosa. `MODEL` (opus) segue valendo para os jobs
+interativos/fundação (`runClaude`).
+
 ## Trava antivazamento (nenhum meta-texto chega ao livro)
 
 Camadas (ver `worker/README.md` e `docs/auditoria-vazamento.md`):

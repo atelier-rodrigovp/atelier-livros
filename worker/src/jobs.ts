@@ -19,9 +19,11 @@ import {
   RUNNER_PATH,
   PY_BIN,
   MODEL,
+  MODEL_ORQUESTRADOR,
   CLAUDE_BIN,
   WORK_DIR,
 } from "./lib.js";
+import { normalizarModelosAgentes } from "./modelos-agentes.js";
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
 import { sanitizarCapitulo, metaResidual } from "./sanitize.js";
 import { LimiteMaxError, limiteMaxRetryAt, pareceLimiteMax } from "./limite-max.js";
@@ -396,6 +398,11 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
     );
   }
 
+  // Pina o MODELO POR PAPEL dos 5 agentes recém-gerados (o arquiteto os emite por
+  // prosa, então o model: vinha não-determinístico — editor às vezes opus). Determinístico.
+  const ajustes = await normalizarModelosAgentes(path.join(dir, ".claude", "agents"));
+  for (const a of ajustes) console.log(`[modelos] ${a.agente}: ${a.de ?? "(sem model)"} -> ${a.para}${a.mudou ? " [corrigido]" : ""}`);
+
   // Sync: sobe a fundação ao Storage
   for (const f of ["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md", "ESTADO_LIVRO.json", "briefing.md"]) {
     if (await exists(path.join(dir, f))) {
@@ -593,6 +600,10 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
 
   // Preflight: skill de escrita precisa existir — falha alto, sem fallback silencioso.
   assertSkillInstalada(proj.skill_escrita);
+  // Pina o MODELO POR PAPEL dos agentes (editor=haiku etc.) antes de escrever:
+  // corrige projetos vivos cujos agentes nasceram com model: errado/herdado. Idempotente.
+  for (const a of await normalizarModelosAgentes(path.join(dir, ".claude", "agents")))
+    if (a.mudou) console.log(`[modelos] ${a.agente}: ${a.de ?? "(sem model)"} -> ${a.para}`);
   // Pré-passe: limpa meta-texto já no disco antes do runner remontar manuscrito/EPUB.
   await sanitizarPastaCapitulos(path.join(dir, "manuscrito"));
 
@@ -634,7 +645,10 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     "--meta", String(meta),
     "--max-reescritas", String(maxReescritas),
     "--piso", String(piso),
-    "--model", MODEL,
+    // Orquestrador (roteia/delega): sonnet por padrão. Subagente escritor segue opus
+    // pelo frontmatter; fases inline pesadas (ESTRUTURA/REVIEW/REESCRITA) sobem para --model-pesado.
+    "--model", MODEL_ORQUESTRADOR,
+    "--model-pesado", MODEL,
     "--claude-bin", CLAUDE_BIN,
   ];
   // Micro-loop escritor→revisor→editor por capítulo é o PADRÃO (camada central de

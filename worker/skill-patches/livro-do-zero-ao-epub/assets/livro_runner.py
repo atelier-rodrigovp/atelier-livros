@@ -529,11 +529,25 @@ def ler_arquivo(projeto, rel):
         return ""
 
 
-def run_claude(projeto, prompt, args):
+# Fases que rodam INLINE na sessao do orquestrador (sem delegar prosa a um subagente):
+# precisam do modelo PESADO (opus). REVIEW roda o book-bestseller-review; REESCRITA e
+# prosa cirurgica; ESTRUTURA gera a fundacao. As demais (ESCRITA/DESMANEIRISMO) so
+# ROTEIAM e delegam a prosa ao subagente escritor (opus via frontmatter) -> orquestrador barato.
+FASES_PESADAS = {"ESTRUTURA", "REVIEW", "REESCRITA"}
+
+
+def modelo_da_fase(fase, args):
+    if fase in FASES_PESADAS and getattr(args, "model_pesado", None):
+        return args.model_pesado
+    return getattr(args, "model", None)
+
+
+def run_claude(projeto, prompt, args, modelo=None):
     cmd = [args.claude_bin, "-p", prompt, "--permission-mode", "bypassPermissions"]
-    if getattr(args, "model", None):
-        cmd += ["--model", args.model]
-    log(projeto, "Disparando Claude headless modelo={} (<prompt {} chars>).".format(getattr(args, "model", "default"), len(prompt)))
+    modelo = modelo or getattr(args, "model", None)
+    if modelo:
+        cmd += ["--model", modelo]
+    log(projeto, "Disparando Claude headless modelo={} (<prompt {} chars>).".format(modelo or "default", len(prompt)))
     timeout = int(args.fase_timeout) or None
     try:
         proc = subprocess.run(cmd, cwd=projeto, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
@@ -850,8 +864,9 @@ def executar(projeto, args):
         else:
             prompt = PREAMBULO
 
-        log(projeto, "--- Executando fase {} (assinatura antes: {}) ---".format(fase, sig_before))
-        rc, out, err = run_claude(projeto, prompt, args)
+        modelo_fase = modelo_da_fase(fase, args)
+        log(projeto, "--- Executando fase {} (modelo={}, assinatura antes: {}) ---".format(fase, modelo_fase or "default", sig_before))
+        rc, out, err = run_claude(projeto, prompt, args, modelo=modelo_fase)
         state = ensure_fields(load_state(projeto), args)
         state = sincroniza_contadores_do_disco(projeto, state, piso)
 
@@ -972,7 +987,8 @@ def build_argparser():
                    help="Piso de palavras por capitulo (default {}).".format(PISO_PALAVRAS_DEFAULT))
     p.add_argument("--fase-timeout", type=int, default=0, help="Timeout por chamada (s; 0 = sem).")
     p.add_argument("--claude-bin", default="claude", help="Binario do Claude Code (default 'claude').")
-    p.add_argument("--model", default="opus", help="Modelo da sessao headless (default 'opus'). Subagentes mantem o modelo do proprio frontmatter (haiku/sonnet).")
+    p.add_argument("--model", default="opus", help="Modelo do ORQUESTRADOR/roteamento (default 'opus'; o worker passa 'sonnet'). Subagentes mantem o modelo do proprio frontmatter (escritor opus, revisor sonnet, editor haiku).")
+    p.add_argument("--model-pesado", default="opus", help="Modelo das fases INLINE pesadas (ESTRUTURA/REVIEW/REESCRITA), que nao delegam a um subagente (default 'opus').")
     p.add_argument("--dry-run", action="store_true", help="So bootstrap do ESTADO_LIVRO.json e sai.")
     return p
 
