@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   contarManeirismos, resumoManeirismo, fechoEpigramatico,
   ngramasSobrerepresentados, diagnosticarRepeticao, contarMuletas,
+  dividirFrases, diagnosticarCadencia, cadenciaAcima,
 } from "./maneirismo.js";
 
 describe("contarMuletas — palavra-muleta ('coisa')", () => {
@@ -94,6 +95,61 @@ describe("ngramasSobrerepresentados — genérico", () => {
   it("ignora n-gramas quase-só stopword", () => {
     const hits = ngramasSobrerepresentados("e a cada um dos que se ".repeat(8), { min: 4, limiarPor10k: 1 });
     expect(hits.length).toBe(0);
+  });
+});
+
+describe("dividirFrases", () => {
+  it("separa por pontuação terminal e ignora headings", () => {
+    const fr = dividirFrases("# Título\n\nDavam datas. Davam horas. Ele riu!");
+    expect(fr).toEqual(["Davam datas.", "Davam horas.", "Ele riu!"]);
+  });
+});
+
+describe("diagnosticarCadencia — ritmo (tiques reais do livro)", () => {
+  const nome = (q: { nome: string }) => q.nome;
+  it("pega fragmentos colados + anáfora ('Davam datas. Davam horas.')", () => {
+    const r = diagnosticarCadencia("Davam datas. Davam horas. Davam nomes que ninguém pedira.");
+    const acima = cadenciaAcima("Davam datas. Davam horas. Davam nomes que ninguém pedira.").map(nome);
+    expect(acima.join(" ")).toMatch(/colados|anáfora/);
+    expect(r.acima).toBe(true);
+  });
+
+  it("pega clipe de negação curto recorrente ('Não precisava.' / 'Não precisavam.')", () => {
+    const t = "Marsh não anotava nada. Não precisava. Olhou de novo o arquivo aberto. Não precisavam.";
+    const acima = cadenciaAcima(t).map(nome).join(" ");
+    expect(acima).toMatch(/clipe de negação/);
+  });
+
+  it("pega staccato denso (capítulo majoritariamente picado)", () => {
+    const t = "Ele parou. Olhou. Não viu. O vento soprou. A porta rangeu. Ninguém veio. Esperou. Nada. Foi embora.";
+    const r = diagnosticarCadencia(t);
+    const stac = r.tiques.find((q) => /staccato/.test(q.nome))!;
+    expect(stac.acima).toBe(true);
+    expect(stac.densidade!).toBeGreaterThan(35);
+  });
+
+  it("pega epigrama antitético ('o silêncio fazia o trabalho que a pergunta estragava')", () => {
+    const acima = cadenciaAcima("Ali, o silêncio fazia o trabalho que a pergunta estragava, e ele aprendeu isso cedo. O silêncio fazia o serviço que a palavra perdia também.").map(nome).join(" ");
+    expect(acima).toMatch(/epigrama/);
+  });
+
+  it("cobra a cota da Regra 4: fragmentos de ênfase colados nunca são permitidos", () => {
+    // dois fragmentos 1-3 palavras colados → estoura (alvo 0)
+    const t = "Ele entrou na sala devagar, medindo cada passo até a mesa. Impossível. Não pode ser. Depois sentou e respirou fundo antes de abrir o envelope lacrado.";
+    const q = diagnosticarCadencia(t).tiques.find((x) => /COLADOS/.test(x.nome))!;
+    expect(q.acima).toBe(true);
+  });
+
+  it("FALSO-POSITIVO: ritmo legítimo (mix longo/curto, um único fragmento) NÃO dispara", () => {
+    const t =
+      "A manhã desceu devagar sobre o porto, e o velho atravessou o cais sem pressa, " +
+      "contando os barcos amarrados como quem reza um terço gasto pelo uso. Parou. " +
+      "Depois seguiu em frente, porque o mar não esperava por homem nenhum e ele já " +
+      "aprendera, havia muito tempo, a não pedir o que a maré não estava disposta a dar. " +
+      "Na esquina do armazém, a luz acendeu cedo e alguém assobiava uma canção antiga, " +
+      "fora de tom, sem que isso parecesse incomodar ninguém naquela hora mansa.";
+    const r = diagnosticarCadencia(t);
+    expect(r.acima).toBe(false);
   });
 });
 

@@ -444,11 +444,21 @@ def prompt_escrita_capitulo(n, piso):
     ).format(n=n, arq=nome_cap(n).replace("\\", "/"), piso=piso)
 
 
-def prompt_revisao_capitulo(n, args, piso):
+def prompt_revisao_capitulo(projeto, n, args, piso):
     """Micro-loop por capitulo (Frente 2): revisor leve -> editor, ANTES de aceitar.
     Porta a arquitetura de papeis da Saga (livro-revisor / livro-editor) para o motor."""
     arq = nome_cap(n).replace("\\", "/")
     maxed = int(getattr(args, "max_edicoes_por_cap", 6))
+    # Cota da Regra 4 (ritmo) COM AS CONTAGENS REAIS deste capitulo, para o revisor
+    # cobrar por NUMERO, nao por impressao.
+    cads = cadencia_acima(ler_arquivo(projeto, nome_cap(n)))
+    if cads:
+        bloco_cad = ("contagem REAL deste capitulo, ACIMA do orcamento -> exija que o "
+                     "editor VARIE O RITMO (funda frases curtas coladas, encadeie na "
+                     "revelacao, quebre anafora/clipe), nao so corte: " +
+                     "; ".join("{} {}x (alvo <= {})".format(nm, c, a) for nm, c, a in cads))
+    else:
+        bloco_cad = "dentro do orcamento neste capitulo; mantenha assim."
     return (
         PREAMBULO +
         "\nFASE ESCRITA - REVISAO POR CAPITULO do {arq} (micro-loop revisor->editor). "
@@ -458,16 +468,21 @@ def prompt_revisao_capitulo(n, args, piso):
         "Biblia/Mapa/perfil-de-voz; (b) o estado/estado-narrativo.md (fios, FATOS, "
         "relogios - continuidade); (c) maneirismos e MULETAS sobre-usadas (sobretudo "
         "'coisa' - no maximo 1 no capitulo; troque pelo referente concreto); (d) voz "
-        "fora do perfil; (e) cena que RESUME em vez de dramatizar. Devolva uma LISTA de "
+        "fora do perfil; (e) cena que RESUME em vez de dramatizar; (f) COTA DA REGRA 4 "
+        "(ritmo variado): por capitulo no maximo ~2-3 pensamentos em italico, ~1-2 "
+        "perguntas retoricas, ~1-2 fragmentos de enfase (1-3 palavras) e NUNCA dois "
+        "fragmentos colados; sem staccato/anafora/clipe de negacao repetidos. {bloco_cad}. "
+        "Devolva uma LISTA de "
         "no maximo {maxed} EDICOES PONTUAIS (trecho -> correcao). NAO e recontacao nem o "
         "review book-wide (esse fica no fim).\n"
         "2) EDITOR (subagente `livro-editor`): aplique as edicoes no {arq}, podendo "
         "ELEVAR 1 movimento (drama/tensao/subtexto) que agregue valor SEM contrariar a "
-        "spec. Troque TODA 'coisa' generica pelo referente concreto. PRESERVE sentido e "
+        "spec. Troque TODA 'coisa' generica pelo referente concreto. Para o ritmo, FUNDA "
+        "as frases curtas coladas em vez de so corta-las. PRESERVE sentido e "
         "voz; nao reescreva a cena a toa.\n"
         "3) Atualize estado/estado-narrativo.md (o que mudou, fios tocados, pistas "
         "plantadas/pagas, MCL). Regrave o MESMO {arq} (>= {piso} palavras). Encerre.\n"
-    ).format(arq=arq, n=n, maxed=maxed, piso=piso)
+    ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_cad=bloco_cad)
 
 
 def prompt_review(k):
@@ -632,19 +647,98 @@ def muletas_acima_cap(texto):
     return out
 
 
+# ----------------------------------------------------------------------------
+# CADENCIA (ritmo das frases) — espelha worker/src/maneirismo.ts. Mede o staccato
+# que a Regra 4 da skill-dan-brown bane ("nunca dois fragmentos colados"): o
+# detector de moldes/muletas conta palavras; este conta RITMO.
+# ----------------------------------------------------------------------------
+_RE_EPIGRAMA = re.compile(u"\\b[oa]s?\\s+[A-Za-zÀ-ÿ]+\\s+(?:faz|fazia|fez|faziam)\\s+[oa]s?\\s+[A-Za-zÀ-ÿ]+\\s+que\\b", re.I | re.U)
+_RE_ITALICO = re.compile(u"(?<![\\*_])([\\*_])(?![\\*_\\s])([^\\*_\\n]{1,80}?)\\1(?![\\*_])", re.U)
+# orcamento (mesmos defaults do TS ORC_CADENCIA)
+CAD = dict(curta=4, enfase=3, colados=1, staccato_frac=0.35, min_frases=8,
+           clipe_neg=1, anafora=1, epigrama=1, frag_enfase=2, italico=3, retorica=2)
+
+
+def _sem_headings(texto):
+    return "\n".join(l for l in (texto or "").split("\n") if not re.match(r"^\s*#", l))
+
+
+def dividir_frases(texto):
+    t = re.sub(r"[ \t]+", " ", _sem_headings(texto)).strip()
+    if not t:
+        return []
+    partes = re.split(u"(?<=[.!?…])[\\s\\n]+", t, flags=re.U)
+    return [re.sub(r"\s+", " ", p).strip() for p in partes if p.strip()]
+
+
+def _sem_abertura(f):
+    return re.sub(u"^[—–\\-\"'“”‘’*_(\\s]+", "", f or "", flags=re.U)
+
+
+def _palavras_frase(f):
+    return len(re.findall(u"[A-Za-zÀ-ÿ0-9’'\\-]+", _sem_abertura(f), re.U))
+
+
+def _primeira_palavra(f):
+    m = re.search(u"[A-Za-zÀ-ÿ0-9’'\\-]+", _sem_abertura(f), re.U)
+    return m.group(0).lower() if m else ""
+
+
+def _eh_dialogo(f):
+    return bool(re.match(u"^[—–\\-\"'“”‘’]", (f or "").strip(), re.U))
+
+
+def cadencia_acima(texto):
+    """Lista (nome, n, alvo) dos tiques de RITMO acima do orcamento. Espelha o TS."""
+    fr = dividir_frases(texto)
+    lens = [_palavras_frase(x) for x in fr]
+    nf = len(fr)
+    out = []
+    colados = sum(1 for i in range(1, nf) if lens[i - 1] <= CAD["curta"] and lens[i] <= CAD["curta"])
+    if colados > CAD["colados"]:
+        out.append(("fragmentos colados (<=4 palavras)", colados, CAD["colados"]))
+    curtas = sum(1 for n in lens if 0 < n <= CAD["curta"])
+    if nf >= CAD["min_frases"] and nf and curtas / nf > CAD["staccato_frac"]:
+        out.append(("staccato denso ({}% de frases curtas)".format(int(round(curtas / nf * 100))), curtas, int(round(nf * CAD["staccato_frac"]))))
+    clip = sum(1 for i, f in enumerate(fr) if lens[i] <= 3 and re.match(u"^n[ãa]o\\b", _sem_abertura(f), re.I | re.U))
+    if clip > CAD["clipe_neg"]:
+        out.append(("clipe de negacao curto", clip, CAD["clipe_neg"]))
+    ana = sum(1 for i in range(1, nf) if _primeira_palavra(fr[i - 1]) and _primeira_palavra(fr[i - 1]) == _primeira_palavra(fr[i]))
+    if ana > CAD["anafora"]:
+        out.append(("anafora (frases coladas, mesmo inicio)", ana, CAD["anafora"]))
+    epi = len(_RE_EPIGRAMA.findall(texto or ""))
+    if epi > CAD["epigrama"]:
+        out.append(("epigrama antitetico", epi, CAD["epigrama"]))
+    frag = sum(1 for i in range(nf) if 1 <= lens[i] <= CAD["enfase"])
+    if frag > CAD["frag_enfase"]:
+        out.append(("fragmento de enfase (Regra 4 <=1-2)", frag, CAD["frag_enfase"]))
+    fcol = sum(1 for i in range(1, nf) if 1 <= lens[i - 1] <= CAD["enfase"] and 1 <= lens[i] <= CAD["enfase"])
+    if fcol > 0:
+        out.append(("fragmentos de enfase COLADOS (Regra 4: nunca dois)", fcol, 0))
+    ital = len(_RE_ITALICO.findall(texto or ""))
+    if ital > CAD["italico"]:
+        out.append(("pensamento em italico (Regra 4 <=2-3)", ital, CAD["italico"]))
+    ret = sum(1 for f in fr if re.search(u"[?][\"'”’)\\]]*$", f, re.U) and not _eh_dialogo(f))
+    if ret > CAD["retorica"]:
+        out.append(("pergunta retorica (Regra 4 <=1-2)", ret, CAD["retorica"]))
+    return out
+
+
 def gate_maneirismo_capitulo(projeto, n, args):
-    """Depois de escrever o capitulo n: se algum molde estourou o orcamento,
-    dispara UMA reescrita-alvo (bounded: 0 ou 1 por escrita, nao bloqueia o
-    avanco do livro). Nomeia as linhas/moldes ofensores."""
+    """Depois de escrever o capitulo n: se algum molde/muleta/CADENCIA estourou o
+    orcamento, dispara UMA reescrita-alvo (bounded: 0 ou 1 por escrita, nao bloqueia
+    o avanco do livro). Nomeia as linhas/moldes/tiques de ritmo ofensores."""
     txt = ler_arquivo(projeto, nome_cap(n))
     if not txt:
         return
     offs = maneirismos_acima(txt)
     muls = muletas_acima_cap(txt)
-    if not offs and not muls:
+    cads = cadencia_acima(txt)
+    if not offs and not muls and not cads:
         return
     lista = "; ".join(["{} {}x".format(nome, cnt) for nome, cnt in offs] +
-                      ["MULETA {} {}x (alvo <= {})".format(nome, cnt, b) for nome, cnt, b in muls])
+                      ["MULETA {} {}x (alvo <= {})".format(nome, cnt, b) for nome, cnt, b in muls] +
+                      ["CADENCIA {} {}x (alvo <= {})".format(nome, cnt, alvo) for nome, cnt, alvo in cads])
     arq = nome_cap(n).replace("\\", "/")
     log(projeto, "GATE CAP {}: acima do orcamento -> reescrevendo ({}).".format(n, lista))
     prompt = (
@@ -652,8 +746,12 @@ def gate_maneirismo_capitulo(projeto, n, args):
         "REVISAO DE PROSA do {arq}: os itens abaixo estao SOBRE-REPRESENTADOS neste "
         "capitulo (contagem real). Reduza CADA UM ao alvo. Para MULETAS (ex.: 'coisa'), "
         "TROQUE pela coisa concreta a que se refere (objeto, ideia, gesto) — nunca deixe "
-        "'coisa' generica. Para MOLDES, desadense o tique com sintaxe variada. PRESERVE "
-        "sentido e voz; NAO reescreva a cena a toa. Regrave o MESMO arquivo {arq}.\n"
+        "'coisa' generica. Para MOLDES, desadense o tique com sintaxe variada. Para "
+        "CADENCIA (ritmo), VARIE o comprimento das frases — FUNDA as frases curtas coladas "
+        "numa frase mais longa e encadeada onde for revelacao, quebre a anafora, corte o "
+        "clipe de negacao repetido; nunca dois fragmentos colados (Regra 4). NAO basta "
+        "cortar palavra: a instrucao e variar o RITMO. PRESERVE sentido e voz; NAO "
+        "reescreva a cena a toa. Regrave o MESMO arquivo {arq}.\n"
         "Itens acima do orcamento: {lista}\n"
     ).format(arq=arq, lista=lista)
     run_claude(projeto, prompt, args)
@@ -758,6 +856,11 @@ def diagnostico_book_wide(projeto, total):
             len(fecho), len(caps), fecho_alvo, ",".join(map(str, fecho[:12]))))
     for g, c, d in _ngramas_sobrerep(full):
         acima.append("repeticao \"{}\": {}x ({}/10k) -> varie".format(g, c, d))
+    # CADENCIA (ritmo) POR CAPITULO: staccato/colados/anafora nao fazem sentido
+    # book-wide; conta por capitulo e lista os que estouram o orcamento de ritmo.
+    for i, cap in enumerate(caps, 1):
+        for nome, cnt, alvo in cadencia_acima(cap):
+            acima.append("CADENCIA cap {}: {} {}x -> <= {} (VARIE o ritmo: funda frases curtas, encadeie na revelacao; nao so corte)".format(i, nome, cnt, alvo))
     return acima, "\n".join(relatorio)
 
 
@@ -843,7 +946,7 @@ def executar(projeto, args):
                 revisando_cap = primeiro_cap_nao_revisado(projeto, tot, piso)
             if revisando_cap is not None:
                 log(projeto, "--- ESCRITA/REVISAO por capitulo: revisando cap {} (micro-loop) ---".format(revisando_cap))
-                prompt = prompt_revisao_capitulo(revisando_cap, args, piso)
+                prompt = prompt_revisao_capitulo(projeto, revisando_cap, args, piso)
             else:
                 alvo = proximo_capitulo_pendente(projeto, tot, piso)
                 if alvo is None:

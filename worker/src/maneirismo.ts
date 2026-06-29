@@ -153,6 +153,142 @@ export function contarMuletas(texto: string, lexico: Muleta[] = MULETAS): Muleta
 }
 
 // ---------------------------------------------------------------------------
+// 5) CADÊNCIA (ritmo, não palavras): o detector acima mede moldes/léxico; este
+//    mede o RITMO das frases — o staccato que a Regra 4 da skill-dan-brown bane
+//    ("nunca dois fragmentos colados"). Determinístico, puro, testável.
+//    Tiques: fragmentos colados, densidade de staccato, clipe de negação,
+//    anáfora, epigrama antitético, e a cota de tiques de propulsão da Regra 4.
+// ---------------------------------------------------------------------------
+const RE_ITALICO = /(?<![\*_])([\*_])(?![\*_\s])([^\*_\n]{1,80}?)\1(?![\*_])/g;
+
+// Remove linhas de heading markdown (não são prosa).
+function semHeadings(texto: string): string {
+  return (texto ?? "").split(/\n/).filter((l) => !/^\s*#/.test(l)).join("\n");
+}
+
+// Divide em frases por pontuação terminal (mantém a pontuação). Heurística PT-BR.
+export function dividirFrases(texto: string): string[] {
+  const t = semHeadings(texto).replace(/[ \t]+/g, " ").trim();
+  if (!t) return [];
+  return t
+    .split(/(?<=[.!?…])[\s\n]+/)
+    .map((s) => s.replace(/\n+/g, " ").trim())
+    .filter(Boolean);
+}
+
+// Tira marcas de abertura (travessão de fala, aspas) antes de contar/abrir a frase.
+function semAbertura(f: string): string {
+  return f.replace(/^[—–\-"'“”‘’*_(\s]+/, "");
+}
+function palavrasFrase(f: string): number {
+  return (semAbertura(f).match(/[A-Za-zÀ-ÿ0-9’'-]+/g) ?? []).length;
+}
+function primeiraPalavra(f: string): string {
+  return (semAbertura(f).match(/[A-Za-zÀ-ÿ0-9’'-]+/) ?? [""])[0].toLowerCase();
+}
+function ehDialogo(f: string): boolean {
+  return /^[—–\-"'“”‘’]/.test(f.trim());
+}
+
+export interface CadenciaTique {
+  nome: string;
+  n: number;
+  alvo: number;
+  acima: boolean;
+  exemplos: string[];
+  densidade?: number; // % quando aplicável (staccato)
+}
+export interface ResultadoCadencia {
+  frases: number;
+  staccatoPct: number;        // % de frases ≤ curta palavras
+  tiques: CadenciaTique[];    // todos os medidos (n≥0); os com acima=true são os ofensores
+  acima: boolean;             // algum tique acima do orçamento
+}
+
+export interface OrcamentoCadencia {
+  curta: number;        // limiar "frase curta" (palavras) p/ colados/staccato
+  enfase: number;       // limiar "fragmento de ênfase" da Regra 4 (palavras)
+  colados: number;      // orçamento de pares colados (≤1 tolerado)
+  staccatoFrac: number; // fração de frases curtas que dispara
+  minFrases: number;    // nº mínimo de frases p/ avaliar staccato (anti falso-positivo)
+  clipeNeg: number;     // clipes de negação curtos por capítulo
+  anafora: number;      // pares de anáfora colada
+  epigrama: number;     // epigramas antitéticos
+  fragEnfase: number;   // fragmentos de ênfase (Regra 4: ≤1–2)
+  italico: number;      // pensamentos em itálico (Regra 4: ≤2–3)
+  retorica: number;     // perguntas retóricas suspensas (Regra 4: ≤1–2)
+}
+export const ORC_CADENCIA: OrcamentoCadencia = {
+  curta: 4, enfase: 3, colados: 1, staccatoFrac: 0.35, minFrases: 8,
+  clipeNeg: 1, anafora: 1, epigrama: 1, fragEnfase: 2, italico: 3, retorica: 2,
+};
+
+const RE_EPIGRAMA = /\b[oa]s?\s+[A-Za-zÀ-ÿ]+\s+(?:faz|fazia|fez|faziam)\s+[oa]s?\s+[A-Za-zÀ-ÿ]+\s+que\b/gi;
+
+export function diagnosticarCadencia(texto: string, orc: OrcamentoCadencia = ORC_CADENCIA): ResultadoCadencia {
+  const t = texto ?? "";
+  const fr = dividirFrases(t);
+  const lens = fr.map(palavrasFrase);
+  const ex = (arr: string[]) => arr.slice(0, 3).map((s) => s.slice(0, 70));
+
+  // 1) fragmentos colados: pares adjacentes de frases ≤ curta palavras
+  const coladosEx: string[] = [];
+  let colados = 0;
+  for (let i = 1; i < fr.length; i++) {
+    if (lens[i - 1] <= orc.curta && lens[i] <= orc.curta) {
+      colados++;
+      coladosEx.push(`${fr[i - 1]} ${fr[i]}`);
+    }
+  }
+  // 2) staccato: densidade de frases curtas
+  const curtas = lens.filter((n) => n > 0 && n <= orc.curta).length;
+  const staccatoPct = fr.length ? Math.round((curtas / fr.length) * 1000) / 10 : 0;
+  const staccatoAcima = fr.length >= orc.minFrases && curtas / fr.length > orc.staccatoFrac;
+  // 3) clipe de negação curto: frase ≤3 palavras começando "Não"
+  const clipes = fr.filter((f, i) => lens[i] <= 3 && /^n[ãa]o\b/i.test(semAbertura(f)));
+  // 4) anáfora: frases consecutivas com a MESMA primeira palavra
+  const anaforaEx: string[] = [];
+  let anafora = 0;
+  for (let i = 1; i < fr.length; i++) {
+    const a = primeiraPalavra(fr[i - 1]);
+    if (a && a === primeiraPalavra(fr[i])) {
+      anafora++;
+      anaforaEx.push(`${fr[i - 1]} / ${fr[i]}`);
+    }
+  }
+  // 5) epigrama antitético ("X fazia o Y que …")
+  const epi = [...t.matchAll(RE_EPIGRAMA)].map((m) => m[0]);
+  // 6) cota da Regra 4: fragmento de ênfase (1–enfase palavras) + colados; itálico; retórica
+  const frag = fr.filter((f, i) => lens[i] >= 1 && lens[i] <= orc.enfase);
+  let fragColados = 0;
+  for (let i = 1; i < fr.length; i++)
+    if (lens[i - 1] >= 1 && lens[i - 1] <= orc.enfase && lens[i] >= 1 && lens[i] <= orc.enfase) fragColados++;
+  const italicos = [...t.matchAll(RE_ITALICO)].map((m) => m[2]);
+  const retoricas = fr.filter((f) => /[?]["'”’)\]]*$/.test(f) && !ehDialogo(f));
+
+  const mk = (nome: string, n: number, alvo: number, exemplos: string[], densidade?: number): CadenciaTique =>
+    ({ nome, n, alvo, acima: n > alvo, exemplos: ex(exemplos), densidade });
+
+  const tiques: CadenciaTique[] = [
+    mk("fragmentos colados (≤4 palavras)", colados, orc.colados, coladosEx),
+    { nome: "staccato (frases curtas)", n: curtas, alvo: Math.round(fr.length * orc.staccatoFrac), acima: staccatoAcima, exemplos: [], densidade: staccatoPct },
+    mk("clipe de negação curto", clipes.length, orc.clipeNeg, clipes),
+    mk("anáfora (frases coladas, mesmo início)", anafora, orc.anafora, anaforaEx),
+    mk("epigrama antitético", epi.length, orc.epigrama, epi),
+    mk("fragmento de ênfase (Regra 4 ≤1–2)", frag.length, orc.fragEnfase, frag),
+    mk("fragmentos de ênfase COLADOS (Regra 4: nunca dois)", fragColados, 0, []),
+    mk("pensamento em itálico (Regra 4 ≤2–3)", italicos.length, orc.italico, italicos),
+    mk("pergunta retórica (Regra 4 ≤1–2)", retoricas.length, orc.retorica, retoricas),
+  ];
+  return { frases: fr.length, staccatoPct, tiques, acima: tiques.some((q) => q.acima) };
+}
+
+// Só os tiques de cadência ACIMA do orçamento (para gate/relatório).
+export function cadenciaAcima(texto: string, orc: OrcamentoCadencia = ORC_CADENCIA): CadenciaTique[] {
+  return diagnosticarCadencia(texto, orc).tiques.filter((q) => q.acima);
+}
+
+// ---------------------------------------------------------------------------
 // Resumos
 // ---------------------------------------------------------------------------
 export function resumoManeirismo(r: ResultadoManeirismo): string {
@@ -162,11 +298,14 @@ export function resumoManeirismo(r: ResultadoManeirismo): string {
 }
 
 // Diagnóstico completo (book-wide): moldes + fecho + n-gramas genéricos acima do alvo.
+export interface CadenciaCapitulo { capitulo: number; tiques: CadenciaTique[] }
+
 export interface DiagnosticoRepeticao {
   moldes: PadraoContagem[];           // só os ACIMA do alvo
   muletas: MuletaContagem[];          // só as ACIMA do alvo
   fecho: FechoResultado & { acima: boolean };
   ngramas: NgramHit[];
+  cadencia: CadenciaCapitulo[];       // por capítulo, só os com tiques de ritmo ACIMA
   algumAcima: boolean;
 }
 
@@ -176,11 +315,17 @@ export function diagnosticarRepeticao(textoCompleto: string, capitulos: string[]
   const muletasAcima = contarMuletas(textoCompleto).filter((m) => m.acima);
   const fecho = fechoEpigramatico(capitulos);
   const ngramas = ngramasSobrerepresentados(textoCompleto);
+  // Cadência é POR CAPÍTULO (staccato/colados não fazem sentido book-wide): roda por
+  // capítulo e lista os que estouram o orçamento de ritmo.
+  const cadencia: CadenciaCapitulo[] = capitulos
+    .map((cap, i) => ({ capitulo: i + 1, tiques: cadenciaAcima(cap) }))
+    .filter((c) => c.tiques.length > 0);
   return {
     moldes: moldesAcima,
     muletas: muletasAcima,
     fecho,
     ngramas,
-    algumAcima: moldesAcima.length > 0 || muletasAcima.length > 0 || fecho.acima || ngramas.length > 0,
+    cadencia,
+    algumAcima: moldesAcima.length > 0 || muletasAcima.length > 0 || fecho.acima || ngramas.length > 0 || cadencia.length > 0,
   };
 }

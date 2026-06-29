@@ -55,7 +55,14 @@ gate + **micro-loop escritor→revisor→editor por capítulo LIGADO POR PADRÃO
 central de qualidade; escape hatch `--sem-revisao-por-capitulo` / env
 `REVISAO_POR_CAPITULO=0` / `payload.sem_revisao_por_capitulo` / toggle na UI para
 baratear no Max). O detector de repetição/muleta vive em `worker/src/maneirismo.ts`
-(TS, testado) e espelhado no runner.
+(TS, testado) e espelhado no runner. **Detector de CADÊNCIA (ritmo, não palavras):**
+`diagnosticarCadencia`/`cadenciaAcima` (TS) + `cadencia_acima` (runner) medem o
+staccato que a Regra 4 da skill-dan-brown bane — fragmentos colados, densidade de
+staccato, clipe de negação, anáfora, epigrama antitético e a **cota da Regra 4**
+(itálico ≤2–3, retórica ≤1–2, fragmento ≤1–2 e nunca dois colados). Ligado no
+**gate por capítulo**, no **revisor** (cota com as contagens reais) e no
+**DESMANEIRISMO** (por capítulo). A instrução é **VARIAR o ritmo** (fundir frases
+curtas, encadear na revelação), não só cortar palavra.
 
 ## Modelo por papel (subagentes livro-*) + orquestrador
 

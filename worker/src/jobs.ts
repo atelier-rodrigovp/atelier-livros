@@ -1074,6 +1074,7 @@ async function passeProsaCountDriven(job: Job, dir: string, sub: string, subRel:
       ...diag.moldes.map((m) => `- ${m.nome}: ${m.n}× (${m.por10k}/10k) → reduza para ≤ ${m.alvo}.`),
       diag.fecho.acima ? `- Fecho epigramático isolado (frase curta sozinha no fim do capítulo): ${diag.fecho.n}/${diag.fecho.total} capítulos → ≤ ${Math.ceil(diag.fecho.total / 3)} (varie os fechamentos).` : "",
       ...diag.ngramas.slice(0, 6).map((h) => `- repetição "${h.gram}": ${h.n}× → varie/reduza.`),
+      ...diag.cadencia.slice(0, 8).map((c) => `- CADÊNCIA cap ${c.capitulo}: ${c.tiques.map((q) => `${q.nome} ${q.n}×${q.densidade != null ? ` (${q.densidade}%)` : ""}→≤${q.alvo}`).join("; ")} → VARIE O RITMO (funda frases curtas, encadeie onde for revelação), não só corte palavra.`),
     ].filter(Boolean).join("\n");
     await setProgress(job.id, { fase: "REVISAO", idioma, etapa: `prosa: desadensando tiques (iter ${it}/${MAX_PROSA_ITERS})`, repeticao: { moldes: diag.moldes.length, fecho: diag.fecho.n } });
     const prompt =
