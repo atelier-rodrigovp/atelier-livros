@@ -25,6 +25,7 @@ import {
 } from "./lib.js";
 import { normalizarModelosAgentes } from "./modelos-agentes.js";
 import { normalizarVozRegra4 } from "./voz-regra4.js";
+import { hidratarWorkDir } from "./hidratar.js";
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
 import { sanitizarCapitulo, metaResidual } from "./sanitize.js";
 import { LimiteMaxError, limiteMaxRetryAt, pareceLimiteMax } from "./limite-max.js";
@@ -263,6 +264,29 @@ async function readState(dir: string): Promise<any | null> {
   } catch {
     return null;
   }
+}
+
+// LIVRO IMPORTADO: o WORK_DIR nasce vazio (importador grava só banco/Storage). Se não
+// há ESTADO_LIVRO.json no disco, hidrata do Storage (capítulos→capitulo-NN.md, fundação,
+// ESTADO semeado, MESTRE) antes da ação. Idempotente; no-op para projeto normal (já tem
+// ESTADO). Falha alto NÃO: hidratar é melhor-esforço; o handler decide o que exigir.
+async function hidratarSeNecessario(projectId: string | null): Promise<void> {
+  if (!projectId) return;
+  if (await exists(path.join(projDir(projectId), "ESTADO_LIVRO.json"))) return;
+  try {
+    const r = await hidratarWorkDir(projectId);
+    console.log(
+      `[hidratar] ${projectId}: ${r.capitulos} caps (baixou ${r.baixados}), ` +
+        `fundação=${r.temFundacao ? "sim" : "não"}, mestre=${r.mestre}, estado=${r.estadoSemeado ? "semeado" : "—"}`
+    );
+  } catch (e) {
+    console.warn(`[hidratar] ${projectId}: ${(e as Error).message}`);
+  }
+}
+
+// Fundação Atelier presente no disco? (agentes livro-* — o runner precisa deles p/ refinar).
+async function temFundacaoAtelier(dir: string): Promise<boolean> {
+  return exists(path.join(dir, ".claude", "agents", "livro-escritor.md"));
 }
 
 // ===========================================================================
@@ -602,8 +626,19 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   if (!RUNNER_PATH) throw new Error("RUNNER_PATH não configurado no worker/.env");
   const proj = await getProject(job.project_id!);
   const dir = projDir(job.project_id!);
+  // Livro importado: hidrata o WORK_DIR do Storage (capítulos + fundação se houver + ESTADO).
+  await hidratarSeNecessario(job.project_id);
   if (!(await exists(path.join(dir, "ESTADO_LIVRO.json"))))
     throw new Error("fundação ausente — rode criar_fundacao antes de escrever_livro");
+  // Refinar/escrever exige a fundação ATELIER (agentes livro-* que o runner delega). Um
+  // livro importado SEM essa fundação não pode ser refinado — erro CLARO e acionável
+  // (não run cru): avalie/publique, ou reconstrua a fundação a partir do manuscrito.
+  if (!(await temFundacaoAtelier(dir))) {
+    throw new Error(
+      "Livro importado sem fundação do Atelier (agentes/Bíblia ausentes) — não dá para refinar. " +
+        "Use Avaliar/Publicar, ou reconstrua a fundação a partir do manuscrito para habilitar o refino."
+    );
+  }
 
   // Preflight: skill de escrita precisa existir — falha alto, sem fallback silencioso.
   assertSkillInstalada(proj.skill_escrita);
@@ -794,6 +829,7 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
 // ===========================================================================
 async function gerarEpub(job: Job) {
   const edicao = await getEdition(job.edition_id!);
+  await hidratarSeNecessario(edicao.project_id); // livro importado: WORK_DIR do Storage
   const proj = await getProject(edicao.project_id);
   const dir = projDir(edicao.project_id);
   const sub = edicao.is_origem ? path.join(dir, "manuscrito") : path.join(dir, "traducoes", edicao.idioma);
@@ -889,6 +925,7 @@ function lancarSeLimiteMax(saidaClaude: string, contexto: string): void {
 // traduzir — skill traducao-editorial (PT-BR -> idiomas-meta)
 // ===========================================================================
 async function traduzir(job: Job, hb?: Heartbeat) {
+  await hidratarSeNecessario(job.project_id); // livro importado: WORK_DIR do Storage
   const proj = await getProject(job.project_id!);
   const dir = projDir(job.project_id!);
   const idiomas: string[] = job.payload?.idiomas ?? [];
@@ -1028,13 +1065,17 @@ async function avaliarEdicao(projectId: string, edicao: any, jobId?: string): Pr
 
 async function avaliar(job: Job, _hb?: Heartbeat) {
   const edicao = await getEdition(job.edition_id!);
+  // Livro importado: hidrata o WORK_DIR do Storage antes (capítulos + MESTRE + ESTADO).
+  await hidratarSeNecessario(edicao.project_id);
   // Avaliação só roda em livro COMPLETO — nunca em manuscrito parcial (ex.: 3/32).
   const proj = await getProject(edicao.project_id);
   const sub = edicaoDir(projDir(edicao.project_id), edicao);
   const state = await readState(projDir(edicao.project_id));
   const total = Number(state?.total_capitulos_previstos ?? proj.total_capitulos ?? 0);
   const have = (await chaptersOnDisk(sub, edicao.is_origem ? Number(proj.piso_palavras ?? 1) : 1)).length;
-  if (total > 0 && have < total) {
+  // Livro CONCLUIDO (incl. importado completo) já é completo por definição — não aplica
+  // o portão de parcialidade (alguns capítulos podem ficar abaixo do piso e não contar).
+  if (state?.fase_atual !== "CONCLUIDO" && total > 0 && have < total) {
     throw new Error(
       `Avaliação só roda com o livro completo — atualmente ${have}/${total} capítulos. Conclua a escrita antes de avaliar.`
     );

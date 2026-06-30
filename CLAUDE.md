@@ -102,6 +102,26 @@ para o modelo **pesado** (`--model-pesado`, default opus) via `modelo_da_fase()`
 não rebaixar nem o avaliador nem a prosa. `MODEL` (opus) segue valendo para os jobs
 interativos/fundação (`runClaude`).
 
+## Livros importados — hidratação do WORK_DIR
+
+Os importadores (`worker/scripts/importar-*.mjs`) gravam só no **banco**
+(`projects`/`editions`/`chapters`) e no **Storage** (`<owner>/<id>/manuscrito/NN-*.md`,
+`<id>/fundacao/*`) — **não** no `WORK_DIR` nem criam `ESTADO_LIVRO.json`. Como o worker
+lê "a verdade do disco" (`chaptersOnDisk`/`readState`) e nunca baixava do Storage, o app
+(lê o banco) mostrava 32/32 e avaliar/refinar (leem o disco) viam 0/32 / "fundação
+ausente". `worker/src/hidratar.ts` (`hidratarWorkDir`, testado) baixa os capítulos no
+layout do runner (`capitulo-NN.md`, por `numero` do banco), baixa a fundação se houver,
+**semeia `ESTADO_LIVRO.json`** (`fase_atual=CONCLUIDO` quando completo) e consolida o
+`MANUSCRITO-MESTRE.md`. Idempotente. Roda **automático no início** de `avaliar`,
+`escrever_livro`, `traduzir`, `gerar_epub` (só quando falta ESTADO — no-op p/ projeto
+normal). Sweep: `npx tsx worker/scripts/hidratar-importados.ts [<id>]`. **`avaliar`** tem
+bypass do portão de parcialidade quando `fase=CONCLUIDO` (livro completo pode ter
+capítulos abaixo do piso — front-matter/curtos — que não contam no piso, ex.: A Casa que
+Conta 29/32 no piso 1400, mas 32/32 real). **Refinar** importado SEM fundação Atelier
+(agentes `livro-*`) falha com **erro claro e acionável** (não run cru): avalie/publique ou
+reconstrua a fundação. (UI de "Preparar"/"Reconstruir fundação" = fatia futura; hoje a
+hidratação é automática e todos os importados têm fundação no Storage.)
+
 ## Trava antivazamento (nenhum meta-texto chega ao livro)
 
 Camadas (ver `worker/README.md` e `docs/auditoria-vazamento.md`):
