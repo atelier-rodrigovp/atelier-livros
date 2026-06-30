@@ -403,10 +403,12 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
   // prosa, então o model: vinha não-determinístico — editor às vezes opus). Determinístico.
   const ajustes = await normalizarModelosAgentes(path.join(dir, ".claude", "agents"));
   for (const a of ajustes) console.log(`[modelos] ${a.agente}: ${a.de ?? "(sem model)"} -> ${a.para}${a.mudou ? " [corrigido]" : ""}`);
-  // Garante a COTA DE CADÊNCIA (Regra 4) no perfil-de-voz.md + Estrutura (o arquiteto
-  // não a emite por padrão). Idempotente: não duplica se já existe.
-  for (const v of await normalizarVozRegra4(dir))
-    if (v.mudou) console.log(`[voz] Regra 4 injetada em ${v.arquivo}`);
+  // Garante a COTA DE CADÊNCIA (Regra 4) + a guarda dos parágrafos-modelo no
+  // perfil-de-voz.md + Estrutura (o arquiteto não as emite por padrão). Idempotente.
+  for (const v of await normalizarVozRegra4(dir)) {
+    if (v.mudou) console.log(`[voz] Regra 4 / guarda injetada em ${v.arquivo}`);
+    if (v.aviso) console.warn(`[voz] AVISO ${v.arquivo}: ${v.aviso}`);
+  }
 
   // Sync: sobe a fundação ao Storage
   for (const f of ["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md", "ESTADO_LIVRO.json", "briefing.md"]) {
@@ -609,10 +611,12 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // corrige projetos vivos cujos agentes nasceram com model: errado/herdado. Idempotente.
   for (const a of await normalizarModelosAgentes(path.join(dir, ".claude", "agents")))
     if (a.mudou) console.log(`[modelos] ${a.agente}: ${a.de ?? "(sem model)"} -> ${a.para}`);
-  // Garante a cota de cadência (Regra 4) na fundação antes de escrever (idempotente):
-  // corrige projetos vivos cuja fundação nasceu sem a injeção de voz.
-  for (const v of await normalizarVozRegra4(dir))
-    if (v.mudou) console.log(`[voz] Regra 4 injetada em ${v.arquivo}`);
+  // Garante a cota de cadência (Regra 4) + guarda dos modelos na fundação antes de
+  // escrever (idempotente): corrige projetos vivos e sinaliza muleta nos modelos.
+  for (const v of await normalizarVozRegra4(dir)) {
+    if (v.mudou) console.log(`[voz] Regra 4 / guarda injetada em ${v.arquivo}`);
+    if (v.aviso) console.warn(`[voz] AVISO ${v.arquivo}: ${v.aviso}`);
+  }
   // Pré-passe: limpa meta-texto já no disco antes do runner remontar manuscrito/EPUB.
   await sanitizarPastaCapitulos(path.join(dir, "manuscrito"));
 

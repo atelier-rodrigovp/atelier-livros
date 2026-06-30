@@ -74,7 +74,12 @@ também injeções legadas sem marcador, p.ex. a edição manual de A Espiral). 
 na prosa do `arquiteto-de-enredo`** (cujo SKILL.md tem encoding corrompido — não
 editar). Os números da cota **batem com os orçamentos do detector** (`ORC_CADENCIA`:
 fragEnfase 2/colados 0, italico 3, retorica 2, anafora/clipe 1; muleta "coisa" orc10k 4
-≈1/cap) — o alvo que o escritor recebe é o mesmo que o gate cobra.
+≈1/cap) — o alvo que o escritor recebe é o mesmo que o gate cobra. **Blindagem dos
+parágrafos-modelo (§2 do perfil):** o mesmo passo injeta uma **linha de guarda**
+(`<!-- GUARDA-MODELOS v1 -->`: "modelos = técnica, não copie, não reproduza muleta")
+e **escaneia** os modelos por muleta (`escanearMuletasNosModelos`), **sinalizando**
+(log/`aviso`) sem reescrever a prosa do autor — porque o gate de cadência roda nos
+capítulos, não no perfil, então a §2 não era coberta.
 
 ## Modelo por papel (subagentes livro-*) + orquestrador
 

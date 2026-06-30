@@ -29,6 +29,7 @@ async function main() {
     const mudados = ajustes.filter((a) => a.mudou);
     const resumo = ajustes.map((a) => `${a.arquivo}${a.mudou ? " [injetado]" : " ok"}`).join("  ");
     console.log(`${mudados.length ? "✏ " : "✓ "}${p}\n   ${resumo}`);
+    for (const a of ajustes) if (a.aviso) console.log(`   ⚠ ${a.aviso}`);
     totalMudou += mudados.length;
   }
   console.log(`\nConcluído. ${totalMudou} arquivo(s) com Regra 4 injetada.`);
