@@ -25,6 +25,7 @@ import {
 } from "./lib.js";
 import { normalizarModelosAgentes } from "./modelos-agentes.js";
 import { normalizarVozRegra4 } from "./voz-regra4.js";
+import { normalizarCraftSkill } from "./craft-skill.js";
 import { hidratarWorkDir } from "./hidratar.js";
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
 import { sanitizarCapitulo, metaResidual } from "./sanitize.js";
@@ -404,6 +405,12 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
     "'## SUPOSIÇÕES ASSUMIDAS' no topo de Biblia-da-Obra.md.\n" +
     "- Gere: Biblia-da-Obra.md, Mapa-de-Personagens.md, Estrutura-do-Livro.md, as pastas " +
     "(manuscrito/, specs/, contexto/, estado/, review/) e os 5 agentes em .claude/agents/.\n" +
+    (proj.skill_escrita
+      ? `- OBRIGATÓRIO — INGIRA A CRAFT DA SKILL: leia os documentos de craft da skill \`${proj.skill_escrita}\` ` +
+        `(em ~/.claude/skills/${proj.skill_escrita}/references/, sobretudo voz-e-oficio.md e metamodelo-thriller.md se existirem) ` +
+        "e TRADUZA o motor + as regras em ALVOS CONCRETOS E POSITIVOS no perfil-de-voz.md (com exemplos) e nas Notas de Execução " +
+        "da Estrutura-do-Livro.md. O perfil NÃO pode ser voz genérico-literária: é a voz DESTA skill para esta obra.\n"
+      : "") +
     "- Grave a SEMENTE ESTADO_LIVRO.json na raiz, já na fase ESCRITA, com: titulo, total_capitulos_previstos " +
     "(número de capítulos da Estrutura), skill_escrita" +
     (proj.skill_escrita ? ` ('${proj.skill_escrita}')` : " (null)") +
@@ -432,6 +439,13 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
   for (const v of await normalizarVozRegra4(dir)) {
     if (v.mudou) console.log(`[voz] Regra 4 / guarda injetada em ${v.arquivo}`);
     if (v.aviso) console.warn(`[voz] AVISO ${v.arquivo}: ${v.aviso}`);
+  }
+  // Injeta o RESUMO DE CRAFT da skill no perfil (motor + regras) — fecha a corrente
+  // skill→fundação→escritor de forma determinística (não confia só na paráfrase do LLM).
+  {
+    const c = await normalizarCraftSkill(dir, proj.skill_escrita);
+    if (c.mudou) console.log(`[craft] resumo da skill '${c.skill}' injetado no perfil-de-voz.md`);
+    else if (!c.reconhecida && proj.skill_escrita) console.warn(`[craft] skill '${proj.skill_escrita}' sem bloco de craft — perfil segue sem resumo`);
   }
 
   // Sync: sobe a fundação ao Storage
@@ -651,6 +665,12 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   for (const v of await normalizarVozRegra4(dir)) {
     if (v.mudou) console.log(`[voz] Regra 4 / guarda injetada em ${v.arquivo}`);
     if (v.aviso) console.warn(`[voz] AVISO ${v.arquivo}: ${v.aviso}`);
+  }
+  // Garante o resumo de craft da skill no perfil (corrige projetos vivos: do próximo
+  // capítulo em diante o escritor escreve com o DNA da skill). Idempotente.
+  {
+    const c = await normalizarCraftSkill(dir, proj.skill_escrita);
+    if (c.mudou) console.log(`[craft] resumo da skill '${c.skill}' injetado no perfil-de-voz.md`);
   }
   // Pré-passe: limpa meta-texto já no disco antes do runner remontar manuscrito/EPUB.
   await sanitizarPastaCapitulos(path.join(dir, "manuscrito"));

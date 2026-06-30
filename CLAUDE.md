@@ -88,6 +88,19 @@ e **escaneia** os modelos por muleta (`escanearMuletasNosModelos`), **sinalizand
 (log/`aviso`) sem reescrever a prosa do autor — porque o gate de cadência roda nos
 capítulos, não no perfil, então a §2 não era coberta.
 
+**Corrente skill→fundação→escritor (a craft da skill chega à caneta):** o escritor
+(`prompt_escrita_capitulo`) lia só a fundação, nunca a craft da skill
+(`references/voz-e-oficio.md`/`metamodelo-thriller.md`), e `criar_fundacao` tratava
+`skill_escrita` como etiqueta. `worker/src/craft-skill.ts` (`normalizarCraftSkill`,
+testado) injeta no `perfil-de-voz.md` um **RESUMO DE CRAFT por skill** (motor + regras
+como ALVO POSITIVO concreto), marcado `<!-- CRAFT-SKILL v1 -->`, idempotente e **agnóstico**
+(`CRAFT_POR_SKILL`: dan-brown, jk-rowling, hoover-mcfadden, romantasy, vésper; skill
+desconhecida/nenhuma → no-op). Roda após `criar_fundacao` e no início de `escrever_livro`.
+O prompt de `criar_fundacao` também **obriga o arquiteto a ingerir** a craft da skill; e
+`prompt_escrita_capitulo` manda o escritor **ler e SEGUIR o bloco `## CRAFT DA SKILL`** do
+perfil. Sweep: `npx tsx worker/scripts/aplicar-craft-skill.ts [<id>]`. **A skill é boa — o
+buraco era a fiação** (escritor não lia a craft; fundação não a ingeria).
+
 ## Modelo por papel (subagentes livro-*) + orquestrador
 
 No Claude Code, um subagente **sem `model:` no frontmatter HERDA o modelo do pai**
