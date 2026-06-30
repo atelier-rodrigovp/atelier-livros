@@ -428,8 +428,13 @@ def prompt_escrita_capitulo(n, piso):
         "e SIGA o bloco '## CRAFT DA SKILL' (marcador CRAFT-SKILL): e o motor + as regras "
         "da skill (alvo do escritor), nao decoracao — o capitulo precisa CUMPRI-LO "
         "(propulsao, montagem/corte de cena, exposicao dramatizada, interioridade com "
-        "custo em acao, gancho honesto, sem coincidencia). Se a skill tiver references "
-        "em ~/.claude/skills/<skill>/references/, podem ser consultadas.\n"
+        "custo em acao, gancho honesto, sem coincidencia).\n"
+        "   VOZ vs FATOS: o digest do contextualizador e para FATOS/continuidade; a VOZ/"
+        "TECNICA o escritor le DIRETO da craft a CADA capitulo, NUNCA de resumo comprimido. "
+        "OBRIGATORIO o livro-escritor LER e SEGUIR os arquivos de craft da skill_escrita em "
+        "~/.claude/skills/<skill_escrita>/references/ — para skill-dan-brown: voz-e-oficio.md "
+        "(as 5 regras) e metamodelo-thriller.md (o motor) — alem do bloco CRAFT DA SKILL do "
+        "perfil. 'Invocar a skill' = LER esses arquivos, nao so o resumo do SKILL.md.\n"
         "2) OBRIGATORIO: delegue a ESCRITA ao subagente 'livro-escritor' via Task "
         "(ele roda em opus). Antes, 'livro-contextualizador' gera "
         "contexto/contexto-cap-{n}.md; depois, 'livro-revisor' revisa e atualiza o "
@@ -472,6 +477,11 @@ def prompt_revisao_capitulo(projeto, n, args, piso):
                    "sem que nada aconteca na cena). Dramatize ou corte a decoracao."
                    ).format(est_pct, dlg_pct) if inter_flag else \
                   "densidade de acao/dialogo aceitavel ({}% estatico).".format(est_pct)
+    # VEREDITO DE PROPULSAO ("isto esta vivo?"): por padrao roda no revisor (sonnet);
+    # com --revisor-craft-opus, eleva esse julgamento a um subagente opus (custo Max).
+    bloco_prop = ("PARA O VEREDITO DE PROPULSAO (item h), delegue a um subagente em OPUS via "
+                  "Task (escritor/juiz) — julgamento de craft caro, mais fino.\n   "
+                  if getattr(args, "revisor_craft_opus", False) else "")
     return (
         PREAMBULO +
         "\nFASE ESCRITA - REVISAO POR CAPITULO do {arq} (micro-loop revisor->editor). "
@@ -494,6 +504,12 @@ def prompt_revisao_capitulo(projeto, n, args, piso):
         "paragrafo: isto AVANCA a cena (evento, virada, informacao, gesto) ou so DECORA? "
         "Se so decora, CORTE ou DRAMATIZE. As contagens sao evidencia; seu julgamento e "
         "mais amplo que a lista. {bloco_inter}\n"
+        "   (h) VEREDITO DE PROPULSAO - 'ISTO ESTA VIVO?': um capitulo competente mas MORTO "
+        "e REPROVACAO. Corta no PICO ou afrouxa? O relogio e sentido? Algo ACONTECE (evento/"
+        "virada/pista) ou e interioridade decorativa? A exposicao e DRAMATIZADA (conflito/"
+        "descoberta/perda) ou palestra? O capitulo PUXA o proximo? Se 'bem escrito e chato', "
+        "REPROVE e devolva edicoes que INJETAM propulsao (dramatize, corte no pico, encadeie "
+        "a caca as pistas), nao so cortam tique. {bloco_prop}"
         "Devolva uma LISTA de "
         "no maximo {maxed} EDICOES PONTUAIS (trecho -> correcao). NAO e recontacao nem o "
         "review book-wide (esse fica no fim).\n"
@@ -504,7 +520,7 @@ def prompt_revisao_capitulo(projeto, n, args, piso):
         "voz; nao reescreva a cena a toa.\n"
         "3) Atualize estado/estado-narrativo.md (o que mudou, fios tocados, pistas "
         "plantadas/pagas, MCL). Regrave o MESMO {arq} (>= {piso} palavras). Encerre.\n"
-    ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_cad=bloco_cad, bloco_inter=bloco_inter)
+    ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_cad=bloco_cad, bloco_inter=bloco_inter, bloco_prop=bloco_prop)
 
 
 def prompt_review(k):
@@ -1137,6 +1153,7 @@ def build_argparser():
     p.add_argument("--claude-bin", default="claude", help="Binario do Claude Code (default 'claude').")
     p.add_argument("--model", default="opus", help="Modelo do ORQUESTRADOR/roteamento (default 'opus'; o worker passa 'sonnet'). Subagentes mantem o modelo do proprio frontmatter (escritor opus, revisor sonnet, editor haiku).")
     p.add_argument("--model-pesado", default="opus", help="Modelo das fases INLINE pesadas (ESTRUTURA/REVIEW/REESCRITA), que nao delegam a um subagente (default 'opus').")
+    p.add_argument("--revisor-craft-opus", action="store_true", help="Eleva o VEREDITO DE PROPULSAO do revisor por capitulo a opus (custo Max). Default off: a critica de propulsao roda no revisor sonnet.")
     p.add_argument("--dry-run", action="store_true", help="So bootstrap do ESTADO_LIVRO.json e sai.")
     return p
 

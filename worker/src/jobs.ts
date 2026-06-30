@@ -26,6 +26,7 @@ import {
 import { normalizarModelosAgentes } from "./modelos-agentes.js";
 import { normalizarVozRegra4 } from "./voz-regra4.js";
 import { normalizarCraftSkill } from "./craft-skill.js";
+import { normalizarCraftNosAgentes } from "./craft-agentes.js";
 import { hidratarWorkDir } from "./hidratar.js";
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
 import { sanitizarCapitulo, metaResidual } from "./sanitize.js";
@@ -447,6 +448,13 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
     if (c.mudou) console.log(`[craft] resumo da skill '${c.skill}' injetado no perfil-de-voz.md`);
     else if (!c.reconhecida && proj.skill_escrita) console.warn(`[craft] skill '${proj.skill_escrita}' sem bloco de craft — perfil segue sem resumo`);
   }
+  // Conserta os AGENTES gerados: escritor lê a craft (não o digest p/ voz) + revisor
+  // reprova "competente e chato" (veredito de propulsão). Idempotente.
+  {
+    const a = await normalizarCraftNosAgentes(path.join(dir, ".claude", "agents"));
+    if (a.escritor) console.log("[craft] livro-escritor: leitura de craft por capítulo injetada");
+    if (a.revisor) console.log("[craft] livro-revisor: veredito de propulsão injetado");
+  }
 
   // Sync: sobe a fundação ao Storage
   for (const f of ["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md", "ESTADO_LIVRO.json", "briefing.md"]) {
@@ -672,6 +680,13 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     const c = await normalizarCraftSkill(dir, proj.skill_escrita);
     if (c.mudou) console.log(`[craft] resumo da skill '${c.skill}' injetado no perfil-de-voz.md`);
   }
+  // Conserta os agentes gerados (escritor lê craft / revisor cobra propulsão) antes de
+  // escrever — projetos vivos passam a escrever da craft do próximo capítulo em diante.
+  {
+    const a = await normalizarCraftNosAgentes(path.join(dir, ".claude", "agents"));
+    if (a.escritor) console.log("[craft] livro-escritor: leitura de craft por capítulo injetada");
+    if (a.revisor) console.log("[craft] livro-revisor: veredito de propulsão injetado");
+  }
   // Pré-passe: limpa meta-texto já no disco antes do runner remontar manuscrito/EPUB.
   await sanitizarPastaCapitulos(path.join(dir, "manuscrito"));
 
@@ -724,6 +739,10 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // payload.sem_revisao_por_capitulo → desliga.
   if (process.env.REVISAO_POR_CAPITULO === "0" || job.payload?.sem_revisao_por_capitulo) {
     args.push("--sem-revisao-por-capitulo");
+  }
+  // Opcional (default off, custo Max): eleva o veredito de propulsão do revisor a opus.
+  if (process.env.REVISOR_CRAFT_OPUS === "1" || job.payload?.revisor_craft_opus) {
+    args.push("--revisor-craft-opus");
   }
   let r;
   try {

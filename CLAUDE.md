@@ -101,6 +101,23 @@ O prompt de `criar_fundacao` também **obriga o arquiteto a ingerir** a craft da
 perfil. Sweep: `npx tsx worker/scripts/aplicar-craft-skill.ts [<id>]`. **A skill é boa — o
 buraco era a fiação** (escritor não lia a craft; fundação não a ingeria).
 
+**O Opus escreve da CRAFT, não do digest-haiku (corrente fechada de verdade):** a
+auditoria independente mostrou que o bloco `CRAFT-SKILL` no perfil era **insuficiente** —
+o agente `livro-escritor` era mandado "não reler a fundação; o digest basta", e a VOZ
+chegava comprimida a ~2 linhas por **haiku**. `worker/src/craft-agentes.ts`
+(`normalizarCraftNosAgentes`, testado) conserta os AGENTES GERADOS: no `livro-escritor`
+injeta `<!-- CRAFT-LEITURA v1 -->` (VOZ/TÉCNICA lida DIRETO de `voz-e-oficio.md` +
+`metamodelo-thriller.md` + bloco CRAFT a cada capítulo; digest = só FATOS) e **neutraliza
+o "não releia"**; no `livro-revisor` injeta `<!-- PROPULSAO v1 -->` (VEREDITO "isto está
+vivo?" — reprova "competente e chato", não só defeito). Roda após `criar_fundacao`, no
+início de `escrever_livro` e no sweep `consertar-craft-agentes.ts`. O runner
+`prompt_escrita_capitulo` manda LER as references da skill (não o resumo); flag
+`--revisor-craft-opus` (env `REVISOR_CRAFT_OPUS=1`, default off) eleva o veredito de
+propulsão a opus. **O `arquiteto-de-enredo/SKILL.md` foi regravado SEM os 3189 NUL**
+(conteúdo idêntico, agora editável) e o template do escritor na fábrica corrigido (VOZ vs
+FATOS) — projeto novo nasce certo. **Canais separados: voz nunca passa por compressão de
+haiku.**
+
 ## Modelo por papel (subagentes livro-*) + orquestrador
 
 No Claude Code, um subagente **sem `model:` no frontmatter HERDA o modelo do pai**
