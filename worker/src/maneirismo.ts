@@ -14,6 +14,14 @@ const MOLDES: Molde[] = [
   { nome: 'aposto antitético ("não era pergunta; era…")', re: /\bn[ãa]o\s+(?:era|foi|é)\s+[^.,;:!?\n]{1,30}[;:,]\s*(?:era|foi|é|mas|e\s+sim)\b/gi, orc10k: 1.0 },
   { nome: 'antítese "não X, mas/e sim Y"', re: /\bn[ãa]o\s+\w[^.,;!?\n]{0,50}[,;]\s*(?:mas|e\s+sim|sen[ãa]o)\s+/gi, orc10k: 1.5 },
   { nome: 'fragmento antitético curto ("Não X. Y.")', re: /(?:^|[.!?]\s)N[ãa]o\s+[^.!?\n]{1,45}[.!?]\s+[A-ZÀ-Ý]/g, orc10k: 1.5 },
+  // antítese com "haver" — escapava (o molde acima só casa não era/foi/é/seria):
+  // "Não havia nada… Havia só o branco." / "não havia X, havia Y".
+  { nome: 'antítese com "haver" ("Não havia X… Havia Y")', re: /\bn[ãa]o\s+h(?:avia|á|ouve)\b[^.!?\n]{0,80}[.!?…]+\s+(?:[^.!?\n]{0,30}\s)?h(?:avia|á)\b/gi, orc10k: 1.5 },
+  { nome: 'antítese com "haver" (mesma frase: "não havia X, havia Y")', re: /\bn[ãa]o\s+h(?:avia|á|ouve)\b[^.,;:!?\n]{1,50}[,;]\s*(?:mas\s+|e\s+sim\s+)?h(?:avia|á)\b/gi, orc10k: 1.0 },
+  // símile-andaime: símile hipotético estendido ("Como quando se entra…", "como se
+  // pudesse…") — um dos piores tiques de IA. Orçamento apertado (1 legítimo ok; o
+  // alvo é o EXCESSO e o molde repetido).
+  { nome: 'símile-andaime ("como se / como quando")', re: /\bcomo\s+(?:se|quando)\b/gi, orc10k: 2.5 },
   // "do jeito que / do jeito de / do jeito como"
   { nome: '"do jeito que/de"', re: /\bdo\s+jeito\s+(?:que|de|como)\b/gi, orc10k: 2.5 },
   // clichês recorrentes
@@ -286,6 +294,28 @@ export function diagnosticarCadencia(texto: string, orc: OrcamentoCadencia = ORC
 // Só os tiques de cadência ACIMA do orçamento (para gate/relatório).
 export function cadenciaAcima(texto: string, orc: OrcamentoCadencia = ORC_CADENCIA): CadenciaTique[] {
   return diagnosticarCadencia(texto, orc).tiques.filter((q) => q.acima);
+}
+
+// INTERIORIDADE SEM EVENTO (heurística — SINALIZA, não bloqueia): capítulo
+// majoritariamente cópula/percepção (ser/estar/parecer/haver/sentir/lembrar) e quase
+// sem diálogo → prosa "bem escrita e chata", sensação sobre sensação sem que nada
+// aconteça na cena. Alimenta o REVISOR (não rejeita sozinho — pode ser uma abertura
+// contemplativa legítima). Conservador: exige densidade alta E diálogo quase nulo.
+const RE_ESTATICO = /\b(é|era|foi|s[ãa]o|eram|est[áa]|estava|estavam|parece|parecia|pareciam|h[áa]|havia|houve|sentia|sente|sentiu|lembrava|lembra|imaginava|imagina|pensava|tinha|existia)\b/i;
+export interface InterioridadeSinal { frases: number; estaticaPct: number; dialogoPct: number; acima: boolean }
+export function interioridadeSemEvento(texto: string, min = 10): InterioridadeSinal {
+  const fr = dividirFrases(texto);
+  if (!fr.length) return { frases: 0, estaticaPct: 0, dialogoPct: 0, acima: false };
+  const estaticas = fr.filter((f) => RE_ESTATICO.test(f) && !ehDialogo(f)).length;
+  const dialogo = fr.filter((f) => ehDialogo(f)).length;
+  const ep = estaticas / fr.length;
+  const dp = dialogo / fr.length;
+  return {
+    frases: fr.length,
+    estaticaPct: Math.round(ep * 1000) / 10,
+    dialogoPct: Math.round(dp * 1000) / 10,
+    acima: fr.length >= min && ep > 0.6 && dp < 0.06,
+  };
 }
 
 // ---------------------------------------------------------------------------

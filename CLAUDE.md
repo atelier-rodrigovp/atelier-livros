@@ -62,7 +62,14 @@ staccato, clipe de negação, anáfora, epigrama antitético e a **cota da Regra
 (itálico ≤2–3, retórica ≤1–2, fragmento ≤1–2 e nunca dois colados). Ligado no
 **gate por capítulo**, no **revisor** (cota com as contagens reais) e no
 **DESMANEIRISMO** (por capítulo). A instrução é **VARIAR o ritmo** (fundir frases
-curtas, encadear na revelação), não só cortar palavra. A **cota da Regra 4 também é
+curtas, encadear na revelação), não só cortar palavra. Moldes adicionais (escapavam):
+**antítese com "haver"** ("Não havia X… Havia Y") e **símile-andaime** ("como se / como
+quando") em `MOLDES`/`_MOLDES_CAP`; e **interioridade-sem-evento** (`interioridadeSemEvento`,
+heurística: cópula/percepção alta + diálogo ~nulo → "bem escrito e chato") que **sinaliza,
+não bloqueia** — só alimenta o revisor. **Revisor por capítulo é CRÍTICO HOLÍSTICO**
+(lever definitivo, não whack-a-mole de lista): item (g) manda ler o capítulo e cortar/
+dramatizar símile-andaime, eco de negação, anáfora/staccato e decoração-sem-evento mesmo
+fora da lista — as contagens entram como evidência. A **cota da Regra 4 também é
 injetada na FUNDAÇÃO** como alvo positivo (não só enforce em runtime): o arquiteto
 não a emite por padrão, então `worker/src/voz-regra4.ts` (`normalizarVozRegra4`,
 testado) garante a seção de cota (fragmento ≤1–2 nunca colado, itálico ≤2–3, retórica

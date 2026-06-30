@@ -2,8 +2,43 @@ import { describe, it, expect } from "vitest";
 import {
   contarManeirismos, resumoManeirismo, fechoEpigramatico,
   ngramasSobrerepresentados, diagnosticarRepeticao, contarMuletas,
-  dividirFrases, diagnosticarCadencia, cadenciaAcima,
+  dividirFrases, diagnosticarCadencia, cadenciaAcima, interioridadeSemEvento,
 } from "./maneirismo.js";
+
+const TRECHO_EVANGELHO =
+  "Não havia nada na borda do fragmento, porque a margem era ausência por definição. " +
+  "Havia só o branco. Como quando se entra num cômodo conhecido e um detalhe está fora " +
+  "do lugar, como se a parede tivesse recuado. Aqui não havia móvel nem quadro. Havia só o branco.";
+
+describe("detector — tiques que ESCAPAVAM (haver-antítese, símile-andaime)", () => {
+  it('pega antítese com "haver" ("Não havia X… Havia Y") — antes escapava', () => {
+    const r = contarManeirismos(TRECHO_EVANGELHO);
+    expect(r.padroes.some((p) => /haver/.test(p.nome) && p.n >= 1)).toBe(true);
+  });
+  it('pega símile-andaime ("como se / como quando")', () => {
+    const r = contarManeirismos(TRECHO_EVANGELHO);
+    const s = r.padroes.find((p) => /símile-andaime/.test(p.nome));
+    expect(s?.n).toBe(2); // "Como quando" + "como se"
+  });
+  it("o trecho real estoura o orçamento (a rede antiga deixava passar)", () => {
+    expect(contarManeirismos(TRECHO_EVANGELHO).acimaDoOrcamento).toBe(true);
+  });
+});
+
+describe("interioridadeSemEvento (heurística)", () => {
+  it("FLAGA capítulo cópula/percepção sem diálogo (o trecho do Evangelho)", () => {
+    const longo = TRECHO_EVANGELHO + " A ausência tinha peso. O silêncio era um objeto. " +
+      "Tudo parecia recuado, como se o quarto respirasse devagar. Nada se movia. Havia apenas a espera.";
+    expect(interioridadeSemEvento(longo).acima).toBe(true);
+  });
+  it("FALSO-POSITIVO: cena com diálogo e ação NÃO dispara", () => {
+    const cena =
+      "— Abre a porta — disse ele, e empurrou a mesa para o lado. Ela girou a chave duas vezes. " +
+      "O trinco cedeu. Lá fora, um carro acelerou e sumiu na esquina. Ela correu até a janela e gritou o nome dele. " +
+      "Ninguém respondeu, então ela desceu a escada de três em três degraus e abriu o portão.";
+    expect(interioridadeSemEvento(cena).acima).toBe(false);
+  });
+});
 
 describe("contarMuletas — palavra-muleta ('coisa')", () => {
   it("conta 'coisa'/'coisas' como palavra inteira, case-insensitive", () => {

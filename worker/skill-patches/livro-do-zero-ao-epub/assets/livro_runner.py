@@ -451,14 +451,22 @@ def prompt_revisao_capitulo(projeto, n, args, piso):
     maxed = int(getattr(args, "max_edicoes_por_cap", 6))
     # Cota da Regra 4 (ritmo) COM AS CONTAGENS REAIS deste capitulo, para o revisor
     # cobrar por NUMERO, nao por impressao.
-    cads = cadencia_acima(ler_arquivo(projeto, nome_cap(n)))
+    txt_cap = ler_arquivo(projeto, nome_cap(n))
+    cads = cadencia_acima(txt_cap)
     if cads:
         bloco_cad = ("contagem REAL deste capitulo, ACIMA do orcamento -> exija que o "
                      "editor VARIE O RITMO (funda frases curtas coladas, encadeie na "
                      "revelacao, quebre anafora/clipe), nao so corte: " +
                      "; ".join("{} {}x (alvo <= {})".format(nm, c, a) for nm, c, a in cads))
     else:
-        bloco_cad = "dentro do orcamento neste capitulo; mantenha assim."
+        bloco_cad = "dentro do orcamento de tiques contados; mas NAO confie so na lista (veja o item holistico)."
+    # Sinal heuristico de interioridade-sem-evento (evidencia para o revisor, nao bloqueio).
+    inter_flag, est_pct, dlg_pct = interioridade_sem_evento(txt_cap)
+    bloco_inter = ("ALERTA: {}% das frases sao copula/percepcao e so {}% tem dialogo -> o "
+                   "capitulo pode estar 'bem escrito e CHATO' (sensacao sobre sensacao, "
+                   "sem que nada aconteca na cena). Dramatize ou corte a decoracao."
+                   ).format(est_pct, dlg_pct) if inter_flag else \
+                  "densidade de acao/dialogo aceitavel ({}% estatico).".format(est_pct)
     return (
         PREAMBULO +
         "\nFASE ESCRITA - REVISAO POR CAPITULO do {arq} (micro-loop revisor->editor). "
@@ -471,7 +479,16 @@ def prompt_revisao_capitulo(projeto, n, args, piso):
         "fora do perfil; (e) cena que RESUME em vez de dramatizar; (f) COTA DA REGRA 4 "
         "(ritmo variado): por capitulo no maximo ~2-3 pensamentos em italico, ~1-2 "
         "perguntas retoricas, ~1-2 fragmentos de enfase (1-3 palavras) e NUNCA dois "
-        "fragmentos colados; sem staccato/anafora/clipe de negacao repetidos. {bloco_cad}. "
+        "fragmentos colados; sem staccato/anafora/clipe de negacao repetidos. {bloco_cad}.\n"
+        "   (g) CRITICA HOLISTICA DE CADENCIA - o lever definitivo, NAO se limite a "
+        "lista acima (lista nomeada e tapa-buraco; sempre falta um tique). LEIA o "
+        "capitulo e marque/reescreva trechos que se apoiam em: SIMILE-ANDAIME ('como "
+        "se', 'como quando se entra...'); ECO DE NEGACAO ('Nao havia X... nao havia "
+        "Y... havia so Z'); ANAFORA/STACCATO; FRAGMENTO COLADO; e INTERIORIDADE que "
+        "descreve SENSACAO SOBRE SENSACAO sem que nada aconteca na cena. Pergunte a CADA "
+        "paragrafo: isto AVANCA a cena (evento, virada, informacao, gesto) ou so DECORA? "
+        "Se so decora, CORTE ou DRAMATIZE. As contagens sao evidencia; seu julgamento e "
+        "mais amplo que a lista. {bloco_inter}\n"
         "Devolva uma LISTA de "
         "no maximo {maxed} EDICOES PONTUAIS (trecho -> correcao). NAO e recontacao nem o "
         "review book-wide (esse fica no fim).\n"
@@ -482,7 +499,7 @@ def prompt_revisao_capitulo(projeto, n, args, piso):
         "voz; nao reescreva a cena a toa.\n"
         "3) Atualize estado/estado-narrativo.md (o que mudou, fios tocados, pistas "
         "plantadas/pagas, MCL). Regrave o MESMO {arq} (>= {piso} palavras). Encerre.\n"
-    ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_cad=bloco_cad)
+    ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_cad=bloco_cad, bloco_inter=bloco_inter)
 
 
 def prompt_review(k):
@@ -609,6 +626,9 @@ _MOLDES_CAP = [
     ("antitese 'nao X, mas Y'", re.compile(u"\\bn[ãa]o\\s+\\w[^.,;!?\\n]{0,50}[,;]\\s*(?:mas|e\\s+sim|sen[ãa]o)\\s+", re.I | re.U)),
     ("fragmento antitetico", re.compile(u"(?:^|[.!?]\\s)N[ãa]o\\s+[^.!?\\n]{1,45}[.!?]\\s+[A-ZÀ-Ý]", re.U)),
     ("'do jeito que/de'", re.compile(u"\\bdo\\s+jeito\\s+(?:que|de|como)\\b", re.I | re.U)),
+    ("antitese com 'haver' (Nao havia X... Havia Y)", re.compile(u"\\bn[ãa]o\\s+h(?:avia|á|ouve)\\b[^.!?\\n]{0,80}[.!?…]+\\s+(?:[^.!?\\n]{0,30}\\s)?h(?:avia|á)\\b", re.I | re.U)),
+    ("antitese com 'haver' (mesma frase)", re.compile(u"\\bn[ãa]o\\s+h(?:avia|á|ouve)\\b[^.,;:!?\\n]{1,50}[,;]\\s*(?:mas\\s+|e\\s+sim\\s+)?h(?:avia|á)\\b", re.I | re.U)),
+    ("simile-andaime ('como se / como quando')", re.compile(u"\\bcomo\\s+(?:se|quando)\\b", re.I | re.U)),
 ]
 PER_CAP_BUDGET = 1
 
@@ -724,6 +744,23 @@ def cadencia_acima(texto):
     return out
 
 
+_RE_ESTATICO = re.compile(u"\\b(é|era|foi|s[ãa]o|eram|est[áa]|estava|estavam|parece|parecia|pareciam|h[áa]|havia|houve|sentia|sente|sentiu|lembrava|lembra|imaginava|imagina|pensava|tinha|existia)\\b", re.I | re.U)
+
+
+def interioridade_sem_evento(texto, min_frases=10):
+    """Heuristica (SINALIZA, nao bloqueia): capitulo majoritariamente copula/percepcao
+    e quase sem dialogo -> 'bem escrito e chato'. Alimenta o REVISOR. Devolve
+    (acima, estatica_pct, dialogo_pct)."""
+    fr = dividir_frases(texto)
+    if not fr:
+        return (False, 0, 0)
+    estaticas = sum(1 for f in fr if _RE_ESTATICO.search(f) and not _eh_dialogo(f))
+    dialogo = sum(1 for f in fr if _eh_dialogo(f))
+    ep = estaticas / len(fr)
+    dp = dialogo / len(fr)
+    return (len(fr) >= min_frases and ep > 0.6 and dp < 0.06, round(ep * 100), round(dp * 100))
+
+
 def gate_maneirismo_capitulo(projeto, n, args):
     """Depois de escrever o capitulo n: se algum molde/muleta/CADENCIA estourou o
     orcamento, dispara UMA reescrita-alvo (bounded: 0 ou 1 por escrita, nao bloqueia
@@ -769,6 +806,9 @@ ORC10K_GLOBAL = {
     "antitese 'nao X, mas Y'": 1.5,
     "fragmento antitetico": 1.5,
     "'do jeito que/de'": 2.5,
+    "antitese com 'haver' (Nao havia X... Havia Y)": 1.5,
+    "antitese com 'haver' (mesma frase)": 1.0,
+    "simile-andaime ('como se / como quando')": 2.5,
 }
 FECHO_MAX_FRACAO = 0.25       # fecho epigramatico isolado em no maximo 1/4 dos capitulos
 NGRAM_MIN = 8                 # n-grama generico: >= 8 ocorrencias no livro
