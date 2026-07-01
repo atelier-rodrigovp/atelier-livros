@@ -28,6 +28,7 @@ import { normalizarVozRegra4 } from "./voz-regra4.js";
 import { normalizarCraftSkill } from "./craft-skill.js";
 import { normalizarCraftNosAgentes } from "./craft-agentes.js";
 import { hidratarWorkDir } from "./hidratar.js";
+import { coletarTelemetria } from "./telemetria.js";
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
 import { sanitizarCapitulo, metaResidual } from "./sanitize.js";
 import { LimiteMaxError, limiteMaxRetryAt, pareceLimiteMax } from "./limite-max.js";
@@ -186,6 +187,30 @@ async function setProgress(jobId: string, progresso: Record<string, unknown>) {
   const resumo = resumoProgresso(progresso as Record<string, any>);
   const comResumo = resumo ? { ...progresso, resumo } : progresso;
   await sb.from("jobs").update({ progresso: comResumo, locked_at: new Date().toISOString() }).eq("id", jobId);
+}
+// Telemetria por projeto (tokens/tempo por agente + throughput), schema-free: uma
+// linha `jobs` tipo='telemetria', status='paused' (nunca reivindicada pelo picker).
+// O painel de observabilidade lê daqui. Best-effort: nunca derruba o job de escrita.
+async function gravarTelemetriaProjeto(projectId: string): Promise<void> {
+  try {
+    const dir = projDir(projectId);
+    // conta as pausas de "falso limite" (branch jobs.ts "não avançou") já registradas
+    // no progresso deste projeto — sinal de throughput desperdiçado.
+    const { data: js } = await sb.from("jobs").select("erro").eq("owner", OWNER)
+      .eq("project_id", projectId).eq("tipo", "escrever_livro").limit(50);
+    const pausas = (js ?? []).filter((j: any) => /não avançou neste run|nao avancou neste run/i.test(String(j.erro ?? ""))).length;
+    const tel = await coletarTelemetria(dir, { pausasFalsoLimite: pausas });
+    if (!tel) return;
+    const { data: ex } = await sb.from("jobs").select("id").eq("owner", OWNER)
+      .eq("project_id", projectId).eq("tipo", "telemetria").limit(1);
+    if (ex?.length) {
+      await sb.from("jobs").update({ payload: tel }).eq("id", (ex[0] as any).id);
+    } else {
+      await sb.from("jobs").insert({ owner: OWNER, project_id: projectId, tipo: "telemetria", status: "paused", payload: tel });
+    }
+  } catch (e: any) {
+    console.warn(`[telemetria] projeto ${projectId}: ${String(e?.message ?? e).slice(0, 200)}`);
+  }
 }
 async function ensureEdition(projectId: string, idioma: string, isOrigem: boolean, status = "pendente") {
   const { data } = await must(
@@ -750,6 +775,9 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   } finally {
     clearInterval(poll);
   }
+
+  // Telemetria (tokens/tempo por agente + throughput) — verdade do disco, best-effort.
+  await gravarTelemetriaProjeto(job.project_id!);
 
   // Verdade do disco
   const state = await readState(dir);

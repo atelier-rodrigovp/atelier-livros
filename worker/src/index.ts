@@ -11,6 +11,15 @@ import { escolherProximo, normalizarMaxParalelo, type ProjInfo } from "./fila.js
 // cobra da API (créditos avulsos). Removendo do processo, ele cai no OAuth.
 delete process.env.ANTHROPIC_API_KEY;
 
+// Teto de tokens de SAÍDA por mensagem do `claude` headless. Sem isto, o default
+// (32000) faz o micro-loop de revisão — que o orquestrador tende a renderizar inline
+// — estourar com "API Error: response exceeded the 32000 output token maximum" (rc=1),
+// jogando fora ~40min de sessão e disparando um restart caro. 64000 dá folga sem
+// custo em regime normal (só cobra o que de fato gerar). Override explícito vence.
+if (!process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS) {
+  process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = "64000";
+}
+
 const WORKER_ID = process.env.WORKER_ID || "worker-local";
 const POLL = Number(process.env.POLL_INTERVAL_MS || 5000);
 const STALE_MIN = Number(process.env.HEARTBEAT_STALE_MIN || 15);

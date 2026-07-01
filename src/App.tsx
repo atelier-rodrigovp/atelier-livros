@@ -12,6 +12,7 @@ import Catalogo from "@/pages/Catalogo";
 import Autores from "@/pages/Autores";
 import Autor from "@/pages/Autor";
 import Vendas from "@/pages/Vendas";
+import Observabilidade from "@/pages/Observabilidade";
 
 function Carregando() {
   return (
@@ -41,6 +42,7 @@ export default function App() {
             <Route path="autores" element={<Autores />} />
             <Route path="autores/:id" element={<Autor />} />
             <Route path="vendas" element={<Vendas />} />
+            <Route path="observabilidade" element={<Observabilidade />} />
             <Route path="configuracoes" element={<Configuracoes />} />
             <Route path="novo-projeto" element={<NovoProjeto />} />
             <Route path="projeto/:id" element={<Projeto />} />

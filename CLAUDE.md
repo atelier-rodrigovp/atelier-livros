@@ -15,6 +15,37 @@ Sem DDL (não há conexão Postgres/CLI/PAT no ambiente — ver [[project-ddl-mi
 - `supabase/producao.sql` é OPCIONAL (promover a colunas reais um dia); o código
   funciona sem ele.
 
+## Observabilidade / telemetria (quem come a cota e quem serializa)
+
+Os transcripts do Claude Code (`~/.claude/projects/<cwd-com-`/:\ `→`-`>/**/*.jsonl`)
+registram por mensagem `model` + `isSidechain` + `usage` (input/cache/output), e as
+chamadas Task trazem `subagent_type` — é a **verdade do disco** de tokens por AGENTE
+(o `run_claude`/`runClaude` usa texto puro e NÃO expõe usage). `worker/src/telemetria.ts`
+(`coletarTelemetria`, testado) agrega isso + sinais de throughput do `runner.log`
+(restarts, calls sem rc, hard-fails de 32k) e persiste **schema-free** numa linha `jobs`
+(`tipo='telemetria'`, `status='paused'`, nunca reivindicada). Roda **após o runner** em
+`escrever_livro` (best-effort, nunca derruba o job). Backfill/sweep:
+`WORK_DIR=<real> npx tsx worker/scripts/backfill-telemetria.ts [<id>]`. Painel
+**Observabilidade** (`src/pages/Observabilidade.tsx`, rota+nav) lê essa linha: custo-proxy
+e output por papel com **gargalo destacado**, restarts, falso-limite/32k-fail. Custo-proxy
+pondera opus/sonnet/haiku só p/ **ranquear** (não é fatura). **Dois eixos distintos:**
+TOKEN (tokens/cap → quantos caps a cota rende; paralelizar NÃO ajuda) vs THROUGHPUT
+(caps/h → sofre com serialização e restarts; paralelizar ajuda).
+
+**Diagnóstico medido (2026-07-01, frota de 17 projetos):** o vilão NÃO é o escritor opus
+relendo a craft (cache_read ≈85% absorve; escritor ~$39). É (1) o **ORQUESTRADOR gerando
+71–100% do output** fazendo o micro-loop inline (vários projetos antigos ainda em opus →
+$600–$1281/livro), e (2) um **falso "limite do Max"**: `escreverLivro` (jobs.ts ~815)
+trata "0 capítulo NOVO neste run" como throttle e **pausa ~15min**, mesmo quando o run fez
+uma **revisão** (marcador `review/_revcap-NN.done`) — descasamento entre a definição de
+progresso do runner (inclui revisão) e a do worker (só capítulo novo). Prova: `claude -p`
+responde na hora (conta não throttada) mas há job pausado "por limite"; `runner.log` tem
+zero string de limite; resets crescem ~20min (não é reset real). Fix aplicado: subir
+`CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000` no worker (`index.ts`) mata os hard-fails de 32k
+(default 32000 estourava o micro-loop → rc=1 → ~40min jogados fora). **Pendente de OK:**
+contar revisão como progresso no jobs.ts (mata a pausa de ~15min — maior ganho de
+throughput) e enxugar o prompt de revisão p/ o orquestrador delegar (corta o output sonnet).
+
 
 Plataforma que orquestra agentes do Claude Code para produzir livros (front
 React+Vite+TS; Supabase; worker local em `worker/` via fila de jobs; deploy em

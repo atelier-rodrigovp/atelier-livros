@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import {
   BookMarked,
+  Gauge,
   LayoutDashboard,
   Library,
   LineChart,
@@ -28,6 +29,7 @@ const nav = [
   { to: "/catalogo", label: "Catálogo", icon: Library },
   { to: "/autores", label: "Autores", icon: Users },
   { to: "/vendas", label: "Vendas", icon: LineChart },
+  { to: "/observabilidade", label: "Observabilidade", icon: Gauge },
   { to: "/configuracoes", label: "Configurações", icon: Settings },
 ];
 
