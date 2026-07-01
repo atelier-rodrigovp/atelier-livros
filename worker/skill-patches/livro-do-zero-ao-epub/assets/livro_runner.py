@@ -157,6 +157,12 @@ def _marcador_revcap(projeto, n):
     return os.path.join(projeto, DIR_REVIEW, "_revcap-{:02d}.done".format(int(n)))
 
 
+def _marcador_revtry(projeto, n):
+    # Fix C: bound da re-revisao dirigida. Existir = ja houve 1 passada em que a guarda
+    # deterministica reprovou (piso/tiques); a 2a passada aceita para nao travar o livro.
+    return os.path.join(projeto, DIR_REVIEW, "_revcap-{:02d}.try".format(int(n)))
+
+
 def primeiro_cap_nao_revisado(projeto, total, piso):
     """Micro-loop: 1o capitulo VALIDO (escrito) ainda sem marcador de revisao.
     Reentrante via disco — se o Max bater no meio, a revisao re-roda do ponto."""
@@ -482,44 +488,37 @@ def prompt_revisao_capitulo(projeto, n, args, piso):
     bloco_prop = ("PARA O VEREDITO DE PROPULSAO (item h), delegue a um subagente em OPUS via "
                   "Task (escritor/juiz) — julgamento de craft caro, mais fino.\n   "
                   if getattr(args, "revisor_craft_opus", False) else "")
+    # Fix C: DELEGA a revisao (nao raciocina inline). O criterio de critica (checklist
+    # a-h + VEREDITO DE PROPULSAO) JA VIVE no agente `livro-revisor`, que le a spec, a
+    # Biblia/Mapa, o estado-narrativo e a craft (voz-e-oficio+metamodelo) no PROPRIO
+    # contexto isolado. Aqui o orquestrador so ROTEIA e passa a EVIDENCIA DINAMICA que o
+    # agente nao recomputa (as contagens reais do detector). Isso tira a leitura+raciocinio
+    # da sessao gorda (cache_read gigante) -> corta o output do orquestrador sem perder
+    # qualidade. A guarda deterministica (piso + tiques cairam) roda no runner, apos.
     return (
         PREAMBULO +
-        "\nFASE ESCRITA - REVISAO POR CAPITULO do {arq} (micro-loop revisor->editor). "
-        "Este capitulo JA foi escrito; antes de aceita-lo, rode um time agentico via Task:\n"
-        "1) REVISOR (subagente `livro-revisor`, CIRURGICO e barato - sonnet): critique "
-        "SOMENTE o {arq} contra: (a) a spec do Capitulo {n} (Estrutura-do-Livro.md) e a "
-        "Biblia/Mapa/perfil-de-voz; (b) o estado/estado-narrativo.md (fios, FATOS, "
-        "relogios - continuidade); (c) maneirismos e MULETAS sobre-usadas (sobretudo "
-        "'coisa' - no maximo 1 no capitulo; troque pelo referente concreto); (d) voz "
-        "fora do perfil; (e) cena que RESUME em vez de dramatizar; (f) COTA DA REGRA 4 "
-        "(ritmo variado): por capitulo no maximo ~2-3 pensamentos em italico, ~1-2 "
-        "perguntas retoricas, ~1-2 fragmentos de enfase (1-3 palavras) e NUNCA dois "
-        "fragmentos colados; sem staccato/anafora/clipe de negacao repetidos. {bloco_cad}.\n"
-        "   (g) CRITICA HOLISTICA DE CADENCIA - o lever definitivo, NAO se limite a "
-        "lista acima (lista nomeada e tapa-buraco; sempre falta um tique). LEIA o "
-        "capitulo e marque/reescreva trechos que se apoiam em: SIMILE-ANDAIME ('como "
-        "se', 'como quando se entra...'); ECO DE NEGACAO ('Nao havia X... nao havia "
-        "Y... havia so Z'); ANAFORA/STACCATO; FRAGMENTO COLADO; e INTERIORIDADE que "
-        "descreve SENSACAO SOBRE SENSACAO sem que nada aconteca na cena. Pergunte a CADA "
-        "paragrafo: isto AVANCA a cena (evento, virada, informacao, gesto) ou so DECORA? "
-        "Se so decora, CORTE ou DRAMATIZE. As contagens sao evidencia; seu julgamento e "
-        "mais amplo que a lista. {bloco_inter}\n"
-        "   (h) VEREDITO DE PROPULSAO - 'ISTO ESTA VIVO?': um capitulo competente mas MORTO "
-        "e REPROVACAO. Corta no PICO ou afrouxa? O relogio e sentido? Algo ACONTECE (evento/"
-        "virada/pista) ou e interioridade decorativa? A exposicao e DRAMATIZADA (conflito/"
-        "descoberta/perda) ou palestra? O capitulo PUXA o proximo? Se 'bem escrito e chato', "
-        "REPROVE e devolva edicoes que INJETAM propulsao (dramatize, corte no pico, encadeie "
-        "a caca as pistas), nao so cortam tique. {bloco_prop}"
-        "Devolva uma LISTA de "
-        "no maximo {maxed} EDICOES PONTUAIS (trecho -> correcao). NAO e recontacao nem o "
-        "review book-wide (esse fica no fim).\n"
-        "2) EDITOR (subagente `livro-editor`): aplique as edicoes no {arq}, podendo "
-        "ELEVAR 1 movimento (drama/tensao/subtexto) que agregue valor SEM contrariar a "
-        "spec. Troque TODA 'coisa' generica pelo referente concreto. Para o ritmo, FUNDA "
-        "as frases curtas coladas em vez de so corta-las. PRESERVE sentido e "
-        "voz; nao reescreva a cena a toa.\n"
-        "3) Atualize estado/estado-narrativo.md (o que mudou, fios tocados, pistas "
-        "plantadas/pagas, MCL). Regrave o MESMO {arq} (>= {piso} palavras). Encerre.\n"
+        "\nFASE ESCRITA - REVISAO POR CAPITULO do {arq} (micro-loop DELEGADO). Este "
+        "capitulo JA foi escrito. ROTEIE via Task; NAO releia nem re-julgue o capitulo "
+        "voce mesmo (os subagentes leem a fundacao/craft no proprio contexto):\n"
+        "1) Task -> `livro-revisor` (sonnet): critique SOMENTE {arq} pelo SEU checklist de "
+        "conformidade + o VEREDITO DE PROPULSAO ('isto esta vivo?') que voce ja conhece "
+        "(fair-play, cota de tiques, info-dump, interioridade-com-custo, relogio, "
+        "coincidencia, nao-reexposicao, corte-no-pico, exposicao dramatizada). Some a isso "
+        "a EVIDENCIA REAL deste capitulo (contagens do detector, NAO recompute): {bloco_cad} "
+        "{bloco_inter} {bloco_prop}"
+        "Devolva uma LISTA de ate {maxed} EDICOES PONTUAIS (trecho -> correcao) que INJETAM "
+        "propulsao (dramatize, corte no pico, encadeie a caca as pistas) e VARIAM o ritmo "
+        "(FUNDA colados, quebre anafora/clipe), nao so cortam tique. NAO e recontacao nem o "
+        "review book-wide.\n"
+        "2) Task -> `livro-editor` (haiku): aplique as edicoes no {arq}; troque TODA 'coisa' "
+        "generica pelo referente concreto; FUNDA as frases curtas coladas (nao so corte); "
+        "ELEVE no maximo 1 movimento (drama/tensao/subtexto) sem contrariar a spec; PRESERVE "
+        "sentido e voz. CONTINUIDADE (obrigatorio): EDITE o LEDGER EXISTENTE "
+        "estado/estado-narrativo.md - NAO crie arquivo novo, NAO escreva noutro lugar; "
+        "atualize NELE o que mudou (MCL, fios abertos, pistas plantadas/pagas, relogios). "
+        "Regrave o MESMO {arq} (>= {piso} palavras).\n"
+        "3) Encerre. NAO gere a critica nem a prosa na SUA sessao - so dispare os dois Tasks "
+        "e confirme que {arq} foi regravado.\n"
     ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_cad=bloco_cad, bloco_inter=bloco_inter, bloco_prop=bloco_prop)
 
 
@@ -1007,6 +1006,12 @@ def executar(projeto, args):
                 revisando_cap = primeiro_cap_nao_revisado(projeto, tot, piso)
             if revisando_cap is not None:
                 log(projeto, "--- ESCRITA/REVISAO por capitulo: revisando cap {} (micro-loop) ---".format(revisando_cap))
+                # Fix C (guarda deterministica): mede os tiques e o mtime do ledger ANTES da
+                # revisao delegada, para o runner confirmar depois que os tiques cairam E que
+                # a CONTINUIDADE foi gravada no estado-narrativo.md (sem o LLM reler/re-julgar).
+                cads_antes_rev = cadencia_acima(ler_arquivo(projeto, nome_cap(revisando_cap)))
+                _ledger = os.path.join(projeto, "estado", "estado-narrativo.md")
+                ledger_mtime_antes = os.path.getmtime(_ledger) if os.path.exists(_ledger) else 0
                 prompt = prompt_revisao_capitulo(projeto, revisando_cap, args, piso)
             else:
                 alvo = proximo_capitulo_pendente(projeto, tot, piso)
@@ -1053,18 +1058,59 @@ def executar(projeto, args):
         if fase == "ESCRITA" and alvo is not None:
             gate_maneirismo_capitulo(projeto, alvo, args)
 
-        # Micro-loop: terminou a REVISAO do capitulo -> marca (reentrante) e conta como
-        # progresso (revisar nao muda a assinatura do disco, mas E avanco do livro).
+        # Micro-loop: terminou a REVISAO do capitulo. GUARDA DETERMINISTICA (Fix C): o
+        # runner (nao o LLM) confirma que o arquivo tem piso E que os tiques de cadencia
+        # CAIRAM (ou ja estavam no orcamento) antes de marcar como aceito. Se nao, uma
+        # re-revisao dirigida (bounded: 1x via marcador .try); na 2a passada aceita para
+        # nao travar o livro (filosofia "bounded, nao bloqueia").
         if fase == "ESCRITA" and revisando_cap is not None:
+            txt_rev = ler_arquivo(projeto, nome_cap(revisando_cap))
+            palavras_rev = len((txt_rev or "").split())
+            cads_depois = cadencia_acima(txt_rev)
+            exc = lambda cs: sum(c - a for _n, c, a in (cs or []))
+            exc_antes, exc_depois = exc(cads_antes_rev), exc(cads_depois)
+            piso_ok = palavras_rev >= piso
+            tiques_ok = (not cads_depois) or (exc_depois < exc_antes)
+            # CONTINUIDADE: o ledger canonico estado-narrativo.md tem que ter sido gravado
+            # (a versao delegada pode escrever num arquivo avulso -> continuidade perdida).
+            ledger_mtime = os.path.getmtime(_ledger) if os.path.exists(_ledger) else 0
+            ledger_ok = ledger_mtime > ledger_mtime_antes
+            try_path = _marcador_revtry(projeto, revisando_cap)
+            ja_tentou = os.path.exists(try_path)
+            # 1a passada: exige piso + ledger gravado + tiques cairam (estrito). 2a passada
+            # (ja_tentou): aceita com piso p/ nao travar, mas AVISA ALTO o que ficou off.
+            if piso_ok and (ja_tentou or (ledger_ok and tiques_ok)):
+                try:
+                    os.makedirs(os.path.join(projeto, DIR_REVIEW), exist_ok=True)
+                    with open(_marcador_revcap(projeto, revisando_cap), "w", encoding="utf-8") as fh:
+                        fh.write(agora())
+                    if ja_tentou:
+                        os.remove(try_path)
+                except OSError:
+                    pass
+                state["_runner"]["tentativas_sem_progresso"] = 0
+                save_state(projeto, state)
+                pend = []
+                if not tiques_ok: pend.append("tiques nao baixaram")
+                if not ledger_ok: pend.append("CONTINUIDADE nao gravada no estado-narrativo")
+                aviso = " [aceito p/ nao travar apos re-revisao; PENDENTE: {}]".format("; ".join(pend)) if pend else ""
+                log(projeto, "Capitulo {} revisado (delegado) -> aceito{}. cadencia excesso {}->{}; piso {}; ledger {}.".format(
+                    revisando_cap, aviso, exc_antes, exc_depois, "ok" if piso_ok else "BAIXO", "ok" if ledger_ok else "NAO-GRAVADO"))
+                continue
+            # Guarda REPROVOU: re-revisa o MESMO cap no proximo loop (dirigido, bounded 1x).
             try:
                 os.makedirs(os.path.join(projeto, DIR_REVIEW), exist_ok=True)
-                with open(_marcador_revcap(projeto, revisando_cap), "w", encoding="utf-8") as fh:
+                with open(try_path, "w", encoding="utf-8") as fh:
                     fh.write(agora())
             except OSError:
                 pass
-            state["_runner"]["tentativas_sem_progresso"] = 0
+            # 1a reprovacao dirige progresso (reseta estagnacao); se ja tentou e ainda
+            # falha por PISO, deixa a estagnacao contar (safety: runner sai apos o max).
+            if not ja_tentou:
+                state["_runner"]["tentativas_sem_progresso"] = 0
             save_state(projeto, state)
-            log(projeto, "Capitulo {} revisado (micro-loop escritor->revisor->editor) -> aceito.".format(revisando_cap))
+            log(projeto, "Capitulo {} revisado mas GUARDA reprovou (piso {}, ledger {}, tiques excesso {}->{}); re-revisao dirigida.".format(
+                revisando_cap, "ok" if piso_ok else "BAIXO", "ok" if ledger_ok else "NAO-GRAVADO", exc_antes, exc_depois))
             continue
 
         # DESMANEIRISMO: reconsolida o MESTRE dos capitulos editados e conta de novo;

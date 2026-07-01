@@ -42,9 +42,18 @@ progresso do runner (inclui revisão) e a do worker (só capítulo novo). Prova:
 responde na hora (conta não throttada) mas há job pausado "por limite"; `runner.log` tem
 zero string de limite; resets crescem ~20min (não é reset real). Fix aplicado: subir
 `CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000` no worker (`index.ts`) mata os hard-fails de 32k
-(default 32000 estourava o micro-loop → rc=1 → ~40min jogados fora). **Pendente de OK:**
-contar revisão como progresso no jobs.ts (mata a pausa de ~15min — maior ganho de
-throughput) e enxugar o prompt de revisão p/ o orquestrador delegar (corta o output sonnet).
+(default 32000 estourava o micro-loop → rc=1 → ~40min jogados fora). **Fix B** (jobs.ts:
+conta `review/_revcap-NN.done` como progresso → mata a pausa de ~15min) e **Fix C**
+(runner: `prompt_revisao_capitulo` DELEGA a crítica ao `livro-revisor` e a aplicação ao
+`livro-editor`, passando só a evidência dinâmica do detector — o critério a–h já vive no
+agente; **A/B mediu −49% do output do orquestrador** com paridade de cadência/prosa) —
+ambos aplicados. **Fix C tem guarda determinística no runner** (não o LLM): após a revisão
+confere `arquivo ≥ piso` + `estado-narrativo.md` atualizado (continuidade no ledger
+canônico, não em arquivo avulso) + rerroda `cadencia_acima` (tiques caíram?); se falhar, 1
+re-revisão dirigida **bounded** (marcador `review/_revcap-NN.try`), na 2ª aceita com aviso
+alto. Vive no runner (`worker/skill-patches/.../livro_runner.py`) → vale para TODO projeto
+do próximo capítulo em diante (sem sweep por-projeto). Pós-edição do runner: rodar
+`instalar-skills.ps1`.
 
 
 Plataforma que orquestra agentes do Claude Code para produzir livros (front
