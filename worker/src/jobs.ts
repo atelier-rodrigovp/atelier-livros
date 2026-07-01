@@ -724,6 +724,14 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   await sb.from("projects").update({ status: "escrevendo" }).eq("id", job.project_id!);
   // baseline para detectar progresso (escrita longa é retomável do disco)
   const capsAntes = (await chaptersOnDisk(path.join(dir, "manuscrito"), piso)).length;
+  // Revisão do micro-loop TAMBÉM é progresso (grava review/_revcap-NN.done), mas não
+  // cria capítulo novo. Sem contar isto, um run que só revisou cai no branch "não
+  // avançou" e o worker pausa ~15min achando que é limite do Max (falso: a conta não
+  // está throttada). Contar os marcadores fecha o descasamento worker↔runner.
+  const contarRevMarkers = async () =>
+    (await readdir(path.join(dir, "review")).catch(() => []))
+      .filter((f) => /^_revcap-\d+\.done$/.test(f)).length;
+  const revAntes = await contarRevMarkers();
   // Grava a contagem REAL do disco JÁ no início (antes do poller de 20s). Run curto
   // que aborta em ~13s não pode mais reportar "0/N" com capítulos no disco.
   await setProgress(job.id, {
@@ -783,6 +791,7 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   const state = await readState(dir);
   const total = Number(state?.total_capitulos_previstos ?? proj.total_capitulos ?? 0);
   const caps = await chaptersOnDisk(path.join(dir, "manuscrito"), piso);
+  const revDepois = await contarRevMarkers();
   const completo = total > 0 && caps.length >= total;
 
   // Edição de origem + sync dos capítulos JÁ existentes (mesmo parcial: a UI mostra progresso real)
@@ -830,8 +839,10 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
         retryAt
       );
     }
-    // Avançou: re-enfileira (com dedupe) e segue.
-    if (caps.length > capsAntes) {
+    // Avançou (capítulo NOVO ou REVISÃO do micro-loop): re-enfileira (com dedupe) e
+    // segue NA HORA, sem a pausa de ~15min. O branch de limite REAL do Max (acima,
+    // via RUNNER_LIMITE_MAX / aguardando_reset / "resets at") segue intacto.
+    if (caps.length > capsAntes || revDepois > revAntes) {
       await enfileirarEscritaSeNovo(job.project_id!);
       await setProgress(job.id, { fase: "ESCRITA", cap_atual: caps.length, total, continua: true });
       return;
