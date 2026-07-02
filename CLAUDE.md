@@ -73,6 +73,21 @@ medido" acima está INVALIDADO** (P0-3 da auditoria: os fixes A/B/honestidade es
 HEAD mas o processo em produção era código ANTERIOR — commit ≠ produção; worker exige
 restart) — re-medir com o HEAD rodando.
 
+**FASE C + auditoria dan-brown (2026-07-02, tarde — ver `AUDITORIA-DAN-BROWN.md`):** P2s
+aplicados (SPEC-07 paridade do Fix C no revisor; SPEC-08 léxico estrangeiro alvo 0 —
+"ninguño" agora estoura; SPEC-10 zero-pad do digest; SPEC-11 senha `<SENHA_DO_APP>` nos
+docs + `--dry-run` no auditar-vazamentos; SPEC-12 `[ISO]` em todo log do worker). E o
+**mecanismo genérico `EXIGENCIAS_ESTRUTURAIS_POR_SKILL`** (`worker/src/exigencias-skill.ts`,
+no-op p/ skill sem entrada; dan-brown = 1ª entrada): matriz de fios com localidade-base +
+regra de rotação, **spec-arquivo obrigatória** (Fio de POV, Dia/Hora, Montagem, Forma,
+Notas factuais — `gate_spec_capitulo` determinístico no runner, bounded via `_spec-NN.try`)
+e **`dossie-factual.md` como única fonte de "real"** (VERIFICADO-com-fonte vs HIPÓTESE; o
+escritor não usa fato paramétrico). A auditoria provou que a montagem/textura boas do
+Índice eram INICIATIVA EMERGENTE do modelo (a fábrica só exigia `tier`; specs nem
+existiam) — agora é fiação. Retrofit do Índice aplicado (matriz + dossiê com 28 fatos
+verificados por web + O-1 "costa de Nevada" e O-2 linha do tempo corrigidos no funil
+normal). Esqueleto das exigências das outras skills: Anexo D do relatório.
+
 
 Plataforma que orquestra agentes do Claude Code para produzir livros (front
 React+Vite+TS; Supabase; worker local em `worker/` via fila de jobs; deploy em

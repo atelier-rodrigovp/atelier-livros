@@ -39,6 +39,25 @@ implementadas, commitadas (SEM push) e **aplicadas em produção** às ~10:38:
   duplica execução, mas vale limpar); **re-medir telemetria com o HEAD** (baseline
   antigo INVALIDADO pelo P0-3). Sem push ainda — pedir confirmação.
 
+### Atualização da tarde (2026-07-02, ~18h35): FASE C + dan-brown APLICADAS
+
+- Teste de Wi-Fi ✓ (ver acima). FASE C aplicada em produção: SPEC-07 (ADENDO_PARIDADE
+  no revisor — grep 3 critérios OK no 53abdade), SPEC-08 ("ninguño" alvo 0, paridade
+  TS↔py), SPEC-10 (zero-pad), SPEC-11 (senha `<SENHA_DO_APP>` + `--dry-run`), SPEC-12
+  (`[ISO]` no worker.log — vivo). Job duplicado `125eb99b` cancelado (mantido 83caefa2).
+- Auditoria dan-brown (`AUDITORIA-DAN-BROWN.md`): H1/H2 parciais — o que funcionava era
+  emergente, não fiação. SPEC-DB1/2/3 aplicadas via `EXIGENCIAS_ESTRUTURAIS_POR_SKILL`
+  (exigencias-skill.ts + gate_spec_capitulo no runner + arquiteto atualizado). Retrofit
+  do Índice: `dossie-factual.md` (28 fatos verificados por web, fontes anotadas; Loftus
+  corrigida; "costa de Nevada" marcada FALSA), MATRIZ-FIOS na Estrutura, O-1/O-2
+  corrigidos no funil normal (sanitize+gate+Storage+banco) e ledger com a linha do
+  tempo canônica (Danny morreu na SEGUNDA; terça = caps 5–9).
+- **Prova viva pendente:** cap 10 nascendo pelo caminho novo (spec-arquivo gateada +
+  fato do dossiê na prosa) — o cap 9 nasceu antes do retrofit (spec podada). Depois da
+  prova: push autorizado pelo usuário (LEMBRAR) + re-medição da telemetria consolidada.
+- Dívida nova: digest legado `contexto-cap-7.md` ainda cita "costa de Nevada" (artefato
+  histórico inerte — nada relê digests antigos).
+
 ---
 
 ## 1. O que é
