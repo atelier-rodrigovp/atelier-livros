@@ -6,6 +6,7 @@ import { executarJob, type Job } from "./jobs.js";
 import { LimiteMaxError, deveRecuperar } from "./limite-max.js";
 import { escolherProximo, normalizarMaxParalelo, type ProjInfo } from "./fila.js";
 import { aguardarConexao } from "./espera-conexao.js";
+import { comRetrySb, ehErroDeRede } from "./retry.js";
 
 // Usar a assinatura MAX (login OAuth do Claude Code), não créditos de API.
 // Se ANTHROPIC_API_KEY estiver no ambiente, o `claude` headless a prioriza e
@@ -37,17 +38,38 @@ const STALE_MIN = Number(process.env.HEARTBEAT_STALE_MIN || 15);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Heartbeat: registra presença para o painel mostrar worker online/offline.
+// Falha de rede: 1 retry curto; falhas seguidas viram contador AGREGADO logado a
+// cada ~5min (numa outage de 83min o log tinha 166 linhas idênticas — ruído).
+let hbFalhasSeguidas = 0;
+let hbUltimoAviso = 0;
 async function heartbeat(extra: Record<string, unknown> = {}) {
-  const { error } = await sb.from("worker_heartbeats").upsert(
-    {
-      worker_id: WORKER_ID,
-      owner: OWNER,
-      last_seen: new Date().toISOString(),
-      status: { ...extra },
-    },
-    { onConflict: "owner,worker_id" }
+  const { error } = await comRetrySb(
+    () =>
+      sb.from("worker_heartbeats").upsert(
+        {
+          worker_id: WORKER_ID,
+          owner: OWNER,
+          last_seen: new Date().toISOString(),
+          status: { ...extra },
+        },
+        { onConflict: "owner,worker_id" }
+      ),
+    { tentativas: 2, baseMs: 2000 }
   );
-  if (error) console.error("[heartbeat] erro:", error.message);
+  if (error) {
+    hbFalhasSeguidas++;
+    const agora = Date.now();
+    if (hbFalhasSeguidas === 1 || agora - hbUltimoAviso > 5 * 60_000) {
+      hbUltimoAviso = agora;
+      console.error(
+        `[heartbeat] erro: ${error.message}` +
+          (hbFalhasSeguidas > 1 ? ` (falhando há ${hbFalhasSeguidas} tentativas seguidas)` : "")
+      );
+    }
+  } else if (hbFalhasSeguidas > 0) {
+    console.log(`[heartbeat] voltou após ${hbFalhasSeguidas} falha(s).`);
+    hbFalhasSeguidas = 0;
+  }
 }
 
 // Recupera jobs que morreram como 'error' por LIMITE DO MAX ou por "não avançou
@@ -189,8 +211,14 @@ async function pegarProximo(opts: { incluir?: string[]; excluir?: string[] } = {
   return claimed && claimed.length ? (claimed[0] as Job) : null;
 }
 
+// Gravação do status final (done/queued/error) — update idempotente, com retry:
+// perder esta escrita por blip de rede deixava o job 'running' órfão por 15min
+// até o recuperarOrfaos (que segue como rede de segurança ao esgotar).
 async function finalizar(jobId: string, patch: Record<string, unknown>) {
-  const { error } = await sb.from("jobs").update(patch).eq("id", jobId);
+  const { error } = await comRetrySb(
+    () => sb.from("jobs").update(patch).eq("id", jobId),
+    { tentativas: 5, rotulo: `finalizar ${jobId}` }
+  );
   if (error) console.error(`[job ${jobId}] falha ao gravar status final: ${error.message}`);
 }
 
@@ -247,6 +275,21 @@ async function processarJob(job: Job) {
       const progresso = { ...((cur?.progresso as Record<string, unknown>) ?? {}), aguardando_reset: err.aguardandoReset, retry_at: err.retryAt, motivo: err.motivo };
       await finalizar(job.id, { status: "queued", erro: null, progresso, locked_by: null, locked_at: null });
       console.log(`[job ${job.id}] ${err.motivo} — retoma ${err.retryAt} (não conta tentativa)`);
+      return;
+    }
+    // Rede caiu além dos retries: o trabalho no disco está íntegro; re-tenta em
+    // ~2min SEM queimar tentativa e com rótulo honesto (não é limite do Max nem
+    // bug — antes isso consumia attempts e 3 blips matavam o job como 'error').
+    if (ehErroDeRede(e)) {
+      const { data: cur } = await sb.from("jobs").select("progresso").eq("id", job.id).single();
+      const progresso = {
+        ...((cur?.progresso as Record<string, unknown>) ?? {}),
+        aguardando_reset: false,
+        retry_at: new Date(Date.now() + 2 * 60_000).toISOString(),
+        motivo: "rede indisponível — re-tentando",
+      };
+      await finalizar(job.id, { status: "queued", erro: null, progresso, locked_by: null, locked_at: null });
+      console.log(`[job ${job.id}] rede indisponível — re-tenta em ~2min (não conta tentativa)`);
       return;
     }
     const msg = String(e?.message ?? e).slice(0, 2000);

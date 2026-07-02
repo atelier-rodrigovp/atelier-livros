@@ -4,6 +4,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import path from "node:path";
 import { sb, OWNER } from "./supabase.js";
+import { comRetrySb } from "./retry.js";
 
 export const WORK_DIR = process.env.WORK_DIR || "./atelier-work";
 export const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
@@ -132,7 +133,8 @@ const CONTENT_TYPES: Record<string, string> = {
   ".csv": "text/csv",
 };
 
-// Sobe um arquivo local para um bucket (service_role ignora RLS). upsert=true.
+// Sobe um arquivo local para um bucket (service_role ignora RLS). upsert=true —
+// idempotente, então falha de REDE re-tenta com backoff (blip não aborta o job).
 export async function uploadFile(
   bucket: string,
   key: string,
@@ -140,10 +142,14 @@ export async function uploadFile(
 ): Promise<void> {
   const body = await readFile(localPath);
   const ext = path.extname(localPath).toLowerCase();
-  const { error } = await sb.storage.from(bucket).upload(key, body, {
-    contentType: CONTENT_TYPES[ext] ?? "application/octet-stream",
-    upsert: true,
-  });
+  const { error } = await comRetrySb(
+    () =>
+      sb.storage.from(bucket).upload(key, body, {
+        contentType: CONTENT_TYPES[ext] ?? "application/octet-stream",
+        upsert: true,
+      }),
+    { tentativas: 5, rotulo: `upload ${bucket}/${key}` }
+  );
   if (error) throw new Error(`upload ${bucket}/${key}: ${error.message}`);
 }
 

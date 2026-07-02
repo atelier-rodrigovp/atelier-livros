@@ -32,6 +32,7 @@ import { coletarTelemetria } from "./telemetria.js";
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
 import { sanitizarCapitulo, metaResidual } from "./sanitize.js";
 import { LimiteMaxError, limiteMaxRetryAt, pareceLimiteMax } from "./limite-max.js";
+import { comRetrySb } from "./retry.js";
 import { contarManeirismos, resumoManeirismo, diagnosticarRepeticao } from "./maneirismo.js";
 import { existsSync } from "node:fs";
 
@@ -127,8 +128,11 @@ async function gateManuscrito(subDir: string): Promise<void> {
 
 // ---- DB helpers -----------------------------------------------------------
 // Falha alto: lança se a escrita no banco retornar erro (evita job "done" divergente).
-async function must<T extends { error: unknown }>(p: PromiseLike<T>): Promise<T> {
-  const r = await p;
+// Forma fábrica `must(() => sb...)`: re-tenta falha DE REDE com backoff — usar SÓ
+// em write idempotente (update/upsert); insert puro fica na forma direta (resposta
+// perdida + retry = linha duplicada; a reclassificação de rede no processarJob cobre).
+async function must<T extends { error: unknown }>(p: PromiseLike<T> | (() => PromiseLike<T>)): Promise<T> {
+  const r = typeof p === "function" ? await comRetrySb(p, { rotulo: "escrita no banco" }) : await p;
   const err = (r as { error: { message?: string } | null }).error;
   if (err) throw new Error("erro de escrita no banco: " + (err.message ?? String(err)));
   return r;
@@ -186,7 +190,13 @@ function resumoProgresso(p: Record<string, any>): string | undefined {
 async function setProgress(jobId: string, progresso: Record<string, unknown>) {
   const resumo = resumoProgresso(progresso as Record<string, any>);
   const comResumo = resumo ? { ...progresso, resumo } : progresso;
-  await sb.from("jobs").update({ progresso: comResumo, locked_at: new Date().toISOString() }).eq("id", jobId);
+  // Update idempotente com retry curto; ao esgotar, LOGA e segue (progresso é
+  // cosmético — o poller de 20s corrige no tick seguinte; antes era perda muda).
+  const { error } = await comRetrySb(
+    () => sb.from("jobs").update({ progresso: comResumo, locked_at: new Date().toISOString() }).eq("id", jobId),
+    { tentativas: 3, baseMs: 500 }
+  );
+  if (error) console.warn(`[progresso ${jobId}] não gravado: ${String(error.message ?? error).slice(0, 200)}`);
 }
 // Telemetria por projeto (tokens/tempo por agente + throughput), schema-free: uma
 // linha `jobs` tipo='telemetria', status='paused' (nunca reivindicada pelo picker).
@@ -213,7 +223,7 @@ async function gravarTelemetriaProjeto(projectId: string): Promise<void> {
   }
 }
 async function ensureEdition(projectId: string, idioma: string, isOrigem: boolean, status = "pendente") {
-  const { data } = await must(
+  const { data } = await must(() =>
     sb
       .from("editions")
       .upsert(
@@ -907,8 +917,8 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // nota_review = AVALIAÇÃO independente (jobs avaliar/revisar). A auto-nota da
   // escrita (state.ultima_nota) NÃO sobrescreve a nota oficial — fica só no
   // progresso do job, rotulada como provisória na UI.
-  await must(sb.from("editions").update({ status: "pronto" }).eq("id", edicao.id));
-  await must(sb.from("projects").update({ status: "pronto" }).eq("id", job.project_id!));
+  await must(() => sb.from("editions").update({ status: "pronto" }).eq("id", edicao.id));
+  await must(() => sb.from("projects").update({ status: "pronto" }).eq("id", job.project_id!));
   await setProgress(job.id, { fase: "CONCLUIDO", cap_atual: caps.length, total, nota, palavras: state?.palavras_totais ?? 0 });
 }
 
