@@ -21,12 +21,20 @@ import { contarMuletas, type MuletaContagem } from "./maneirismo.js";
 export const MARCADOR = "<!-- COTA-CADENCIA v1 -->";
 export const MARCADOR_FIM = "<!-- /COTA-CADENCIA -->";
 // Injeções ANTERIORES (sem marcador): edição cirúrgica manual em "A Espiral" e a 1ª
-// versão deste passo. Reconhecidas para NÃO duplicar.
-const RE_LEGADO = /cota de tiques|nunca dois colados|RITMO[ \w]*E COTA DE TIQUES/i;
+// versão deste passo. Reconhecidas para NÃO duplicar — mas SÓ quando o legado é
+// COMPLETO: o arquiteto v6.3 emite nativamente uma cota PARCIAL ("Cota de tiques…
+// nunca dois colados", sem anáfora/clipe nem orçamento de "coisa") que casava com o
+// regex antigo e SUPRIMIA a injeção — o escritor de projeto novo só descobria
+// anáfora/clipe/"coisa" quando o gate reprovava (cap 6 do Índice: tiques 40→17
+// pagos no micro-loop). Completo = núcleo + (anáfora OU clipe) + orçamento "coisa".
+const RE_LEGADO_NUCLEO = /cota de tiques|nunca dois colados|RITMO[ \w]*E COTA DE TIQUES/i;
+const RE_LEGADO_ANAFORA_CLIPE = /an[áa]fora|clipe de nega[çc]/i;
+const RE_LEGADO_COISA = /["“”']?coisas?["“”']?\*{0,2}:?[^\n]{0,60}(≤\s*~?1|no m[áa]ximo\s+\*{0,2}~?\s*1|~1\s*(\/|por)\s*cap)/i;
 
 function jaTemCota(texto: string): boolean {
   const t = texto ?? "";
-  return t.includes(MARCADOR) || RE_LEGADO.test(t);
+  if (t.includes(MARCADOR)) return true;
+  return RE_LEGADO_NUCLEO.test(t) && RE_LEGADO_ANAFORA_CLIPE.test(t) && RE_LEGADO_COISA.test(t);
 }
 
 export const SECAO_REGRA4_PERFIL =

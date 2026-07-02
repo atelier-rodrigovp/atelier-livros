@@ -29,11 +29,27 @@ describe("garantirRegra4NoPerfil", () => {
     expect(dois.mudou).toBe(false);
     expect(contar(dois.texto, MARCADOR)).toBe(1);
   });
-  it("idempotente com injeção LEGADA (sem marcador, ex.: 'COTA DE TIQUES')", () => {
-    const legado = "# Perfil\n\n## 5. RITMO VARIADO E COTA DE TIQUES (Regra 4)\n- itálico ≤2–3.\n";
+  it("idempotente com injeção LEGADA COMPLETA (sem marcador, ex.: A Espiral)", () => {
+    const legado =
+      "# Perfil\n\n## 5. RITMO VARIADO E COTA DE TIQUES (Regra 4)\n" +
+      "- itálico ≤2–3; fragmento ≤1–2, nunca dois colados.\n" +
+      "- Sem clipe de negação nem anáfora colada.\n" +
+      '- **"coisa"/"coisas":** no máximo **~1 por capítulo**.\n';
     const r = garantirRegra4NoPerfil(legado);
     expect(r.mudou).toBe(false);
     expect(r.texto).toBe(legado);
+  });
+  it("legado PARCIAL (cota nativa do arquiteto v6.3, sem anáfora/clipe/'coisa') → INJETA", () => {
+    // Reproduz o falso-positivo que suprimia a cota nos projetos novos: o arquiteto
+    // emite "Cota de tiques… nunca dois colados" mas NÃO cobre anáfora/clipe/"coisa".
+    const parcial =
+      "# Perfil\n\n## 1. Assinatura\n" +
+      "- Cota de tiques: itálico ≤2–3, retórica ≤1–2, fragmento ≤1–2, nunca dois colados.\n";
+    const r = garantirRegra4NoPerfil(parcial);
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toContain(MARCADOR);
+    expect(r.texto).toMatch(/clipe de negação/i); // o que faltava chega ao escritor
+    expect(r.texto).toMatch(/coisa/);
   });
 });
 
