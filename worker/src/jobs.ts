@@ -847,15 +847,18 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
       await setProgress(job.id, { fase: "ESCRITA", cap_atual: caps.length, total, continua: true });
       return;
     }
-    // NÃO avançou, mas o livro está ÍNTEGRO e incompleto (caps>0): num livro longo
-    // "0 capítulos novos neste run" é quase sempre throttle/interrupção, NÃO
-    // travamento. Re-tenta com BACKOFF (~15min) SEM queimar tentativa (reusa a
-    // pausa do LimiteMaxError). Só vira erro real por assinatura genuína.
+    // NÃO avançou, mas o livro está ÍNTEGRO e incompleto (caps>0): o run foi
+    // INTERROMPIDO sem completar o passo (morte intermitente), NÃO travamento e NÃO
+    // limite do Max. Como o runner é RETOMÁVEL do disco, re-tenta rápido (~2min) SEM
+    // queimar tentativa e com rótulo HONESTO (não mentir "limite do Max" — o bloco de
+    // limite REAL, acima, é o único que reporta throttle). Um limite genuíno já teria
+    // sido pego antes (retry_at parseado); aqui é só interrupção.
     if (caps.length > 0) {
       throw new LimiteMaxError(
-        `Escrita não avançou neste run em ${caps.length}/${total} (livro íntegro). ` +
-          `Re-tentando em ~15min, sem queimar tentativa.`,
-        new Date(Date.now() + 15 * 60_000).toISOString()
+        `Run interrompido sem progresso em ${caps.length}/${total} (livro íntegro); ` +
+          `re-tentando (retomável do disco).`,
+        new Date(Date.now() + 2 * 60_000).toISOString(),
+        { motivo: "run interrompido sem progresso — re-tentando", aguardandoReset: false }
       );
     }
     const log = logTail.slice(-300);

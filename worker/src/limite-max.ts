@@ -8,10 +8,14 @@
 // de tratar como falha terminal.
 export class LimiteMaxError extends Error {
   retryAt: string; // ISO — quando tentar de novo (próximo reset, ou backoff)
-  constructor(message: string, retryAt: string) {
+  motivo: string; // rótulo honesto p/ UI/log (limite REAL do Max vs run sem progresso)
+  aguardandoReset: boolean; // true = throttle do Max; false = re-tentativa por interrupção
+  constructor(message: string, retryAt: string, opts?: { motivo?: string; aguardandoReset?: boolean }) {
     super(message);
     this.name = "LimiteMaxError";
     this.retryAt = retryAt;
+    this.motivo = opts?.motivo ?? "limite do plano Max";
+    this.aguardandoReset = opts?.aguardandoReset ?? true;
   }
 }
 

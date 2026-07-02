@@ -230,11 +230,11 @@ async function processarJob(job: Job) {
     // 'queued' com retry_at no progresso) e NÃO consome max_attempts. O picker o
     // re-dispara sozinho quando retry_at passar (retoma do disco).
     if (e instanceof LimiteMaxError || e?.name === "LimiteMaxError") {
-      const retryAt = (e as LimiteMaxError).retryAt;
+      const err = e as LimiteMaxError;
       const { data: cur } = await sb.from("jobs").select("progresso").eq("id", job.id).single();
-      const progresso = { ...((cur?.progresso as Record<string, unknown>) ?? {}), aguardando_reset: true, retry_at: retryAt, motivo: "limite do plano Max" };
+      const progresso = { ...((cur?.progresso as Record<string, unknown>) ?? {}), aguardando_reset: err.aguardandoReset, retry_at: err.retryAt, motivo: err.motivo };
       await finalizar(job.id, { status: "queued", erro: null, progresso, locked_by: null, locked_at: null });
-      console.log(`[job ${job.id}] limite do Max — aguardando reset até ${retryAt} (não conta tentativa)`);
+      console.log(`[job ${job.id}] ${err.motivo} — retoma ${err.retryAt} (não conta tentativa)`);
       return;
     }
     const msg = String(e?.message ?? e).slice(0, 2000);
