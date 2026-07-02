@@ -38,6 +38,19 @@ describe("garantirCraftLeituraEscritor", () => {
     expect(dois.mudou).toBe(false);
     expect(contar(dois.texto, MARCADOR_CRAFT_LEITURA)).toBe(1);
   });
+  it("injeção nova já manda CUMPRIR o ORÇAMENTO DE PÁGINA do perfil (SPEC-06)", () => {
+    expect(garantirCraftLeituraEscritor(ESCRITOR).texto).toMatch(/ORÇAMENTO DE PÁGINA/);
+  });
+  it("UPGRADE: bloco v1 antigo (sem a linha do orçamento) ganha a linha sem duplicar", () => {
+    // simula agente injetado antes da SPEC-06: bloco presente, sem a linha
+    const v1 = garantirCraftLeituraEscritor(ESCRITOR).texto.replace(/\*\*CUMPRA o `### ORÇAMENTO DE PÁGINA`[^\n]*\n\n/, "");
+    expect(v1).not.toMatch(/ORÇAMENTO DE PÁGINA/);
+    const r = garantirCraftLeituraEscritor(v1);
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toMatch(/ORÇAMENTO DE PÁGINA/);
+    expect(contar(r.texto, MARCADOR_CRAFT_LEITURA)).toBe(1); // sem duplicar o bloco
+    expect(garantirCraftLeituraEscritor(r.texto).mudou).toBe(false); // idempotente após upgrade
+  });
 });
 
 describe("garantirPropulsaoRevisor", () => {

@@ -15,6 +15,13 @@ import path from "node:path";
 export const MARCADOR_CRAFT_LEITURA = "<!-- CRAFT-LEITURA v1 -->";
 export const MARCADOR_PROPULSAO = "<!-- PROPULSAO v1 -->";
 
+// SPEC-06: os NÚMEROS vivem no perfil (### ORÇAMENTO DE PÁGINA, por skill) — o
+// agente só aponta para lá (fonte única; nada de duplicar número em dois lugares).
+export const LINHA_ORCAMENTO =
+  "**CUMPRA o `### ORÇAMENTO DE PÁGINA` do `perfil-de-voz.md`** — são os números por " +
+  "capítulo que o gate mede (muletas, moldes, cota de ritmo). Alvo positivo: uma imagem " +
+  "forte vale mais que três.";
+
 export const BLOCO_CRAFT_LEITURA = `
 ${MARCADOR_CRAFT_LEITURA}
 
@@ -34,6 +41,8 @@ Escreva DESTA craft: propulsão, montagem/**corte de cena no pico**, exposição
 (por conflito/descoberta/perda, nunca palestra), interioridade com **CUSTO em ação** (não
 sensação sobre sensação), gancho honesto, **sem coincidência**, ritmo variado sob a cota.
 Voz genérica ou "bem escrito e chato" é reprovação — o revisor vai cobrar propulsão.
+
+${LINHA_ORCAMENTO}
 
 <!-- /CRAFT-LEITURA -->`;
 
@@ -66,8 +75,13 @@ function neutralizarNaoReleia(conteudo: string): string {
 }
 
 export function garantirCraftLeituraEscritor(conteudo: string): { texto: string; mudou: boolean } {
-  if ((conteudo ?? "").includes(MARCADOR_CRAFT_LEITURA)) return { texto: conteudo, mudou: false };
-  const base = neutralizarNaoReleia(conteudo);
+  const t = conteudo ?? "";
+  if (t.includes(MARCADOR_CRAFT_LEITURA)) {
+    // upgrade: bloco v1 sem a linha do orçamento (SPEC-06) ganha a linha in-place.
+    if (t.includes("ORÇAMENTO DE PÁGINA")) return { texto: t, mudou: false };
+    return { texto: t.replace("<!-- /CRAFT-LEITURA -->", `${LINHA_ORCAMENTO}\n\n<!-- /CRAFT-LEITURA -->`), mudou: true };
+  }
+  const base = neutralizarNaoReleia(t);
   return { texto: base.replace(/\s*$/, "") + "\n\n" + BLOCO_CRAFT_LEITURA + "\n", mudou: true };
 }
 

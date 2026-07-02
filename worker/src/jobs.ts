@@ -119,7 +119,12 @@ async function sanitizarPastaCapitulos(subDir: string): Promise<number> {
 // Gate de compilação/EPUB: roda tools/gate_manuscrito.py sobre a pasta do
 // manuscrito; se achar <!--/fence/assinatura, falha com mensagem clara.
 async function gateManuscrito(subDir: string): Promise<void> {
-  if (!existsSync(GATE_SCRIPT)) return; // gate ausente: não bloqueia o build
+  if (!existsSync(GATE_SCRIPT)) {
+    // gate ausente não bloqueia o build (sanitize+metaResidual por capítulo seguem
+    // ativos), mas o degrade era MUDO — avisar alto para não sumir em silêncio.
+    console.warn(`[gate] ${GATE_SCRIPT} ausente — compilação SEM gate de vazamento book-wide.`);
+    return;
+  }
   const r = await run(PY_BIN, [GATE_SCRIPT, subDir]);
   if (r.code !== 0) {
     throw new Error(`Gate de compilação reprovou o manuscrito: ${(r.out || r.err).trim().slice(-400)}`);

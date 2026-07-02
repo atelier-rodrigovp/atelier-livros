@@ -33,3 +33,7 @@ skills-livro.zip
 
 # Backups da auditoria antivazamento (conteúdo de livros — não versionar)
 worker/audit-backup/
+
+# Backups .orig.bak (auditoria antivazamento) e bytecode python
+*.orig.bak
+__pycache__/

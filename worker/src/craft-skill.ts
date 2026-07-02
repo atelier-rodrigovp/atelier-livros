@@ -10,15 +10,20 @@
 // no doc que o escritor de fato lê. Idempotente (marcador), agnóstico de skill.
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { orcCadenciaParaSkill, type OrcamentoCadencia } from "./maneirismo.js";
 
 export const MARCADOR_CRAFT = "<!-- CRAFT-SKILL v1 -->";
+// v2 = v1 + ORÇAMENTO DE PÁGINA (números por capítulo na caneta — a auditoria na
+// página provou que a craft qualitativa não segura o opus: 3 de 4 capítulos de
+// teste estouraram "coisa"/símile-andaime/antítese MESMO lendo as references).
+export const MARCADOR_CRAFT_V2 = "<!-- CRAFT-SKILL v2 -->";
 export const MARCADOR_CRAFT_FIM = "<!-- /CRAFT-SKILL -->";
 
 // Resumo curado da craft, por skill. Cada bloco é o ALVO POSITIVO que o escritor segue.
 // (Curado a partir das references de cada skill — não substitui a skill, concentra o DNA.)
 export const CRAFT_POR_SKILL: Record<string, string> = {
   "skill-dan-brown": `### Motor (capítulo a capítulo)
-- **Capítulo curto e propulsivo:** 1.300–2.200 palavras, UMA virada, **gancho honesto** no fim.
+- **Capítulo curto e propulsivo:** UMA virada, **gancho honesto** no fim (a banda de palavras é a da Estrutura DESTE projeto — respeite o piso).
 - **Montagem paralela:** 2–4 fios de POV; **corte no PICO** (antes da resolução), não depois — alterne cena/POV entre capítulos, não narre linear-contemplativo.
 - **Relógio comprimido:** 12–48h, ameaça contínua e visível na cena.
 - **Cold open:** planta o enigma/morte central nas primeiras páginas.
@@ -66,23 +71,46 @@ export const CRAFT_POR_SKILL: Record<string, string> = {
 - **Fidelidade à spec do capítulo** (PdV, beat, marco) antes de qualquer floreio.`,
 };
 
-// Detecta se o perfil já tem o bloco de craft (marcador). Idempotente.
+// Detecta se o perfil já tem o bloco de craft (marcador v1 ou v2). Idempotente.
 export function temCraft(conteudo: string): boolean {
-  return (conteudo ?? "").includes(MARCADOR_CRAFT);
+  const t = conteudo ?? "";
+  return t.includes(MARCADOR_CRAFT) || t.includes(MARCADOR_CRAFT_V2);
+}
+
+// ORÇAMENTO DE PÁGINA: os NÚMEROS que o gate mede, na caneta do escritor — como
+// alvo positivo, não lista de banimento. Muletas/moldes são fixos (molde de IA é
+// molde em qualquer skill); a cota de ritmo vem do orçamento DA SKILL (SPEC-05),
+// então o alvo do escritor é exatamente o que o detector cobra.
+export function blocoOrcamentoPagina(skill: string, orc: OrcamentoCadencia = orcCadenciaParaSkill(skill)): string {
+  const colados = orc.fragColados <= 0 ? "nunca dois colados" : `≤${orc.fragColados} pares colados`;
+  return `### ORÇAMENTO DE PÁGINA (por capítulo — o gate mede por NÚMERO)
+Uma imagem forte vale mais que três; troque a muleta pelo referente concreto (objeto, gesto, ideia).
+- **Muletas/moldes:** "coisa"/"coisas" ≤1 · símile-andaime ("como se"/"como quem") ≤1 · antítese "Não era X. Era Y." ≤1 · anáfora colada ≤${orc.anafora} par(es).
+- **Ritmo:** fragmentos de ênfase ≤${orc.fragEnfase} (${colados}) · pensamento em itálico ≤${orc.italico} · pergunta retórica ≤${orc.retorica} · frases curtas até ~${Math.round(orc.staccatoFrac * 100)}% da narração.`;
 }
 
 // Injeta o bloco de craft da skill no fim do perfil, se a skill for conhecida e o bloco
 // ainda não existir. Skill desconhecida / "nenhuma" → no-op (não inventa craft).
+// Reconhece o bloco v1 e faz UPGRADE in-place (v1 → v2 + orçamento), sem duplicar.
 export function garantirCraftNoPerfil(conteudo: string, skill: string | null | undefined): { texto: string; mudou: boolean } {
   const corpo = skill ? CRAFT_POR_SKILL[skill] : undefined;
   if (!corpo) return { texto: conteudo ?? "", mudou: false };
-  if (temCraft(conteudo)) return { texto: conteudo, mudou: false };
+  const t = conteudo ?? "";
+  if (t.includes(MARCADOR_CRAFT_V2)) return { texto: t, mudou: false };
+  const orcamento = blocoOrcamentoPagina(skill!);
+  if (t.includes(MARCADOR_CRAFT)) {
+    // upgrade v1 → v2: soma o orçamento ao bloco existente (fecho como âncora).
+    const texto = t
+      .replace(MARCADOR_CRAFT, MARCADOR_CRAFT_V2)
+      .replace(MARCADOR_CRAFT_FIM, `${orcamento}\n\n${MARCADOR_CRAFT_FIM}`);
+    return { texto, mudou: true };
+  }
   const bloco =
-    `${MARCADOR_CRAFT}\n\n## CRAFT DA SKILL \`${skill}\` (motor + regras — ALVO do escritor)\n\n` +
+    `${MARCADOR_CRAFT_V2}\n\n## CRAFT DA SKILL \`${skill}\` (motor + regras — ALVO do escritor)\n\n` +
     `> O \`livro-escritor\` ESCREVE seguindo este bloco (a craft da skill, concentrada). ` +
     `Não é decoração: é o padrão que o capítulo precisa cumprir.\n\n` +
-    `${corpo}\n\n${MARCADOR_CRAFT_FIM}`;
-  return { texto: (conteudo ?? "").replace(/\s*$/, "") + "\n\n" + bloco + "\n", mudou: true };
+    `${corpo}\n\n${orcamento}\n\n${MARCADOR_CRAFT_FIM}`;
+  return { texto: t.replace(/\s*$/, "") + "\n\n" + bloco + "\n", mudou: true };
 }
 
 export interface CraftAjuste { arquivo: string; mudou: boolean; skill: string | null; reconhecida: boolean }
