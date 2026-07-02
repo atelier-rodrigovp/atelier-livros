@@ -783,6 +783,13 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   } finally {
     clearInterval(poll);
   }
+  // Diagnóstico SEMPRE visível: rc + tail do stderr em TODO retorno do runner,
+  // inclusive nos caminhos de limite/interrupção (que antes descartavam a causa —
+  // a "morte silenciosa" ficava invisível no worker.log).
+  const errTail = (r.err || "").trim().slice(-400);
+  console.log(
+    `[job ${job.id}] runner rc=${r.code}${errTail ? ` err_tail=${JSON.stringify(errTail)}` : ""}`
+  );
 
   // Telemetria (tokens/tempo por agente + throughput) — verdade do disco, best-effort.
   await gravarTelemetriaProjeto(job.project_id!);

@@ -91,12 +91,18 @@ def agora():
 
 def log(projeto, msg):
     linha = "[{}] {}".format(agora(), msg)
-    print(linha, flush=True)
+    # ARQUIVO antes do print: no Windows o stdout herdado pode ser cp1252
+    # (errors=strict) e um caractere fora dele (✓ → emoji) matava o processo
+    # ANTES de persistir a linha — a "morte silenciosa" que comia runs inteiros.
     try:
         with open(os.path.join(projeto, ARQ_LOG), "a", encoding="utf-8") as fh:
             fh.write(linha + "\n")
     except OSError:
         pass
+    try:
+        print(linha, flush=True)
+    except (UnicodeEncodeError, OSError):
+        pass  # stdout hostil (encoding/pipe fechado) nunca derruba o runner
 
 
 def caminho_estado(projeto):

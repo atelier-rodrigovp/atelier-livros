@@ -21,6 +21,15 @@ if (!process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS) {
   process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = "64000";
 }
 
+// Runner python spawnado com pipe herda o encoding do locale no Windows (cp1252,
+// errors=strict): um ✓/→/emoji vindo do resumo do Claude matava o print() com
+// UnicodeEncodeError — a "morte silenciosa" entre o retorno da call e o log do rc
+// (31/44 calls sem rc no diagnóstico). UTF-8 em todos os I/O do python resolve na
+// raiz (as leituras/escritas de arquivo do runner já são utf-8 explícito).
+if (!process.env.PYTHONUTF8) {
+  process.env.PYTHONUTF8 = "1";
+}
+
 const WORKER_ID = process.env.WORKER_ID || "worker-local";
 const POLL = Number(process.env.POLL_INTERVAL_MS || 5000);
 const STALE_MIN = Number(process.env.HEARTBEAT_STALE_MIN || 15);
