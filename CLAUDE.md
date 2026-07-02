@@ -55,6 +55,24 @@ alto. Vive no runner (`worker/skill-patches/.../livro_runner.py`) → vale para 
 do próximo capítulo em diante (sem sweep por-projeto). Pós-edição do runner: rodar
 `instalar-skills.ps1`.
 
+**Auditoria da base + FASE B (2026-07-02, ver `AUDITORIA-BASE-SISTEMA.md`):** SPECs 01–06
+aplicadas e EM PRODUÇÃO (commits `0c71887`/`0ad0a49`/`578be9e`/`859c5f3`/`6fd8f78`/`82046a7`):
+startup resiliente + autostart com wrapper e auto-restart (`worker/autostart/`); **morte
+silenciosa do runner morta na raiz** — a causa era `UnicodeEncodeError` (stdout **cp1252**
+do python spawnado; um ✓/→/emoji matava o `log()`), NÃO rede → `PYTHONUTF8=1` no worker +
+`log()` grava o arquivo antes do print + rc/err logado em todo retorno do runner;
+retry/backoff de rede nos writes idempotentes (`worker/src/retry.ts`; **claim FORA por
+design**; blip de rede re-enfileira sem queimar tentativa); cota de cadência COMPLETA em
+projetos novos (`RE_LEGADO` por completude em `voz-regra4.ts`); **orçamento de cadência POR
+SKILL** (`ORC_CADENCIA_POR_SKILL` + espelho no runner; diálogo não conta como tique — a voz
+"curta e cheia" do hoover deixou de reprovar); **ORÇAMENTO DE PÁGINA na caneta**
+(`CRAFT-SKILL v2`: os números do gate no perfil, por skill; corta ~70% das muletas na
+origem — residual "coisa" ~2×/cap fica para o gate). Runner de produção reinstalado
+(diff patch↔instalado vazio em 2026-07-02). ⚠️ **O baseline de telemetria do "diagnóstico
+medido" acima está INVALIDADO** (P0-3 da auditoria: os fixes A/B/honestidade estavam no
+HEAD mas o processo em produção era código ANTERIOR — commit ≠ produção; worker exige
+restart) — re-medir com o HEAD rodando.
+
 
 Plataforma que orquestra agentes do Claude Code para produzir livros (front
 React+Vite+TS; Supabase; worker local em `worker/` via fila de jobs; deploy em
