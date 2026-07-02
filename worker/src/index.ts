@@ -5,6 +5,7 @@ import { sb, OWNER } from "./supabase.js";
 import { executarJob, type Job } from "./jobs.js";
 import { LimiteMaxError, deveRecuperar } from "./limite-max.js";
 import { escolherProximo, normalizarMaxParalelo, type ProjInfo } from "./fila.js";
+import { aguardarConexao } from "./espera-conexao.js";
 
 // Usar a assinatura MAX (login OAuth do Claude Code), não créditos de API.
 // Se ANTHROPIC_API_KEY estiver no ambiente, o `claude` headless a prioriza e
@@ -198,7 +199,9 @@ async function verificarConexao() {
 
 async function loop() {
   if (!OWNER) throw new Error("OWNER_USER_ID não configurado no worker/.env");
-  await verificarConexao();
+  // Startup resiliente: rede indisponível no boot NÃO derruba o daemon (espera
+  // logando ~1×/min); erro de config (URL/credencial) fica visível no mesmo log.
+  await aguardarConexao(verificarConexao);
   await recuperarLimiteMax(); // na inicialização: ressuscita jobs mortos por limite do Max
   await heartbeat({ estado: "online" });
   console.log(
