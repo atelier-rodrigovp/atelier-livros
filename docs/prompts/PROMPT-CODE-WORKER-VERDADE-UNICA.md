@@ -1,6 +1,6 @@
 # Prompt para o Claude Code — status do worker: uma fonte única de verdade (acabar com o conflito)
 
-Você roda na minha máquina, repositório `ATELIER-LIVROS`. Faça de forma autônoma. Ao final: `npm run build` limpo, testes ok, `git commit` + `git push`; valide com Playwright (senha `AtelierLivros2026`) com screenshot de Configurações. Não exponha segredos. Sem DDL/credencial nova.
+Você roda na minha máquina, repositório `ATELIER-LIVROS`. Faça de forma autônoma. Ao final: `npm run build` limpo, testes ok, `git commit` + `git push`; valide com Playwright (senha `<SENHA_DO_APP>`) com screenshot de Configurações. Não exponha segredos. Sem DDL/credencial nova.
 
 ## Problema
 A tela de Configurações mostra infos que parecem se contradizer: o topo diz **"Produzindo · último sinal <hoje>"** (heartbeat fresco) e o painel "Trabalhando agora" mostra cap 27/32; mas a lista **Atividade** mostra o MESMO job de escrita como **"Executando"** com data de ontem (o `created_at` do job). O usuário não consegue saber se está realmente rodando. Causa: a UI mistura três sinais (heartbeat vivo, status do job, e timestamps) sem reconciliá-los, e usa a hora de início do job como se fosse "agora".

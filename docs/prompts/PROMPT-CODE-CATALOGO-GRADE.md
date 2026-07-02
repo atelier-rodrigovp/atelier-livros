@@ -1,6 +1,6 @@
 # Prompt para o Claude Code — Catálogo: grade densa de biblioteca (não vitrine)
 
-Cole no Claude Code na raiz do `ATELIER-LIVROS`. Ao final: `npm run build` limpo, testes passando, `git commit` + `git push` (deploy Pages), e **valide no navegador com Playwright** (senha `AtelierLivros2026`) com screenshot antes de declarar pronto.
+Cole no Claude Code na raiz do `ATELIER-LIVROS`. Ao final: `npm run build` limpo, testes passando, `git commit` + `git push` (deploy Pages), e **valide no navegador com Playwright** (senha `<SENHA_DO_APP>`) com screenshot antes de declarar pronto.
 
 ## Diagnóstico (por que refazer)
 O catálogo atual usa **hero gigante + carrosséis por série**. Isso é padrão de *vitrine com curadoria* (Netflix home). Para uma **biblioteca de produção pessoal** que vai ter 30, 100, 500 livros, isso é errado: o hero queima uma tela inteira sem função e o carrossel esconde a maioria dos itens, forçando scroll lateral item a item. O padrão correto é **biblioteca**: uma grade densa de capas, com busca, ordenação e filtros. (Pense Plex/Letterboxd/“Sua biblioteca” da Amazon, não a home da Netflix.)

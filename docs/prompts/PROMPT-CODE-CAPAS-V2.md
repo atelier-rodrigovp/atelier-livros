@@ -1,6 +1,6 @@
 # Prompt para o Claude Code — capas v2: FLUX grátis, 5 opções, logo Maremonti, multilíngue padronizado
 
-Você roda na minha máquina, repositório `ATELIER-LIVROS` (front React+Vite+TS + worker TS local + `worker/scripts/compose_cover.py` em Pillow). Faça de forma autônoma. Ao final: `npm run build` limpo, testes ok, `git commit` + `git push`; valide com Playwright (senha `AtelierLivros2026`) e, se possível, gere um exemplo real de capa pra screenshot. Não exponha segredos.
+Você roda na minha máquina, repositório `ATELIER-LIVROS` (front React+Vite+TS + worker TS local + `worker/scripts/compose_cover.py` em Pillow). Faça de forma autônoma. Ao final: `npm run build` limpo, testes ok, `git commit` + `git push`; valide com Playwright (senha `<SENHA_DO_APP>`) e, se possível, gere um exemplo real de capa pra screenshot. Não exponha segredos.
 
 ## Estado atual (parta daqui)
 - O job `gerar_capas` (`worker/src/jobs.ts`) gera **UMA arte-mestra sem texto** via **Pollinations.ai/Flux** (default fraco) e cai em canvas-design (Claude) como fallback.

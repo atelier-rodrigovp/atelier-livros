@@ -29,7 +29,7 @@ implementadas, commitadas (SEM push) e **aplicadas em produção** às ~10:38:
 - **Dívidas:** SPEC-07 (paridade plena do Fix C no revisor: continuidade dura, voz
   fora do perfil, moldes nomeados), SPEC-08 (token estrangeiro "ninguño" invisível
   aos gates), SPEC-10 (zero-pad do digest no runner), SPEC-11 (trocar a senha
-  `AtelierLivros2026` exposta em 10 docs versionados), SPEC-12 (timestamps no
+  `<SENHA_DO_APP>` exposta em 10 docs versionados), SPEC-12 (timestamps no
   worker.log); **teste de Wi-Fi da SPEC-03: ✓ PASSOU** (02/07 ~12:16, queda real de
   ~90s durante a escrita do cap 8: PID intacto, attempts=0, zero "erro de escrita no
   banco", heartbeat agregado "voltou após 10 falha(s)", call do Claude em voo

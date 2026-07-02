@@ -1,6 +1,6 @@
 # Prompt para o Claude Code — Dashboard + Catálogo (Netflix-grade) + botão Ligar Worker
 
-Cole no Claude Code na raiz do `ATELIER-LIVROS`. Stack: React + Vite + TS, shadcn/ui, Tailwind, Supabase. Ao final: `npm run build` limpo, testes passando, `git commit` + `git push` (deploy GitHub Pages) e **valide no navegador com Playwright** (login: senha `AtelierLivros2026`) tirando screenshot das 3 telas antes de declarar pronto.
+Cole no Claude Code na raiz do `ATELIER-LIVROS`. Stack: React + Vite + TS, shadcn/ui, Tailwind, Supabase. Ao final: `npm run build` limpo, testes passando, `git commit` + `git push` (deploy GitHub Pages) e **valide no navegador com Playwright** (login: senha `<SENHA_DO_APP>`) tirando screenshot das 3 telas antes de declarar pronto.
 
 Este é um trabalho de **acabamento visual**, não de rascunho. Refêrencias de qualidade: storefront da Netflix/Amazon Prime. Capriche em espaçamento, hierarquia, densidade e estados de hover. Nada de telas com 80% de espaço vazio.
 

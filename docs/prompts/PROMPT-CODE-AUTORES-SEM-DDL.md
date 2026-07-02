@@ -1,6 +1,6 @@
 # Prompt para o Claude Code — Autores SEM criar tabela (zero DDL, zero token)
 
-Você roda na minha máquina, repositório `ATELIER-LIVROS` (React+Vite+TS, shadcn/ui, Tailwind, Supabase; deploy GitHub Pages). **Restrição dura: NÃO há como rodar DDL** (não existe token do Supabase, senha do banco nem acesso ao SQL Editor, e a service_role não cria tabela). Portanto **reescreva a feature de Autores para NÃO depender de nenhuma tabela nova nem de coluna nova** — use apenas dados que o front já pode ler e gravar sob a RLS existente. O usuário não vai tocar em nada. Ao final: `npm run build` limpo, testes ok, `git commit` + `git push`, e valide no navegador com Playwright (senha `AtelierLivros2026`) com screenshots.
+Você roda na minha máquina, repositório `ATELIER-LIVROS` (React+Vite+TS, shadcn/ui, Tailwind, Supabase; deploy GitHub Pages). **Restrição dura: NÃO há como rodar DDL** (não existe token do Supabase, senha do banco nem acesso ao SQL Editor, e a service_role não cria tabela). Portanto **reescreva a feature de Autores para NÃO depender de nenhuma tabela nova nem de coluna nova** — use apenas dados que o front já pode ler e gravar sob a RLS existente. O usuário não vai tocar em nada. Ao final: `npm run build` limpo, testes ok, `git commit` + `git push`, e valide no navegador com Playwright (senha `<SENHA_DO_APP>`) com screenshots.
 
 ## Princípio (onde guardar os autores sem DDL)
 Não use a tabela `authors` nem a coluna `projects.author_id` (não existem e não podem ser criadas). Em vez disso:

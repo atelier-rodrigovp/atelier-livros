@@ -235,6 +235,27 @@ describe("diagnosticarCadencia — ritmo (tiques reais do livro)", () => {
   });
 });
 
+describe("contarMuletas — léxico estrangeiro (SPEC-08)", () => {
+  it("detecta o 'ninguño' REAL do capítulo vesper (alvo 0 — qualquer ocorrência estoura)", () => {
+    // frase literal do capítulo de teste da auditoria, que passou por todos os gates
+    const frase = "Era um gesto pequeno, coisa que quase ninguño acerta de primeira.";
+    const hit = contarMuletas(frase).find((m) => /estrangeiro/.test(m.termo));
+    expect(hit?.n).toBe(1);
+    expect(hit?.alvo).toBe(0);
+    expect(hit?.acima).toBe(true);
+  });
+  it("pega os tokens espanhóis frequentes de LLM (pero/entonces/mismo/también)", () => {
+    const t = "Pero ele ficou. Entonces a porta abriu, e era o mismo homem de ontem, también cansado.";
+    const hit = contarMuletas(t).find((m) => /estrangeiro/.test(m.termo));
+    expect(hit?.n).toBe(4);
+    expect(hit?.acima).toBe(true);
+  });
+  it("NÃO dá falso positivo em PT legítimo ('sino' da igreja, 'mesmo', 'todavia' sem acento)", () => {
+    const t = "O sino da igreja tocou três vezes. Ele mesmo puxara a corda; todavia, ninguém veio.";
+    expect(contarMuletas(t).find((m) => /estrangeiro/.test(m.termo))).toBeUndefined();
+  });
+});
+
 describe("diagnosticarRepeticao — agregado", () => {
   it("junta moldes acima + fecho + n-gramas", () => {
     const cap = "Não era paz. Era guerra. Não era paz. Era guerra. A sombra longa do muro.";

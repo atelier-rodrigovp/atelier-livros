@@ -7,6 +7,11 @@ import { LimiteMaxError, deveRecuperar } from "./limite-max.js";
 import { escolherProximo, normalizarMaxParalelo, type ProjInfo } from "./fila.js";
 import { aguardarConexao } from "./espera-conexao.js";
 import { comRetrySb, ehErroDeRede } from "./retry.js";
+import { instalarTimestampsISO } from "./log-iso.js";
+
+// SPEC-12: todo console.log/warn/error do worker ganha [ISO] (o log não tinha
+// relógio próprio — instalar ANTES de qualquer log).
+instalarTimestampsISO();
 
 // Usar a assinatura MAX (login OAuth do Claude Code), não créditos de API.
 // Se ANTHROPIC_API_KEY estiver no ambiente, o `claude` headless a prioriza e

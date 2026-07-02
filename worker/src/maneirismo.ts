@@ -143,6 +143,15 @@ export const MULETAS: Muleta[] = [
   { termo: '"na verdade"', re: /\bna verdade\b/gi, orc10k: 4 },
   { termo: '"parecia que"', re: /\bparecia que\b/gi, orc10k: 3 },
   { termo: '"de certa forma/maneira"', re: /\bde certa (?:forma|maneira)\b/gi, orc10k: 2 },
+  // SPEC-08: token estrangeiro/typo de geração (o "ninguño" do capítulo vesper passou
+  // por TODOS os gates e chegaria ao EPUB). Lista LITERAL curta — nada de heurística
+  // (nome próprio de fantasia não pode dar falso positivo). orc10k 0 = alvo 0 (qualquer
+  // ocorrência estoura). "sino" ficou FORA de propósito: é palavra PT legítima (o sino).
+  {
+    termo: "léxico estrangeiro (typo de geração)",
+    re: /\b(ninguño|ningún|ninguna|pero|entonces|mismo|misma|aunque|también|todavía|además)\b/gi,
+    orc10k: 0,
+  },
 ];
 
 export interface MuletaContagem { termo: string; n: number; por10k: number; alvo: number; acima: boolean }
@@ -153,7 +162,8 @@ export function contarMuletas(texto: string, lexico: Muleta[] = MULETAS): Muleta
   return lexico
     .map(({ termo, re, orc10k }) => {
       const n = (t.match(re) ?? []).length;
-      const alvo = Math.max(1, Math.round((orc10k * palavras) / 10_000));
+      // orc10k ≤ 0 = tolerância zero (léxico estrangeiro); senão, piso 1 proporcional.
+      const alvo = orc10k <= 0 ? 0 : Math.max(1, Math.round((orc10k * palavras) / 10_000));
       return { termo, n, por10k: palavras ? Math.round((n / palavras) * 10_000 * 10) / 10 : 0, alvo, acima: n > alvo };
     })
     .filter((m) => m.n > 0)

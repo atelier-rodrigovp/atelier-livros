@@ -1,6 +1,6 @@
 # Prompt para o Claude Code — gerador de posts de rede social na voz de cada autor
 
-Você roda na minha máquina, no repositório `ATELIER-LIVROS` (React+Vite+TS, shadcn/ui, Tailwind, Supabase + worker local que executa a IA via fila de `jobs`; deploy GitHub Pages). Faça tudo de forma autônoma. Ao final: `npm run build` limpo, testes ok, `git commit` + `git push`, e valide no navegador com Playwright (senha `AtelierLivros2026`). Use a service_role do `worker/.env` quando precisar semear/verificar dados; nunca exponha segredos.
+Você roda na minha máquina, no repositório `ATELIER-LIVROS` (React+Vite+TS, shadcn/ui, Tailwind, Supabase + worker local que executa a IA via fila de `jobs`; deploy GitHub Pages). Faça tudo de forma autônoma. Ao final: `npm run build` limpo, testes ok, `git commit` + `git push`, e valide no navegador com Playwright (senha `<SENHA_DO_APP>`). Use a service_role do `worker/.env` quando precisar semear/verificar dados; nunca exponha segredos.
 
 ## Pré-requisito
 A feature **Autores** já existe (tabela `authors` com `bio`, `personalidade`, `referencias`, `estilo`, `genero`, `social`; `projects.author_id`; página `/autores/:id`). Esta fase **adiciona o gerador de posts na voz do autor**. Se algo da feature Autores faltar, crie o mínimo necessário, mas não a refaça.

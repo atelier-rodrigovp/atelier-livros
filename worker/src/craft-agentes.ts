@@ -46,6 +46,15 @@ ${LINHA_ORCAMENTO}
 
 <!-- /CRAFT-LEITURA -->`;
 
+// SPEC-07: critérios do revisor INLINE antigo que o Fix C (delegação) tinha perdido —
+// paridade plena. Também é o ponto de upgrade de blocos v1 já injetados.
+export const ADENDO_PARIDADE = `### PARIDADE COM A REVISÃO INLINE (critérios que NÃO podem se perder)
+Fonte adicional OBRIGATÓRIA: o \`perfil-de-voz.md\` (voz + \`## CRAFT DA SKILL\` + \`### ORÇAMENTO DE PÁGINA\`).
+- **Voz fora do perfil:** prosa que não soa como o perfil (registro, lente, léxico, cadência) é edição obrigatória — cite a linha.
+- **Continuidade dura vs ledger:** nenhum fato do capítulo pode contradizer o \`estado/estado-narrativo.md\` (nomes, datas, geografia, relógios, quem-sabe-o-quê). Contradição = reprovação, não nota de rodapé.
+- **Moldes nomeados (corte/dramatize mesmo fora das contagens):** símile-andaime ("como se"/"como quem"), eco de negação ("Não havia X… Havia Y"), antítese-haver, anáfora/staccato colado, decoração-sem-evento.
+- **Token estrangeiro/typo de geração:** palavra fora do PT-BR ("ninguño", "pero", "entonces") ou typo — aponte a linha e corrija na edição.`;
+
 export const BLOCO_PROPULSAO = `
 ${MARCADOR_PROPULSAO}
 
@@ -62,6 +71,8 @@ MORTO é **REPROVAÇÃO**, não aprovação. Pergunte:
 
 Se "bem escrito e CHATO": **REPROVE** e devolva edições que **INJETAM propulsão** (dramatize,
 corte no pico, encadeie a caça às pistas) — não só cortam tique. Preserve sentido e voz.
+
+${ADENDO_PARIDADE}
 
 <!-- /PROPULSAO -->`;
 
@@ -86,8 +97,13 @@ export function garantirCraftLeituraEscritor(conteudo: string): { texto: string;
 }
 
 export function garantirPropulsaoRevisor(conteudo: string): { texto: string; mudou: boolean } {
-  if ((conteudo ?? "").includes(MARCADOR_PROPULSAO)) return { texto: conteudo, mudou: false };
-  return { texto: (conteudo ?? "").replace(/\s*$/, "") + "\n\n" + BLOCO_PROPULSAO + "\n", mudou: true };
+  const t = conteudo ?? "";
+  if (t.includes(MARCADOR_PROPULSAO)) {
+    // upgrade SPEC-07: bloco v1 (sem o adendo de paridade) ganha o adendo in-place.
+    if (t.includes("PARIDADE COM A REVISÃO INLINE")) return { texto: t, mudou: false };
+    return { texto: t.replace("<!-- /PROPULSAO -->", `${ADENDO_PARIDADE}\n\n<!-- /PROPULSAO -->`), mudou: true };
+  }
+  return { texto: t.replace(/\s*$/, "") + "\n\n" + BLOCO_PROPULSAO + "\n", mudou: true };
 }
 
 export interface CraftAgentesAjuste { escritor: boolean; revisor: boolean }

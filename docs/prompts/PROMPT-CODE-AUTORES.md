@@ -1,6 +1,6 @@
 # Prompt para o Claude Code — Autores como entidades (página dedicada) + redistribuir obras
 
-Você roda na minha máquina, no repositório `ATELIER-LIVROS` (React+Vite+TS, shadcn/ui, Tailwind, Supabase; deploy GitHub Pages). Faça tudo de forma autônoma. Ao final: `npm run build` limpo, testes passando, `git commit` + `git push`, e **valide no navegador com Playwright** (login senha `AtelierLivros2026`) com screenshots. Use a service_role do `worker/.env` para as escritas de dados (seed/atribuição). Nunca exponha segredos.
+Você roda na minha máquina, no repositório `ATELIER-LIVROS` (React+Vite+TS, shadcn/ui, Tailwind, Supabase; deploy GitHub Pages). Faça tudo de forma autônoma. Ao final: `npm run build` limpo, testes passando, `git commit` + `git push`, e **valide no navegador com Playwright** (login senha `<SENHA_DO_APP>`) com screenshots. Use a service_role do `worker/.env` para as escritas de dados (seed/atribuição). Nunca exponha segredos.
 
 ## Objetivo
 Transformar os **autores (pseudônimos)** em entidades de primeira classe: uma página "Autores" no menu esquerdo para personificá-los (bio, personalidade, referências, estilo, avatar e redes sociais), e **reatribuir cada obra ao autor certo**. Cada autor tem um estilo:

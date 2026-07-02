@@ -44,7 +44,7 @@ Raízes: `C:\Users\Rodrigo Paiva\Desktop\PESSOAL\Saga` e `C:\Users\Rodrigo Paiva
 2. **Importe** os 12 volumes conforme o mapa acima (escreva o código que quiser; rode você mesmo). Trate erros por volume e siga em frente; corrija mapeamento de caminho se algum acento/encoding do Windows falhar.
 3. **Verifique no banco:** 12 `projects` novos; cada um com 1 `edition` pt-BR `is_origem=true`; `chapters` nas contagens esperadas (acima); `artifacts` de capa/epub onde existirem.
 4. **Spot-check de Storage:** para 2–3 projetos, gere signed URL da capa e de 1 capítulo e confirme HTTP 200.
-5. **Confirme no app:** abra o Atelier no navegador (Playwright; login senha `AtelierLivros2026`), vá ao **Catálogo** e tire screenshot mostrando a trilogia "A Linhagem das Cinzas" e "Última Chamada para o Embarque" agrupadas por série (Vol. 1/2/3), os avulsos, capas reais onde há arquivo e fallback colorido onde não há (ex.: A Última Carta de Vênus).
+5. **Confirme no app:** abra o Atelier no navegador (Playwright; login senha `<SENHA_DO_APP>`), vá ao **Catálogo** e tire screenshot mostrando a trilogia "A Linhagem das Cinzas" e "Última Chamada para o Embarque" agrupadas por série (Vol. 1/2/3), os avulsos, capas reais onde há arquivo e fallback colorido onde não há (ex.: A Última Carta de Vênus).
 
 ## Limites
 - **Não** faça commit/push nem deploy — isto é carga de dados, não mudança de app.

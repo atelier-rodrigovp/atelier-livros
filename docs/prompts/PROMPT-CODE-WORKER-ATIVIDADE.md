@@ -1,6 +1,6 @@
 # Prompt para o Claude Code — Configurações: mostrar EM QUAL livro o worker está trabalhando
 
-Você roda na minha máquina, repositório `ATELIER-LIVROS`. Faça de forma autônoma. Ao final: `npm run build` limpo, testes ok, `git commit` + `git push`, e valide no navegador com Playwright (senha `AtelierLivros2026`) com screenshot da tela de Configurações. Não exponha segredos.
+Você roda na minha máquina, repositório `ATELIER-LIVROS`. Faça de forma autônoma. Ao final: `npm run build` limpo, testes ok, `git commit` + `git push`, e valide no navegador com Playwright (senha `<SENHA_DO_APP>`) com screenshot da tela de Configurações. Não exponha segredos.
 
 ## Problema
 Na seção **Atividade** (Configurações), cada job mostra só o tipo (`escrever_livro`, `gerar_capas`…) + hora + status. Não dá pra saber **qual projeto/livro** o worker está processando. Pior: há um `escrever_livro` preso em **"Executando"** desde 23/06 enquanto o worker está offline — é um **job órfão** (o worker caiu segurando o lock) e a UI não deixa isso claro.

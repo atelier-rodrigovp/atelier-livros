@@ -60,7 +60,7 @@ Start-ScheduledTask -TaskName 'AtelierWorker'
 | P2-2 | Banda de palavras conflitante na mesma fundação: CRAFT-SKILL diz "1.300–2.200", Estrutura/agente cobram "1.800–2.700, piso 1.800". Um capítulo de 1.500 "conforme a craft" queimaria um run. | Integrações |
 | P2-3 | Digest sem zero-pad: runner gera `contexto-cap-7.md`, agentes esperam convenção `NN` (`contexto-cap-07.md`). Hoje inócuo (nome exato vai no prompt). | Integrações |
 | P2-4 | Token estrangeiro/typo de geração invisível a TODOS os gates: capítulo vesper saiu com **"ninguño"** — chegaria ao EPUB. | Skills |
-| P2-5 | Senha do app (`AtelierLivros2026`) em texto claro em 10 docs versionados (`docs/prompts/PROMPT-CODE-*.md`). Repo privado + RLS mantêm em P2; sobe a P1 se o repo for público. | Segurança |
+| P2-5 | Senha do app (`<SENHA_DO_APP>`) em texto claro em 10 docs versionados (`docs/prompts/PROMPT-CODE-*.md`). Repo privado + RLS mantêm em P2; sobe a P1 se o repo for público. | Segurança |
 | P2-6 | `.gitignore` sem `*.orig.bak` e `__pycache__` (o `__pycache__` do skill-patch já aparece untracked). | Segurança |
 | P2-7 | Gate de compilação com degrade silencioso: `if (!existsSync(GATE_SCRIPT)) return;` (jobs.ts:121) — se `tools/` mover, o gate some sem aviso (mitigante: sanitize+metaResidual por capítulo continuam). | Segurança |
 | P2-8 | `auditar-vazamentos.ts` escreve por padrão (regrava capítulos + upsert no Storage), sem `--dry-run` — não pôde ser rodado na auditoria. | Segurança |

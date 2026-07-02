@@ -1,6 +1,6 @@
 # Prompt para o Claude Code — Catálogo (grade) + Dashboard + Worker
 
-Cole no Claude Code na raiz do `ATELIER-LIVROS`. Trabalho de **acabamento visual** (não rascunho), referência de qualidade: biblioteca tipo Plex/Letterboxd e painel de produção limpo. Ao final: `npm run build` limpo, testes passando, `git commit` + `git push` (deploy Pages), e **valide no navegador com Playwright** (senha `AtelierLivros2026`) com screenshot das 3 telas antes de declarar pronto. Reutilize o componente já extraído `src/components/CoverArt.tsx` em todas as telas.
+Cole no Claude Code na raiz do `ATELIER-LIVROS`. Trabalho de **acabamento visual** (não rascunho), referência de qualidade: biblioteca tipo Plex/Letterboxd e painel de produção limpo. Ao final: `npm run build` limpo, testes passando, `git commit` + `git push` (deploy Pages), e **valide no navegador com Playwright** (senha `<SENHA_DO_APP>`) com screenshot das 3 telas antes de declarar pronto. Reutilize o componente já extraído `src/components/CoverArt.tsx` em todas as telas.
 
 ---
 

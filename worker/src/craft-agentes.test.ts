@@ -67,4 +67,24 @@ describe("garantirPropulsaoRevisor", () => {
     expect(garantirPropulsaoRevisor(um).mudou).toBe(false);
     expect(contar(um, MARCADOR_PROPULSAO)).toBe(1);
   });
+  it("SPEC-07: injeção nova carrega os critérios de paridade do inline", () => {
+    const t = garantirPropulsaoRevisor("# rev\n").texto;
+    expect(t).toMatch(/perfil-de-voz\.md/);
+    expect(t).toMatch(/Voz fora do perfil/);
+    expect(t).toMatch(/Continuidade dura vs ledger/);
+    expect(t).toMatch(/símile-andaime.*eco de negação|eco de negação/);
+    expect(t).toMatch(/antítese-haver/);
+    expect(t).toMatch(/ninguño/); // SPEC-08: token estrangeiro vira item do revisor
+  });
+  it("SPEC-07: UPGRADE de bloco v1 (sem paridade) ganha o adendo sem duplicar", () => {
+    const v1 = garantirPropulsaoRevisor("# rev\n").texto
+      .replace(/### PARIDADE COM A REVISÃO INLINE[\s\S]*?(?=\n\n<!-- \/PROPULSAO -->)/, "")
+      .replace(/\n{3,}/g, "\n\n");
+    expect(v1).not.toMatch(/PARIDADE COM A REVISÃO INLINE/);
+    const r = garantirPropulsaoRevisor(v1);
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toMatch(/Continuidade dura vs ledger/);
+    expect(contar(r.texto, MARCADOR_PROPULSAO)).toBe(1);
+    expect(garantirPropulsaoRevisor(r.texto).mudou).toBe(false); // idempotente após upgrade
+  });
 });

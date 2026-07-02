@@ -449,7 +449,7 @@ def prompt_escrita_capitulo(n, piso):
         "perfil. 'Invocar a skill' = LER esses arquivos, nao so o resumo do SKILL.md.\n"
         "2) OBRIGATORIO: delegue a ESCRITA ao subagente 'livro-escritor' via Task "
         "(ele roda em opus). Antes, 'livro-contextualizador' gera "
-        "contexto/contexto-cap-{n}.md; depois, 'livro-revisor' revisa e atualiza o "
+        "contexto/contexto-cap-{n:02d}.md; depois, 'livro-revisor' revisa e atualiza o "
         "ledger + MCL. NAO escreva a prosa na sessao principal: a prosa nasce no "
         "subagente escritor (opus). \n"
         "3) Grave o capitulo final em '{arq}' — prosa de verdade, PT-BR, no PdV e "
@@ -680,6 +680,11 @@ _MULETAS = [
     (u"'de repente'", re.compile(u"\\bde repente\\b", re.I | re.U), 1, 4.0),
     (u"'na verdade'", re.compile(u"\\bna verdade\\b", re.I | re.U), 1, 4.0),
     (u"'parecia que'", re.compile(u"\\bparecia que\\b", re.I | re.U), 1, 3.0),
+    # SPEC-08: token estrangeiro/typo de geracao (lista LITERAL; "sino" fora — e PT).
+    # budget 0 = qualquer ocorrencia estoura. Espelha o TS.
+    (u"lexico estrangeiro (typo)",
+     re.compile(u"\\b(ninguño|ningún|ninguna|pero|entonces|mismo|misma|aunque|también|todavía|además)\\b", re.I | re.U),
+     0, 0.0),
 ]
 
 
@@ -949,7 +954,8 @@ def diagnostico_book_wide(projeto, total):
     # MULETAS (book-wide): 'coisa' & cia. com orcamento por 10k. Troque pelo referente.
     for nome, rx, _budget, orc10k in _MULETAS:
         n = len(rx.findall(full))
-        alvo = max(1, int(round(orc10k * palavras / 10000.0)))
+        # orc10k <= 0 = tolerancia zero (lexico estrangeiro); senao, piso 1 proporcional.
+        alvo = 0 if orc10k <= 0 else max(1, int(round(orc10k * palavras / 10000.0)))
         if n > alvo:
             acima.append("MULETA \"{}\": {}x -> reduza para <= {} (troque pela coisa concreta a que se refere)".format(nome, n, alvo))
             relatorio.append("[X] muleta {}: {}x (alvo <= {})".format(nome, n, alvo))
