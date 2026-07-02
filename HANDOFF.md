@@ -30,7 +30,10 @@ implementadas, commitadas (SEM push) e **aplicadas em produção** às ~10:38:
   fora do perfil, moldes nomeados), SPEC-08 (token estrangeiro "ninguño" invisível
   aos gates), SPEC-10 (zero-pad do digest no runner), SPEC-11 (trocar a senha
   `AtelierLivros2026` exposta em 10 docs versionados), SPEC-12 (timestamps no
-  worker.log); **teste de Wi-Fi** da SPEC-03 pendente (usuário avisa quando);
+  worker.log); **teste de Wi-Fi da SPEC-03: ✓ PASSOU** (02/07 ~12:16, queda real de
+  ~90s durante a escrita do cap 8: PID intacto, attempts=0, zero "erro de escrita no
+  banco", heartbeat agregado "voltou após 10 falha(s)", call do Claude em voo
+  sobreviveu e o job seguiu running);
   residual "coisa" ~2×/cap na origem — lever seguinte é o Fix D
   (`--revisor-craft-opus`); 2 jobs queued do MESMO projeto `da74a71e` (picker não
   duplica execução, mas vale limpar); **re-medir telemetria com o HEAD** (baseline
