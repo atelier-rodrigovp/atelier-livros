@@ -474,7 +474,7 @@ def prompt_revisao_capitulo(projeto, n, args, piso):
     # Cota da Regra 4 (ritmo) COM AS CONTAGENS REAIS deste capitulo, para o revisor
     # cobrar por NUMERO, nao por impressao.
     txt_cap = ler_arquivo(projeto, nome_cap(n))
-    cads = cadencia_acima(txt_cap)
+    cads = cadencia_acima(txt_cap, _skill_projeto(projeto))
     if cads:
         bloco_cad = ("contagem REAL deste capitulo, ACIMA do orcamento -> exija que o "
                      "editor VARIE O RITMO (funda frases curtas coladas, encadeie na "
@@ -702,7 +702,29 @@ _RE_EPIGRAMA = re.compile(u"\\b[oa]s?\\s+[A-Za-zÀ-ÿ]+\\s+(?:faz|fazia|fez|fazi
 _RE_ITALICO = re.compile(u"(?<![\\*_])([\\*_])(?![\\*_\\s])([^\\*_\\n]{1,80}?)\\1(?![\\*_])", re.U)
 # orcamento (mesmos defaults do TS ORC_CADENCIA)
 CAD = dict(curta=4, enfase=3, colados=1, staccato_frac=0.35, min_frases=8,
-           clipe_neg=1, anafora=1, epigrama=1, frag_enfase=2, italico=3, retorica=2)
+           clipe_neg=1, anafora=1, epigrama=1, frag_enfase=2, frag_colados=0,
+           italico=3, retorica=2)
+
+# Orcamento POR SKILL (espelha TS ORC_CADENCIA_POR_SKILL): o default e calibrado
+# para cadencia LONGA (Regra 4 dan-brown/vesper). Skills de cadencia RAPIDA tem a
+# frase curta como ASSINATURA ("curta e cheia" do hoover-mcfadden) — o orcamento
+# unico criminalizava a voz correta. Opt-in; quem nao esta no mapa usa o default.
+CAD_POR_SKILL = {
+    "hoover-mcfadden": dict(CAD, staccato_frac=0.55, frag_enfase=20, frag_colados=6,
+                            colados=8, clipe_neg=3, anafora=2),
+}
+
+
+def _cad_para_skill(skill):
+    return CAD_POR_SKILL.get(skill or "", CAD)
+
+
+def _skill_projeto(projeto):
+    """skill_escrita do ESTADO_LIVRO.json (fonte unica; '' quando ausente)."""
+    try:
+        return (load_state(projeto) or {}).get("skill_escrita") or ""
+    except Exception:
+        return ""
 
 
 def _sem_headings(texto):
@@ -734,39 +756,55 @@ def _eh_dialogo(f):
     return bool(re.match(u"^[—–\\-\"'“”‘’]", (f or "").strip(), re.U))
 
 
-def cadencia_acima(texto):
-    """Lista (nome, n, alvo) dos tiques de RITMO acima do orcamento. Espelha o TS."""
-    fr = dividir_frases(texto)
+def _frases_rotuladas(texto):
+    """Frases com a marca de DIALOGO do PARAGRAFO de origem (espelha o TS): a fala
+    multi-frase pertence INTEIRA ao dialogo, mesmo sem travessao na 2a frase."""
+    fr, narr = [], []
+    for par in re.split(u"\n{2,}", texto or ""):
+        dial = bool(re.match(u"^[\\s>]*[—–\\-\"'“”‘’]", par, re.U))
+        for f in dividir_frases(par):
+            fr.append(f)
+            narr.append(not dial)
+    return fr, narr
+
+
+def cadencia_acima(texto, skill=None):
+    """Lista (nome, n, alvo) dos tiques de RITMO acima do orcamento. Espelha o TS.
+    Orcamento resolvido POR SKILL (default = cadencia longa); DIALOGO nao conta
+    como tique de ritmo (fala curta e fala natural, nao staccato de narracao)."""
+    cad = _cad_para_skill(skill)
+    fr, narr = _frases_rotuladas(texto)
     lens = [_palavras_frase(x) for x in fr]
     nf = len(fr)
+    n_narr = sum(1 for x in narr if x)
     out = []
-    colados = sum(1 for i in range(1, nf) if lens[i - 1] <= CAD["curta"] and lens[i] <= CAD["curta"])
-    if colados > CAD["colados"]:
-        out.append(("fragmentos colados (<=4 palavras)", colados, CAD["colados"]))
-    curtas = sum(1 for n in lens if 0 < n <= CAD["curta"])
-    if nf >= CAD["min_frases"] and nf and curtas / nf > CAD["staccato_frac"]:
-        out.append(("staccato denso ({}% de frases curtas)".format(int(round(curtas / nf * 100))), curtas, int(round(nf * CAD["staccato_frac"]))))
-    clip = sum(1 for i, f in enumerate(fr) if lens[i] <= 3 and re.match(u"^n[ãa]o\\b", _sem_abertura(f), re.I | re.U))
-    if clip > CAD["clipe_neg"]:
-        out.append(("clipe de negacao curto", clip, CAD["clipe_neg"]))
-    ana = sum(1 for i in range(1, nf) if _primeira_palavra(fr[i - 1]) and _primeira_palavra(fr[i - 1]) == _primeira_palavra(fr[i]))
-    if ana > CAD["anafora"]:
-        out.append(("anafora (frases coladas, mesmo inicio)", ana, CAD["anafora"]))
+    colados = sum(1 for i in range(1, nf) if narr[i - 1] and narr[i] and lens[i - 1] <= cad["curta"] and lens[i] <= cad["curta"])
+    if colados > cad["colados"]:
+        out.append(("fragmentos colados (<=4 palavras)", colados, cad["colados"]))
+    curtas = sum(1 for i in range(nf) if narr[i] and 0 < lens[i] <= cad["curta"])
+    if n_narr >= cad["min_frases"] and curtas / n_narr > cad["staccato_frac"]:
+        out.append(("staccato denso ({}% de frases curtas na narracao)".format(int(round(curtas / n_narr * 100))), curtas, int(round(n_narr * cad["staccato_frac"]))))
+    clip = sum(1 for i, f in enumerate(fr) if narr[i] and lens[i] <= 3 and re.match(u"^n[ãa]o\\b", _sem_abertura(f), re.I | re.U))
+    if clip > cad["clipe_neg"]:
+        out.append(("clipe de negacao curto", clip, cad["clipe_neg"]))
+    ana = sum(1 for i in range(1, nf) if narr[i - 1] and narr[i] and _primeira_palavra(fr[i - 1]) and _primeira_palavra(fr[i - 1]) == _primeira_palavra(fr[i]))
+    if ana > cad["anafora"]:
+        out.append(("anafora (frases coladas, mesmo inicio)", ana, cad["anafora"]))
     epi = len(_RE_EPIGRAMA.findall(texto or ""))
-    if epi > CAD["epigrama"]:
-        out.append(("epigrama antitetico", epi, CAD["epigrama"]))
-    frag = sum(1 for i in range(nf) if 1 <= lens[i] <= CAD["enfase"])
-    if frag > CAD["frag_enfase"]:
-        out.append(("fragmento de enfase (Regra 4 <=1-2)", frag, CAD["frag_enfase"]))
-    fcol = sum(1 for i in range(1, nf) if 1 <= lens[i - 1] <= CAD["enfase"] and 1 <= lens[i] <= CAD["enfase"])
-    if fcol > 0:
-        out.append(("fragmentos de enfase COLADOS (Regra 4: nunca dois)", fcol, 0))
+    if epi > cad["epigrama"]:
+        out.append(("epigrama antitetico", epi, cad["epigrama"]))
+    frag = sum(1 for i in range(nf) if narr[i] and 1 <= lens[i] <= cad["enfase"])
+    if frag > cad["frag_enfase"]:
+        out.append(("fragmento de enfase (Regra 4 <=1-2)", frag, cad["frag_enfase"]))
+    fcol = sum(1 for i in range(1, nf) if narr[i - 1] and narr[i] and 1 <= lens[i - 1] <= cad["enfase"] and 1 <= lens[i] <= cad["enfase"])
+    if fcol > cad["frag_colados"]:
+        out.append(("fragmentos de enfase COLADOS (Regra 4: nunca dois)", fcol, cad["frag_colados"]))
     ital = len(_RE_ITALICO.findall(texto or ""))
-    if ital > CAD["italico"]:
-        out.append(("pensamento em italico (Regra 4 <=2-3)", ital, CAD["italico"]))
-    ret = sum(1 for f in fr if re.search(u"[?][\"'”’)\\]]*$", f, re.U) and not _eh_dialogo(f))
-    if ret > CAD["retorica"]:
-        out.append(("pergunta retorica (Regra 4 <=1-2)", ret, CAD["retorica"]))
+    if ital > cad["italico"]:
+        out.append(("pensamento em italico (Regra 4 <=2-3)", ital, cad["italico"]))
+    ret = sum(1 for i, f in enumerate(fr) if narr[i] and re.search(u"[?][\"'”’)\\]]*$", f, re.U))
+    if ret > cad["retorica"]:
+        out.append(("pergunta retorica (Regra 4 <=1-2)", ret, cad["retorica"]))
     return out
 
 
@@ -796,7 +834,7 @@ def gate_maneirismo_capitulo(projeto, n, args):
         return
     offs = maneirismos_acima(txt)
     muls = muletas_acima_cap(txt)
-    cads = cadencia_acima(txt)
+    cads = cadencia_acima(txt, _skill_projeto(projeto))
     if not offs and not muls and not cads:
         return
     lista = "; ".join(["{} {}x".format(nome, cnt) for nome, cnt in offs] +
@@ -925,7 +963,7 @@ def diagnostico_book_wide(projeto, total):
     # CADENCIA (ritmo) POR CAPITULO: staccato/colados/anafora nao fazem sentido
     # book-wide; conta por capitulo e lista os que estouram o orcamento de ritmo.
     for i, cap in enumerate(caps, 1):
-        for nome, cnt, alvo in cadencia_acima(cap):
+        for nome, cnt, alvo in cadencia_acima(cap, _skill_projeto(projeto)):
             acima.append("CADENCIA cap {}: {} {}x -> <= {} (VARIE o ritmo: funda frases curtas, encadeie na revelacao; nao so corte)".format(i, nome, cnt, alvo))
     return acima, "\n".join(relatorio)
 
@@ -1015,7 +1053,7 @@ def executar(projeto, args):
                 # Fix C (guarda deterministica): mede os tiques e o mtime do ledger ANTES da
                 # revisao delegada, para o runner confirmar depois que os tiques cairam E que
                 # a CONTINUIDADE foi gravada no estado-narrativo.md (sem o LLM reler/re-julgar).
-                cads_antes_rev = cadencia_acima(ler_arquivo(projeto, nome_cap(revisando_cap)))
+                cads_antes_rev = cadencia_acima(ler_arquivo(projeto, nome_cap(revisando_cap)), _skill_projeto(projeto))
                 _ledger = os.path.join(projeto, "estado", "estado-narrativo.md")
                 ledger_mtime_antes = os.path.getmtime(_ledger) if os.path.exists(_ledger) else 0
                 prompt = prompt_revisao_capitulo(projeto, revisando_cap, args, piso)
@@ -1072,7 +1110,7 @@ def executar(projeto, args):
         if fase == "ESCRITA" and revisando_cap is not None:
             txt_rev = ler_arquivo(projeto, nome_cap(revisando_cap))
             palavras_rev = len((txt_rev or "").split())
-            cads_depois = cadencia_acima(txt_rev)
+            cads_depois = cadencia_acima(txt_rev, _skill_projeto(projeto))
             exc = lambda cs: sum(c - a for _n, c, a in (cs or []))
             exc_antes, exc_depois = exc(cads_antes_rev), exc(cads_depois)
             piso_ok = palavras_rev >= piso

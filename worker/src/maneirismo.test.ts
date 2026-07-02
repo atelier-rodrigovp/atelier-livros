@@ -3,6 +3,7 @@ import {
   contarManeirismos, resumoManeirismo, fechoEpigramatico,
   ngramasSobrerepresentados, diagnosticarRepeticao, contarMuletas,
   dividirFrases, diagnosticarCadencia, cadenciaAcima, interioridadeSemEvento,
+  orcCadenciaParaSkill, ORC_CADENCIA,
 } from "./maneirismo.js";
 
 const TRECHO_EVANGELHO =
@@ -185,6 +186,52 @@ describe("diagnosticarCadencia — ritmo (tiques reais do livro)", () => {
       "fora de tom, sem que isso parecesse incomodar ninguém naquela hora mansa.";
     const r = diagnosticarCadencia(t);
     expect(r.acima).toBe(false);
+  });
+
+  it("DIÁLOGO não conta como tique de ritmo (fala curta é fala) — vira sinal fragDialogo", () => {
+    // Falas curtas em sequência + narração longa e sã: nada acima; falas contadas no sinal.
+    const t =
+      "— Desculpe. Ainda está aberto?\n\n— Está. Entre.\n\n— Obrigada. Já vou.\n\n" +
+      "Ela atravessou a loja devagar, medindo as prateleiras com o olhar de quem procura " +
+      "uma memória e não um produto, e o dono voltou ao jornal dobrado sobre o balcão, " +
+      "porque naquela cidade ninguém tinha pressa de vender o que o tempo mesmo traria. " +
+      "A campainha da porta descansou no silêncio morno da tarde enquanto lá fora o " +
+      "calçamento guardava o calor do meio-dia como um animal grande e manso. " +
+      "Ninguém mais entrou naquela hora, e a poeira dançava na régua de luz da vitrine, " +
+      "indiferente ao que as pessoas chamavam de pressa nas cidades maiores do vale.";
+    const r = diagnosticarCadencia(t);
+    expect(r.acima).toBe(false); // nenhum tique de narração disparado pelas falas
+    expect(r.fragDialogo).toBeGreaterThan(0); // mas o sinal existe p/ o revisor
+  });
+
+  it("ORÇAMENTO POR SKILL: prosa 'curta e cheia' do hoover reprova no default e PASSA no orçamento da skill", () => {
+    // Narração de staccato deliberado (assinatura hoover-mcfadden), sem molde de IA:
+    // ~46% de frases curtas e 5 fragmentos de ênfase espaçados (default: fragEnfase 2,
+    // staccato 35% → reprova; hoover: fragEnfase 6, staccato 55% → conforme).
+    const t =
+      "Bato uma porta na outra. Quando fecham, respiro. " +
+      "O corredor inteiro cheirava a cera velha e a alguma memória de escola que eu não pedi para ter. " +
+      "Doze. " +
+      "Era o número de passos entre a escada e a sala, o mesmo de ontem, o mesmo da semana passada, e eu contava porque contar segura as mãos. " +
+      "Contei os passos. " +
+      "A pasta continuava sobre a mesa, exatamente onde eu a deixara na sexta-feira à noite, " +
+      "e o bilhete dentro dela dizia menos do que eu precisava e mais do que eu queria saber. " +
+      "Guardei o bilhete. " +
+      "Lá fora um carro passou devagar demais para quem tem destino, e eu fiquei olhando a rua até as luzes dobrarem a esquina. " +
+      "Respirei fundo. " +
+      "Depois apaguei a luz da sala e fechei a porta com o cuidado de quem não quer acordar a própria culpa. " +
+      "Ninguém viu.";
+    const padrao = diagnosticarCadencia(t);
+    const hoover = diagnosticarCadencia(t, orcCadenciaParaSkill("hoover-mcfadden"));
+    expect(padrao.acima).toBe(true); // o orçamento único criminalizava esta voz
+    expect(hoover.acima).toBe(false); // a mesma prosa é CONFORME na skill dela
+  });
+
+  it("orcCadenciaParaSkill: skill desconhecida/ausente → default intacto", () => {
+    expect(orcCadenciaParaSkill("skill-dan-brown")).toBe(ORC_CADENCIA);
+    expect(orcCadenciaParaSkill(null)).toBe(ORC_CADENCIA);
+    expect(orcCadenciaParaSkill(undefined)).toBe(ORC_CADENCIA);
+    expect(orcCadenciaParaSkill("hoover-mcfadden").staccatoFrac).toBeGreaterThan(ORC_CADENCIA.staccatoFrac);
   });
 });
 

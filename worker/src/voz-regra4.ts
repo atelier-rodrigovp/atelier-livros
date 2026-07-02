@@ -15,7 +15,10 @@
 // Assim o ALVO que o escritor recebe é o MESMO que o gate cobra.
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { contarMuletas, type MuletaContagem } from "./maneirismo.js";
+import {
+  contarMuletas, orcCadenciaParaSkill, ORC_CADENCIA,
+  type MuletaContagem, type OrcamentoCadencia,
+} from "./maneirismo.js";
 
 // Marcador de idempotência: bloco gerido por este passo. Não duplicar.
 export const MARCADOR = "<!-- COTA-CADENCIA v1 -->";
@@ -37,8 +40,17 @@ function jaTemCota(texto: string): boolean {
   return RE_LEGADO_NUCLEO.test(t) && RE_LEGADO_ANAFORA_CLIPE.test(t) && RE_LEGADO_COISA.test(t);
 }
 
-export const SECAO_REGRA4_PERFIL =
-  `${MARCADOR}
+// Faixa "n-1–n" como o texto sempre exibiu ("≤1–2", "≤2–3"); n≤1 vira o número seco.
+const faixa = (n: number) => (n <= 1 ? `${n}` : `${n - 1}–${n}`);
+// Cláusula de fragmentos colados: default (0) mantém o texto histórico.
+const clausulaColados = (orc: OrcamentoCadencia) =>
+  orc.fragColados <= 0 ? "**NUNCA dois colados**" : `no máximo **${orc.fragColados}** pares colados`;
+
+// A cota usa os NÚMEROS DA SKILL (orcCadenciaParaSkill): o default é a Regra 4 de
+// cadência longa; skills de cadência rápida (hoover-mcfadden) recebem a folga do
+// detector — o alvo do escritor é SEMPRE o mesmo que o gate cobra.
+export function secaoRegra4Perfil(orc: OrcamentoCadencia = ORC_CADENCIA): string {
+  return `${MARCADOR}
 
 ## RITMO E COTA DE TIQUES (Regra 4 — régua DURA, alvo POSITIVO)
 
@@ -53,9 +65,9 @@ corte seco só no soco. Reação física ancorada neste corpo, nesta cena — nu
 clichê de prateleira.
 
 **Cota por capítulo (o Revisor cobra por NÚMERO — bate com o detector determinístico):**
-- **Fragmento de ênfase (frase de 1–3 palavras):** no máximo **1–2**, e **NUNCA dois colados**.
-- **Pensamento em itálico:** no máximo **2–3**, cada um para um golpe real de reconhecimento.
-- **Pergunta retórica suspensa:** no máximo **1–2**.
+- **Fragmento de ênfase (frase de 1–3 palavras):** no máximo **${faixa(orc.fragEnfase)}**, e ${clausulaColados(orc)}.
+- **Pensamento em itálico:** no máximo **${faixa(orc.italico)}**, cada um para um golpe real de reconhecimento.
+- **Pergunta retórica suspensa:** no máximo **${faixa(orc.retorica)}**.
 - **Ritmo variado conscientemente:** alterne o comprimento da frase; a revelação pode
   respirar numa frase longa e encadeada; **nunca o mesmo molde dois capítulos seguidos**.
 - **Sem clipe de negação nem anáfora:** não repita "Não X." curto como remate
@@ -71,34 +83,49 @@ Estourar a cota é reprovação estética: o capítulo é marcado para reescrita
 (funde/encadeia as frases), preservando sentido e voz. Um detector determinístico
 mede isto a cada capítulo — não é questão de impressão.
 ${MARCADOR_FIM}`;
+}
+// Compat: texto default (cadência longa) — mesmo conteúdo de sempre.
+export const SECAO_REGRA4_PERFIL = secaoRegra4Perfil();
 
-export const POLITICA_CADENCIA_ESTRUTURA =
-  `${MARCADOR}\n` +
-  `- **Regra 4 (cadência — política dura):** o capítulo é REPROVADO esteticamente se ` +
-  `estourar a cota — ritmo VARIADO por capítulo (alterne frase longa encadeada e curta), ` +
-  `com ≤2–3 pensamentos em itálico, ≤1–2 perguntas retóricas, ≤1–2 fragmentos de ênfase ` +
-  `**e nunca dois colados**; sem staccato denso, anáfora colada ou clipe de negação ` +
-  `repetido; "coisa" ≤1/cap (troque pelo referente). Instrução = **variar o ritmo** ` +
-  `(fundir frases curtas, encadear na revelação), não só cortar. Ver \`perfil-de-voz.md\`.\n` +
-  MARCADOR_FIM;
+export function politicaCadenciaEstrutura(orc: OrcamentoCadencia = ORC_CADENCIA): string {
+  return (
+    `${MARCADOR}\n` +
+    `- **Regra 4 (cadência — política dura):** o capítulo é REPROVADO esteticamente se ` +
+    `estourar a cota — ritmo VARIADO por capítulo (alterne frase longa encadeada e curta), ` +
+    `com ≤${faixa(orc.italico)} pensamentos em itálico, ≤${faixa(orc.retorica)} perguntas retóricas, ≤${faixa(orc.fragEnfase)} fragmentos de ênfase ` +
+    `${orc.fragColados <= 0 ? "**e nunca dois colados**" : `**e no máximo ${orc.fragColados} pares colados**`}; sem staccato denso, anáfora colada ou clipe de negação ` +
+    `repetido; "coisa" ≤1/cap (troque pelo referente). Instrução = **variar o ritmo** ` +
+    `(fundir frases curtas, encadear na revelação), não só cortar. Ver \`perfil-de-voz.md\`.\n` +
+    MARCADOR_FIM
+  );
+}
+// Compat: texto default.
+export const POLITICA_CADENCIA_ESTRUTURA = politicaCadenciaEstrutura();
 
 // perfil-de-voz.md: anexa a seção da cota ao fim, se ainda não existir.
-export function garantirRegra4NoPerfil(conteudo: string): { texto: string; mudou: boolean } {
+export function garantirRegra4NoPerfil(
+  conteudo: string,
+  orc: OrcamentoCadencia = ORC_CADENCIA
+): { texto: string; mudou: boolean } {
   if (jaTemCota(conteudo)) return { texto: conteudo, mudou: false };
-  return { texto: (conteudo ?? "").replace(/\s*$/, "") + "\n\n" + SECAO_REGRA4_PERFIL + "\n", mudou: true };
+  return { texto: (conteudo ?? "").replace(/\s*$/, "") + "\n\n" + secaoRegra4Perfil(orc) + "\n", mudou: true };
 }
 
 // Estrutura-do-Livro.md: injeta o bullet de cadência no topo da seção "NOTAS DE
 // EXECUÇÃO" (logo após o cabeçalho); se a seção não existir, cria uma.
-export function garantirCadenciaNaEstrutura(conteudo: string): { texto: string; mudou: boolean } {
+export function garantirCadenciaNaEstrutura(
+  conteudo: string,
+  orc: OrcamentoCadencia = ORC_CADENCIA
+): { texto: string; mudou: boolean } {
   if (jaTemCota(conteudo)) return { texto: conteudo, mudou: false };
   const t = conteudo ?? "";
+  const politica = politicaCadenciaEstrutura(orc);
   const m = /(?:^|\n)#+\s*NOTAS DE EXECU[ÇC][ÃA]O[^\n]*\n/i.exec(t);
   if (m) {
     const idx = m.index + m[0].length;
-    return { texto: t.slice(0, idx) + POLITICA_CADENCIA_ESTRUTURA + "\n\n" + t.slice(idx), mudou: true };
+    return { texto: t.slice(0, idx) + politica + "\n\n" + t.slice(idx), mudou: true };
   }
-  return { texto: t.replace(/\s*$/, "") + "\n\n## NOTAS DE EXECUÇÃO (cadência)\n\n" + POLITICA_CADENCIA_ESTRUTURA + "\n", mudou: true };
+  return { texto: t.replace(/\s*$/, "") + "\n\n## NOTAS DE EXECUÇÃO (cadência)\n\n" + politica + "\n", mudou: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -151,10 +178,24 @@ export function escanearMuletasNosModelos(conteudoPerfil: string): MuletaContage
 
 export interface VozAjuste { arquivo: string; mudou: boolean; aviso?: string }
 
+// skill_escrita do ESTADO_LIVRO.json do projeto (fonte única; null quando ausente) —
+// resolve o orçamento de cadência POR SKILL para a cota injetada.
+async function skillDoProjeto(projDir: string): Promise<string | null> {
+  try {
+    const raw = await readFile(path.join(projDir, "ESTADO_LIVRO.json"), "utf8");
+    const est = JSON.parse(raw) as { skill_escrita?: unknown };
+    return typeof est.skill_escrita === "string" && est.skill_escrita ? est.skill_escrita : null;
+  } catch {
+    return null;
+  }
+}
+
 // Garante a cota de cadência + a guarda dos modelos na fundação (idempotente) e
-// SINALIZA muleta nos parágrafos-modelo (sem reescrever prosa).
+// SINALIZA muleta nos parágrafos-modelo (sem reescrever prosa). Os números da cota
+// vêm do orçamento DA SKILL do projeto (default = cadência longa).
 export async function normalizarVozRegra4(projDir: string): Promise<VozAjuste[]> {
   const ajustes: VozAjuste[] = [];
+  const orc = orcCadenciaParaSkill(await skillDoProjeto(projDir));
 
   // perfil-de-voz.md: cota (fim) + guarda dos modelos (§2) + scan de muleta.
   const perfilPath = path.join(projDir, "perfil-de-voz.md");
@@ -162,7 +203,7 @@ export async function normalizarVozRegra4(projDir: string): Promise<VozAjuste[]>
   if (perfil0 != null) {
     let perfil = perfil0;
     let mudou = false;
-    for (const fn of [garantirRegra4NoPerfil, garantirGuardaModelos]) {
+    for (const fn of [(c: string) => garantirRegra4NoPerfil(c, orc), garantirGuardaModelos]) {
       const r = fn(perfil);
       perfil = r.texto;
       mudou = mudou || r.mudou;
@@ -182,7 +223,7 @@ export async function normalizarVozRegra4(projDir: string): Promise<VozAjuste[]>
   const estPath = path.join(projDir, "Estrutura-do-Livro.md");
   const est0 = await lerOuNull(estPath);
   if (est0 != null) {
-    const { texto, mudou } = garantirCadenciaNaEstrutura(est0);
+    const { texto, mudou } = garantirCadenciaNaEstrutura(est0, orc);
     if (mudou) await writeFile(estPath, texto, "utf8");
     ajustes.push({ arquivo: "Estrutura-do-Livro.md", mudou });
   }

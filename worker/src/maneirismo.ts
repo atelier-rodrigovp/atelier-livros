@@ -198,6 +198,24 @@ function ehDialogo(f: string): boolean {
   return /^[—–\-"'“”‘’]/.test(f.trim());
 }
 
+// Frases rotuladas com a marca de DIÁLOGO do PARÁGRAFO de origem: a fala
+// multi-frase ("— Desculpe. Ainda está aberto?") pertence INTEIRA ao diálogo,
+// mesmo que a 2ª frase não carregue o travessão. Conservador: o aparte de
+// narração dentro do parágrafo de fala também conta como diálogo (menos falso
+// positivo, nunca mais).
+function frasesRotuladas(texto: string): { fr: string[]; narr: boolean[] } {
+  const fr: string[] = [];
+  const narr: boolean[] = [];
+  for (const par of (texto ?? "").split(/\n{2,}/)) {
+    const dialogo = /^[\s>]*[—–\-"'“”‘’]/.test(par);
+    for (const f of dividirFrases(par)) {
+      fr.push(f);
+      narr.push(!dialogo);
+    }
+  }
+  return { fr, narr };
+}
+
 export interface CadenciaTique {
   nome: string;
   n: number;
@@ -208,7 +226,8 @@ export interface CadenciaTique {
 }
 export interface ResultadoCadencia {
   frases: number;
-  staccatoPct: number;        // % de frases ≤ curta palavras
+  staccatoPct: number;        // % de frases de NARRAÇÃO ≤ curta palavras
+  fragDialogo: number;        // fragmentos curtos em DIÁLOGO (só SINAL — fala curta é fala, não tique)
   tiques: CadenciaTique[];    // todos os medidos (n≥0); os com acima=true são os ofensores
   acima: boolean;             // algum tique acima do orçamento
 }
@@ -223,72 +242,99 @@ export interface OrcamentoCadencia {
   anafora: number;      // pares de anáfora colada
   epigrama: number;     // epigramas antitéticos
   fragEnfase: number;   // fragmentos de ênfase (Regra 4: ≤1–2)
+  fragColados: number;  // pares de fragmentos de ênfase colados (Regra 4: nunca dois → 0)
   italico: number;      // pensamentos em itálico (Regra 4: ≤2–3)
   retorica: number;     // perguntas retóricas suspensas (Regra 4: ≤1–2)
 }
 export const ORC_CADENCIA: OrcamentoCadencia = {
   curta: 4, enfase: 3, colados: 1, staccatoFrac: 0.35, minFrases: 8,
-  clipeNeg: 1, anafora: 1, epigrama: 1, fragEnfase: 2, italico: 3, retorica: 2,
+  clipeNeg: 1, anafora: 1, epigrama: 1, fragEnfase: 2, fragColados: 0, italico: 3, retorica: 2,
 };
+
+// Orçamento POR SKILL: o default é calibrado para cadência LONGA (Regra 4 da
+// skill-dan-brown/vésper). Skills de cadência RÁPIDA têm a frase curta como
+// ASSINATURA ("curta e cheia" do hoover-mcfadden) — o orçamento único criminalizava
+// a voz correta (capítulo conforme a craft reprovava com staccato 47%). Opt-in por
+// skill; quem não está no mapa usa o default intacto.
+// Calibração do hoover: pelo capítulo-exemplar da auditoria (julgado CONFORME à
+// craft na página): a régua contra staccato VAZIO fica na DENSIDADE (55%), nos
+// pares colados e na anáfora — a contagem absoluta de fragmentos é a própria voz
+// e ganha folga. Epigrama/itálico/retórica seguem o default (molde de IA, não voz).
+export const ORC_CADENCIA_POR_SKILL: Record<string, OrcamentoCadencia> = {
+  "hoover-mcfadden": {
+    ...ORC_CADENCIA,
+    staccatoFrac: 0.55, fragEnfase: 20, fragColados: 6, colados: 8, clipeNeg: 3, anafora: 2,
+  },
+};
+export function orcCadenciaParaSkill(skill?: string | null): OrcamentoCadencia {
+  return (skill && ORC_CADENCIA_POR_SKILL[skill]) || ORC_CADENCIA;
+}
 
 const RE_EPIGRAMA = /\b[oa]s?\s+[A-Za-zÀ-ÿ]+\s+(?:faz|fazia|fez|faziam)\s+[oa]s?\s+[A-Za-zÀ-ÿ]+\s+que\b/gi;
 
 export function diagnosticarCadencia(texto: string, orc: OrcamentoCadencia = ORC_CADENCIA): ResultadoCadencia {
   const t = texto ?? "";
-  const fr = dividirFrases(t);
+  // Diálogo NÃO conta como tique de ritmo: fala curta é fala natural, não staccato
+  // de narração ("— Desculpe. Ainda está aberto?" contava como fragmento). Fica
+  // como SINAL separado (fragDialogo) para o revisor, sem reprovar.
+  const { fr, narr } = frasesRotuladas(t);
   const lens = fr.map(palavrasFrase);
   const ex = (arr: string[]) => arr.slice(0, 3).map((s) => s.slice(0, 70));
 
-  // 1) fragmentos colados: pares adjacentes de frases ≤ curta palavras
+  // 1) fragmentos colados: pares adjacentes de frases de NARRAÇÃO ≤ curta palavras
   const coladosEx: string[] = [];
   let colados = 0;
   for (let i = 1; i < fr.length; i++) {
-    if (lens[i - 1] <= orc.curta && lens[i] <= orc.curta) {
+    if (narr[i - 1] && narr[i] && lens[i - 1] <= orc.curta && lens[i] <= orc.curta) {
       colados++;
       coladosEx.push(`${fr[i - 1]} ${fr[i]}`);
     }
   }
-  // 2) staccato: densidade de frases curtas
-  const curtas = lens.filter((n) => n > 0 && n <= orc.curta).length;
-  const staccatoPct = fr.length ? Math.round((curtas / fr.length) * 1000) / 10 : 0;
-  const staccatoAcima = fr.length >= orc.minFrases && curtas / fr.length > orc.staccatoFrac;
-  // 3) clipe de negação curto: frase ≤3 palavras começando "Não"
-  const clipes = fr.filter((f, i) => lens[i] <= 3 && /^n[ãa]o\b/i.test(semAbertura(f)));
-  // 4) anáfora: frases consecutivas com a MESMA primeira palavra
+  // 2) staccato: densidade de frases curtas NA NARRAÇÃO
+  const nNarr = narr.filter(Boolean).length;
+  const curtas = lens.filter((n, i) => narr[i] && n > 0 && n <= orc.curta).length;
+  const staccatoPct = nNarr ? Math.round((curtas / nNarr) * 1000) / 10 : 0;
+  const staccatoAcima = nNarr >= orc.minFrases && curtas / nNarr > orc.staccatoFrac;
+  // 3) clipe de negação curto: frase de narração ≤3 palavras começando "Não"
+  const clipes = fr.filter((f, i) => narr[i] && lens[i] <= 3 && /^n[ãa]o\b/i.test(semAbertura(f)));
+  // 4) anáfora: frases de narração consecutivas com a MESMA primeira palavra
   const anaforaEx: string[] = [];
   let anafora = 0;
   for (let i = 1; i < fr.length; i++) {
     const a = primeiraPalavra(fr[i - 1]);
-    if (a && a === primeiraPalavra(fr[i])) {
+    if (narr[i - 1] && narr[i] && a && a === primeiraPalavra(fr[i])) {
       anafora++;
       anaforaEx.push(`${fr[i - 1]} / ${fr[i]}`);
     }
   }
   // 5) epigrama antitético ("X fazia o Y que …")
   const epi = [...t.matchAll(RE_EPIGRAMA)].map((m) => m[0]);
-  // 6) cota da Regra 4: fragmento de ênfase (1–enfase palavras) + colados; itálico; retórica
-  const frag = fr.filter((f, i) => lens[i] >= 1 && lens[i] <= orc.enfase);
+  // 6) cota da Regra 4: fragmento de ênfase (1–enfase palavras, narração) + colados;
+  //    itálico; retórica. Fragmento em DIÁLOGO vira só sinal.
+  const frag = fr.filter((f, i) => narr[i] && lens[i] >= 1 && lens[i] <= orc.enfase);
+  const fragDialogo = fr.filter((f, i) => !narr[i] && lens[i] >= 1 && lens[i] <= orc.enfase).length;
   let fragColados = 0;
   for (let i = 1; i < fr.length; i++)
-    if (lens[i - 1] >= 1 && lens[i - 1] <= orc.enfase && lens[i] >= 1 && lens[i] <= orc.enfase) fragColados++;
+    if (narr[i - 1] && narr[i] && lens[i - 1] >= 1 && lens[i - 1] <= orc.enfase && lens[i] >= 1 && lens[i] <= orc.enfase)
+      fragColados++;
   const italicos = [...t.matchAll(RE_ITALICO)].map((m) => m[2]);
-  const retoricas = fr.filter((f) => /[?]["'”’)\]]*$/.test(f) && !ehDialogo(f));
+  const retoricas = fr.filter((f, i) => narr[i] && /[?]["'”’)\]]*$/.test(f));
 
   const mk = (nome: string, n: number, alvo: number, exemplos: string[], densidade?: number): CadenciaTique =>
     ({ nome, n, alvo, acima: n > alvo, exemplos: ex(exemplos), densidade });
 
   const tiques: CadenciaTique[] = [
     mk("fragmentos colados (≤4 palavras)", colados, orc.colados, coladosEx),
-    { nome: "staccato (frases curtas)", n: curtas, alvo: Math.round(fr.length * orc.staccatoFrac), acima: staccatoAcima, exemplos: [], densidade: staccatoPct },
+    { nome: "staccato (frases curtas)", n: curtas, alvo: Math.round(nNarr * orc.staccatoFrac), acima: staccatoAcima, exemplos: [], densidade: staccatoPct },
     mk("clipe de negação curto", clipes.length, orc.clipeNeg, clipes),
     mk("anáfora (frases coladas, mesmo início)", anafora, orc.anafora, anaforaEx),
     mk("epigrama antitético", epi.length, orc.epigrama, epi),
     mk("fragmento de ênfase (Regra 4 ≤1–2)", frag.length, orc.fragEnfase, frag),
-    mk("fragmentos de ênfase COLADOS (Regra 4: nunca dois)", fragColados, 0, []),
+    mk("fragmentos de ênfase COLADOS (Regra 4: nunca dois)", fragColados, orc.fragColados, []),
     mk("pensamento em itálico (Regra 4 ≤2–3)", italicos.length, orc.italico, italicos),
     mk("pergunta retórica (Regra 4 ≤1–2)", retoricas.length, orc.retorica, retoricas),
   ];
-  return { frases: fr.length, staccatoPct, tiques, acima: tiques.some((q) => q.acima) };
+  return { frases: fr.length, staccatoPct, fragDialogo, tiques, acima: tiques.some((q) => q.acima) };
 }
 
 // Só os tiques de cadência ACIMA do orçamento (para gate/relatório).
