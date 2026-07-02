@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Coins, Gauge, RotateCcw, Timer, Zap } from "lucide-react";
+import { Activity, AlertTriangle, Coins, Gauge, PauseCircle, RotateCcw, Timer, Zap } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
 
@@ -23,6 +23,15 @@ interface Telemetria {
 }
 type Row = { projectId: string; titulo: string; tel: Telemetria };
 
+// Progresso que o worker grava em jobs.progresso (setProgress).
+type Progresso = {
+  fase?: string; cap_atual?: number; total?: number; nota?: number | null; palavras?: number;
+  retry_at?: string | null; aguardando_reset?: boolean; motivo?: string; continua?: boolean;
+};
+type JobAtivo = { project_id: string; status: string; progresso: Progresso | null; created_at: string };
+// Projeto EM PRODUÇÃO agora: escrevendo/revisão OU com job escrever_livro ativo.
+type Vivo = { projectId: string; titulo: string; projStatus: string; job?: JobAtivo; tel?: Telemetria };
+
 const fmtTok = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}k` : String(n));
 const rotuloPapel = (p: string) =>
   p.replace("orquestrador/inline:", "orquestrador ").replace("subagente:", "subagente ")
@@ -41,23 +50,142 @@ function Kpi({ label, valor, sub, Icon, tone }: { label: string; valor: string; 
   );
 }
 
+// Estado derivado do job ativo: rodando / na fila / pausado (limite do Max).
+function statusVivo(v: Vivo): { label: string; dot: string; detail?: string } {
+  const j = v.job;
+  const pg = j?.progresso ?? {};
+  const retry = pg.retry_at ? Date.parse(pg.retry_at) : NaN;
+  const pausado = j?.status === "queued" && (pg.aguardando_reset || (!Number.isNaN(retry) && retry > Date.now()));
+  if (pausado) {
+    const hh = !Number.isNaN(retry) ? new Date(retry).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : null;
+    return { label: "Pausado", dot: "bg-amber-500", detail: `${pg.motivo ?? "aguardando reset do Max"}${hh ? ` · retoma ~${hh}` : ""}` };
+  }
+  if (j?.status === "running") return { label: "Escrevendo", dot: "bg-emerald-500 animate-pulse" };
+  if (j?.status === "queued") return { label: "Na fila", dot: "bg-sky-500" };
+  return { label: "Aguardando", dot: "bg-muted-foreground/40" };
+}
+
+// Seção "Em produção agora": comportamento de consumo AO VIVO dos projetos escrevendo.
+function ProducaoAgora({ vivos }: { vivos: Vivo[] }) {
+  return (
+    <div className="space-y-3">
+      <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+        <Activity className="h-4 w-4 text-emerald-500" /> Em produção agora
+        <span className="text-sm font-normal text-muted-foreground">({vivos.length})</span>
+      </h2>
+      {vivos.length === 0 ? (
+        <p className="rounded-xl border border-dashed py-8 text-center text-sm text-muted-foreground">
+          Nenhum projeto escrevendo no momento.
+        </p>
+      ) : (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {vivos.map((v) => {
+            const st = statusVivo(v);
+            const pg = v.job?.progresso ?? {};
+            const cap = Number(pg.cap_atual ?? 0);
+            const total = Number(pg.total ?? 0);
+            const tel = v.tel;
+            const tp = tel?.throughput;
+            const tokCap = tel && cap > 0 ? tel.totais.output / cap : 0;
+            const projTotal = tel && cap > 0 && total > 0 ? (tel.totais.output / cap) * total : 0;
+            return (
+              <div key={v.projectId} className="rounded-xl border bg-card p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="min-w-0 truncate font-semibold">{v.titulo}</h3>
+                  <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className={`inline-block h-2 w-2 rounded-full ${st.dot}`} /> {st.label}
+                  </span>
+                </div>
+                {st.detail && (
+                  <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-500">
+                    <PauseCircle className="h-3 w-3" /> {st.detail}
+                  </p>
+                )}
+
+                {/* Progresso */}
+                <div className="mt-3">
+                  <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+                    <span>{pg.fase ?? "—"}{cap || total ? ` · ${cap}/${total || "?"} cap` : ""}</span>
+                    {pg.palavras ? <span className="tabular-nums">{fmtTok(pg.palavras)} palavras</span> : null}
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div className="h-full bg-emerald-500/70" style={{ width: `${total ? Math.min(100, (cap / total) * 100) : 0}%` }} />
+                  </div>
+                </div>
+
+                {/* Consumo */}
+                {tel && tp ? (
+                  <div className="mt-3 space-y-2 border-t pt-3">
+                    <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                      <div><div className="text-muted-foreground">output</div><div className="font-medium tabular-nums">{fmtTok(tel.totais.output)}</div></div>
+                      <div><div className="text-muted-foreground">tokens/cap</div><div className="font-medium tabular-nums">{tokCap ? fmtTok(Math.round(tokCap)) : "—"}</div></div>
+                      <div><div className="text-muted-foreground">custo-proxy</div><div className="font-medium tabular-nums">${tel.custo_proxy_usd.toFixed(0)}</div></div>
+                      <div><div className="text-muted-foreground">proj. p/ livro</div><div className="font-medium tabular-nums">{projTotal ? fmtTok(Math.round(projTotal)) : "—"}</div></div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                      <span className={`flex items-center gap-1 tabular-nums ${tp.restarts > 15 ? "text-red-600 dark:text-red-500" : "text-muted-foreground"}`}>
+                        <RotateCcw className="h-3 w-3" />{tp.restarts} restarts
+                      </span>
+                      <span className={`flex items-center gap-1 tabular-nums ${tp.pausas_falso_limite > 0 ? "text-amber-600 dark:text-amber-500" : "text-muted-foreground"}`}>
+                        <Timer className="h-3 w-3" />{tp.pausas_falso_limite} falso-limite
+                      </span>
+                      {tp.hard_fail_32k > 0 && <span className="text-red-600 dark:text-red-500">{tp.hard_fail_32k} 32k-fail</span>}
+                      {tel.gargalo && <span className="text-muted-foreground">gargalo: <span className="font-medium text-foreground">{rotuloPapel(tel.gargalo.papel)}</span> {tel.gargalo.pct_output}%</span>}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">medido ao fim de cada run · última: {new Date(tel.gerado_em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</p>
+                  </div>
+                ) : (
+                  <p className="mt-3 border-t pt-3 text-[11px] text-muted-foreground">Consumo ainda não medido — grava ao fim do 1º run do runner.</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Observabilidade() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [vivos, setVivos] = useState<Vivo[]>([]);
   const [carregando, setCarregando] = useState(true);
 
   const carregar = useCallback(async () => {
-    const [{ data: tels }, { data: projs }] = await Promise.all([
+    const [{ data: tels }, { data: projs }, { data: ativos }] = await Promise.all([
       supabase.from("jobs").select("project_id,payload").eq("tipo", "telemetria"),
-      supabase.from("projects").select("id,titulo"),
+      supabase.from("projects").select("id,titulo,status"),
+      supabase.from("jobs").select("project_id,status,progresso,created_at")
+        .eq("tipo", "escrever_livro").in("status", ["running", "queued"]).order("created_at", { ascending: false }),
     ]);
     const titulo: Record<string, string> = {};
-    for (const p of (projs as { id: string; titulo: string }[]) ?? []) titulo[p.id] = p.titulo;
+    const projStatus: Record<string, string> = {};
+    for (const p of (projs as { id: string; titulo: string; status: string }[]) ?? []) {
+      titulo[p.id] = p.titulo; projStatus[p.id] = p.status;
+    }
+    const telOf: Record<string, Telemetria> = {};
     const out: Row[] = [];
     for (const t of (tels as { project_id: string; payload: Telemetria }[]) ?? []) {
-      if (t.payload?.totais) out.push({ projectId: t.project_id, titulo: titulo[t.project_id] ?? "—", tel: t.payload });
+      if (t.payload?.totais) { telOf[t.project_id] = t.payload; out.push({ projectId: t.project_id, titulo: titulo[t.project_id] ?? "—", tel: t.payload }); }
     }
     out.sort((a, b) => b.tel.custo_proxy_usd - a.tel.custo_proxy_usd);
     setRows(out);
+
+    // Job ativo por projeto (running vence queued; o mais recente).
+    const jobOf: Record<string, JobAtivo> = {};
+    for (const j of (ativos as JobAtivo[]) ?? []) {
+      const cur = jobOf[j.project_id];
+      if (!cur || (j.status === "running" && cur.status !== "running")) jobOf[j.project_id] = j;
+    }
+    const idsVivos = new Set<string>([
+      ...Object.keys(jobOf),
+      ...Object.entries(projStatus).filter(([, s]) => s === "escrevendo" || s === "revisao").map(([id]) => id),
+    ]);
+    const rank = (v: Vivo) => (v.job?.status === "running" ? 0 : v.job?.status === "queued" ? 1 : 2);
+    const vv: Vivo[] = [...idsVivos].map((id) => ({
+      projectId: id, titulo: titulo[id] ?? "—", projStatus: projStatus[id] ?? "—", job: jobOf[id], tel: telOf[id],
+    })).sort((a, b) => rank(a) - rank(b));
+    setVivos(vv);
     setCarregando(false);
   }, []);
 
@@ -94,11 +222,13 @@ export default function Observabilidade() {
         </p>
       </div>
 
+      {!carregando && <ProducaoAgora vivos={vivos} />}
+
       {carregando ? (
         <p className="text-muted-foreground">Carregando telemetria…</p>
       ) : rows.length === 0 ? (
-        <div className="rounded-xl border border-dashed py-16 text-center text-muted-foreground">
-          Sem telemetria ainda. Rode <code className="rounded bg-muted px-1">npx tsx scripts/backfill-telemetria.ts</code> no worker, ou escreva um capítulo.
+        <div className="rounded-xl border border-dashed py-12 text-center text-muted-foreground">
+          Sem telemetria histórica ainda — ela é gravada ao fim de cada run do runner (ou rode <code className="rounded bg-muted px-1">npx tsx scripts/backfill-telemetria.ts</code>).
         </div>
       ) : (
         <>
@@ -110,7 +240,7 @@ export default function Observabilidade() {
           </div>
 
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold tracking-tight">Por projeto — gargalo destacado</h2>
+            <h2 className="text-lg font-semibold tracking-tight">Histórico por projeto — gargalo destacado</h2>
             {rows.map((r) => {
               const papeis = Object.entries(r.tel.por_papel).sort((a, b) => b[1].custo_usd - a[1].custo_usd);
               const maxCusto = papeis[0]?.[1].custo_usd || 1;
