@@ -27,6 +27,7 @@ import { normalizarModelosAgentes } from "./modelos-agentes.js";
 import { normalizarVozRegra4 } from "./voz-regra4.js";
 import { normalizarCraftSkill } from "./craft-skill.js";
 import { normalizarCraftNosAgentes } from "./craft-agentes.js";
+import { exigenciasParaSkill, normalizarExigenciasSkill } from "./exigencias-skill.js";
 import { hidratarWorkDir } from "./hidratar.js";
 import { coletarTelemetria } from "./telemetria.js";
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
@@ -452,6 +453,9 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
         "e TRADUZA o motor + as regras em ALVOS CONCRETOS E POSITIVOS no perfil-de-voz.md (com exemplos) e nas Notas de Execução " +
         "da Estrutura-do-Livro.md. O perfil NÃO pode ser voz genérico-literária: é a voz DESTA skill para esta obra.\n"
       : "") +
+    // SPEC-DB1/DB3: exigências estruturais por skill (matriz de fios, colunas
+    // POV/Dia-Hora, dossiê factual) — skill sem entrada não adiciona nada.
+    (exigenciasParaSkill(proj.skill_escrita)?.promptFundacao ?? "") +
     "- Grave a SEMENTE ESTADO_LIVRO.json na raiz, já na fase ESCRITA, com: titulo, total_capitulos_previstos " +
     "(número de capítulos da Estrutura), skill_escrita" +
     (proj.skill_escrita ? ` ('${proj.skill_escrita}')` : " (null)") +
@@ -494,6 +498,12 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
     const a = await normalizarCraftNosAgentes(path.join(dir, ".claude", "agents"));
     if (a.escritor) console.log("[craft] livro-escritor: leitura de craft por capítulo injetada");
     if (a.revisor) console.log("[craft] livro-revisor: veredito de propulsão injetado");
+  }
+  // Exigências estruturais por skill (rotação de fios, spec completa no editor,
+  // fato-vs-dossiê no revisor) — no-op para skill sem entrada. Idempotente.
+  for (const e of await normalizarExigenciasSkill(dir, proj.skill_escrita)) {
+    if (e.mudou) console.log(`[exigencias] ${e.arquivo}: bloco injetado`);
+    if (e.aviso) console.warn(`[exigencias] AVISO ${e.arquivo}: ${e.aviso}`);
   }
 
   // Sync: sobe a fundação ao Storage
@@ -726,6 +736,12 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     const a = await normalizarCraftNosAgentes(path.join(dir, ".claude", "agents"));
     if (a.escritor) console.log("[craft] livro-escritor: leitura de craft por capítulo injetada");
     if (a.revisor) console.log("[craft] livro-revisor: veredito de propulsão injetado");
+  }
+  // Exigências estruturais por skill (rotação/spec completa/dossiê) — projetos vivos
+  // ganham a fiação do próximo capítulo em diante; no-op p/ skill sem entrada.
+  for (const e of await normalizarExigenciasSkill(dir, proj.skill_escrita)) {
+    if (e.mudou) console.log(`[exigencias] ${e.arquivo}: bloco injetado`);
+    if (e.aviso) console.warn(`[exigencias] AVISO ${e.arquivo}: ${e.aviso}`);
   }
   // Pré-passe: limpa meta-texto já no disco antes do runner remontar manuscrito/EPUB.
   await sanitizarPastaCapitulos(path.join(dir, "manuscrito"));

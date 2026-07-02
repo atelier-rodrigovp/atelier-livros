@@ -436,7 +436,12 @@ def prompt_escrita_capitulo(n, piso):
         "1) Leia, para fidelidade: Biblia-da-Obra.md, Mapa-de-Personagens.md, "
         "a LINHA do Capitulo {n} em Estrutura-do-Livro.md (tier, PdV, beat), "
         "perfil-de-voz.md e estado/estado-narrativo.md (ledger + Mapa de "
-        "Conhecimento do Leitor / 'O LEITOR JA SABE'). DENTRO do perfil-de-voz.md, leia "
+        "Conhecimento do Leitor / 'O LEITOR JA SABE'). Se existir "
+        "specs/Spec-Capitulo-{n:02d}.md, ela e a SPEC CANONICA do capitulo: cumpra "
+        "Fio de POV, Dia/Hora corrente e o plano de Montagem (corte de/para no pico). "
+        "Se existir dossie-factual.md, TODO fato do mundo real usado na prosa vem de "
+        "la (status VERIFICADO) ou entra MARCADO como hipotese na propria cena — "
+        "nunca fato real de memoria parametrica. DENTRO do perfil-de-voz.md, leia "
         "e SIGA o bloco '## CRAFT DA SKILL' (marcador CRAFT-SKILL): e o motor + as regras "
         "da skill (alvo do escritor), nao decoracao — o capitulo precisa CUMPRI-LO "
         "(propulsao, montagem/corte de cena, exposicao dramatizada, interioridade com "
@@ -730,6 +735,82 @@ def _skill_projeto(projeto):
         return (load_state(projeto) or {}).get("skill_escrita") or ""
     except Exception:
         return ""
+
+
+# ----------------------------------------------------------------------------
+# SPEC-DB2 — gate deterministico de SPEC por capitulo (skills EXIGENTES).
+# Espelha worker/src/exigencias-skill.ts (EXIGENCIAS_ESTRUTURAIS_POR_SKILL):
+# skill sem entrada = gate INERTE. Filosofia bounded: spec ausente/incompleta
+# vira UMA re-geracao dirigida (marcador .try); na 2a falha aceita com aviso alto.
+# ----------------------------------------------------------------------------
+DIR_SPECS = "specs"
+EXIGE_SPEC_POR_SKILL = {
+    "skill-dan-brown": dict(campos=["Fio de POV", "Dia/Hora"], max_mesmo_fio=3),
+}
+
+
+def _spec_path(projeto, n):
+    return os.path.join(projeto, DIR_SPECS, "Spec-Capitulo-{:02d}.md".format(int(n)))
+
+
+def _spec_try_marker(projeto, n):
+    return os.path.join(projeto, DIR_SPECS, "_spec-{:02d}.try".format(int(n)))
+
+
+def _fio_da_spec(texto):
+    """Extrai o valor do campo 'Fio de POV' (ou 'POV / fio') de uma spec."""
+    m = re.search(u"(?:Fio de POV|POV\\s*/\\s*fio)[^:\\n]*:\\s*\\**\\s*([^\\n*]+)", texto or "", re.I | re.U)
+    return m.group(1).strip().lower() if m else ""
+
+
+def gate_spec_capitulo(projeto, n):
+    """None = spec OK (ou skill sem exigencia). String = motivo da reprovacao."""
+    exig = EXIGE_SPEC_POR_SKILL.get(_skill_projeto(projeto))
+    if not exig:
+        return None
+    txt = ""
+    try:
+        with open(_spec_path(projeto, n), "r", encoding="utf-8") as fh:
+            txt = fh.read()
+    except OSError:
+        return "spec ausente (specs/Spec-Capitulo-{:02d}.md)".format(int(n))
+    faltam = [c for c in exig["campos"] if c.lower() not in txt.lower()]
+    if faltam:
+        return "spec sem campo(s): {}".format(", ".join(faltam))
+    # rotacao: se os N anteriores tem o MESMO fio e este repete, exige justificativa
+    fio = _fio_da_spec(txt)
+    if fio:
+        anteriores = []
+        for k in range(int(n) - exig["max_mesmo_fio"], int(n)):
+            if k < 1:
+                continue
+            try:
+                with open(_spec_path(projeto, k), "r", encoding="utf-8") as fh:
+                    anteriores.append(_fio_da_spec(fh.read()))
+            except OSError:
+                anteriores.append(None)
+        if (len(anteriores) == exig["max_mesmo_fio"] and all(a == fio for a in anteriores)
+                and "justificativa de fio" not in txt.lower()):
+            return ("{}o capitulo consecutivo no fio '{}' sem 'Justificativa de fio:'"
+                    .format(exig["max_mesmo_fio"] + 1, fio))
+    return None
+
+
+def prompt_gerar_spec(n, motivo):
+    return (
+        PREAMBULO +
+        "\nFASE ESCRITA — PRE-REQUISITO: a spec do Capitulo {n} reprovou no gate "
+        "deterministico ({motivo}). NAO escreva o capitulo.\n"
+        "1) Delegue ao subagente 'livro-editor' via Task: materialize/corrija "
+        "specs/Spec-Capitulo-{n:02d}.md no formato 'SPEC COMPLETA' definido no proprio "
+        "agente (Fio de POV, Dia/Hora corrente, Montagem corte de/para, Forma "
+        "anti-mesmice, Notas de precisao factual puxadas de dossie-factual.md se "
+        "existir). Use a LINHA do Capitulo {n} na Estrutura-do-Livro.md, a MATRIZ DE "
+        "FIOS e o estado/estado-narrativo.md como fontes.\n"
+        "2) Se o fio repetir os {n_ant} capitulos anteriores, ou troque o fio (se a "
+        "Estrutura permitir) ou inclua a linha 'Justificativa de fio: <por que>'.\n"
+        "3) NAO escreva prosa de capitulo nesta sessao."
+    ).format(n=int(n), motivo=motivo, n_ant=3)
 
 
 def _sem_headings(texto):
@@ -1071,7 +1152,21 @@ def executar(projeto, args):
                     continue
                 log(projeto, "--- ESCRITA: capitulo alvo = {} (validos={}/{}) ---".format(
                     alvo, len(capitulos_validos(projeto, tot, piso)), tot))
-                prompt = prompt_escrita_capitulo(alvo, piso)
+                # SPEC-DB2: gate deterministico de spec (skills exigentes; inerte p/ demais).
+                motivo_spec = gate_spec_capitulo(projeto, alvo)
+                if motivo_spec:
+                    marker = _spec_try_marker(projeto, alvo)
+                    if not os.path.exists(marker):
+                        os.makedirs(os.path.join(projeto, DIR_SPECS), exist_ok=True)
+                        with open(marker, "w", encoding="utf-8") as fh:
+                            fh.write(agora())
+                        log(projeto, "GATE SPEC cap {}: {} -> pedindo SPEC COMPLETA ao livro-editor (bounded).".format(alvo, motivo_spec))
+                        prompt = prompt_gerar_spec(alvo, motivo_spec)
+                    else:
+                        log(projeto, "AVISO ALTO: spec do cap {} segue reprovada ({}) apos 1 re-geracao — escrevendo assim mesmo (bounded, nao bloqueia).".format(alvo, motivo_spec))
+                        prompt = prompt_escrita_capitulo(alvo, piso)
+                else:
+                    prompt = prompt_escrita_capitulo(alvo, piso)
         elif fase == "REVIEW":
             prompt = prompt_review(iter_before + 1)
         elif fase == "REESCRITA":

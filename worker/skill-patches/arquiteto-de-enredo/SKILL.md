@@ -82,6 +82,11 @@ definidos. Termina quando todos fecham (tipicamente 18–35 perguntas).
    verbal; imagem de abertura; **imagem/metáfora-mestra do livro inteiro
    (controlling image)** — uma imagem de controle que recorre com sentido ao longo
    da obra (não decoração); tier dos capítulos.
+   **PERGUNTA CONDICIONAL (montagem paralela — skills exigentes, ex.
+   `skill-dan-brown`):** se a skill de escrita escolhida pedir montagem paralela,
+   pergunte em botões: **quantos fios de POV (2–4)?** e, por fio: personagem,
+   **localidade-base**, função e relógio-dono; e onde os fios **convergem**.
+   Registre como MATRIZ DE FIOS (ver fase de geração).
    **PERGUNTA OBRIGATÓRIA (tamanho em páginas E capítulos):** pergunte SEMPRE, em
    botões, **(a) quantas páginas** (impresso, ~275 palavras/página) e **(b)
    quantos capítulos**. Converta e confirme na frente do autor:
@@ -181,6 +186,13 @@ Quando os 8 blocos fecharem, antes de gerar:
    - `Mapa-de-Personagens.md` — Tabela de Pistas; **FUNÇÃO NARRATIVA / FIO /
      ENTRELAÇA COM** por apoio; **Mapa de Entrelaçamento** (REFERÊNCIA EMBUTIDA B).
    - `Estrutura-do-Livro.md` — cada capítulo com `tier` (default `pivo`).
+     **Quando a skill_escrita tiver exigências estruturais (ex. `skill-dan-brown`):**
+     a tabela de capítulos ganha colunas **POV** e **Dia/Hora**, e o arquivo abre
+     com a seção **`<!-- MATRIZ-FIOS v1 -->`** (2–4 fios: personagem,
+     localidade-base, função, relógio-dono, ponto de convergência) — é dela que as
+     specs puxam o Fio de POV. Gere também **`dossie-factual.md`** (fatos reais por
+     locação/tema, cada um `VERIFICADO (fonte: …)` ou `HIPÓTESE`; sem fonte ⇒
+     HIPÓTESE — é a única fonte de "real" do livro).
    - `estado/estado.json` + `estado/estado-legivel.md` — com o bloco
      `"densidade"` (REFERÊNCIA EMBUTIDA B).
    - `estado/estado-narrativo.md` — o ledger, com a seção
@@ -399,8 +411,19 @@ Regra de saúde: **nenhum bloco prolongado com fio único** (assinatura do meio
 arrastado).
 
 ## Specs que matam o esticar
-A spec de cada capítulo ganha:
+A spec de cada capítulo ganha (os 5 primeiros campos são OBRIGATÓRIOS quando a
+skill_escrita tiver exigências estruturais, ex. `skill-dan-brown` — o runner tem
+gate determinístico que reprova spec incompleta):
 ```
+- Fio de POV: <fio da MATRIZ DE FIOS; ao repetir o 3º consecutivo, incluir a linha
+  'Justificativa de fio: <por quê>'>
+- Dia/Hora corrente: <DIA N — HHhMM (relógio comprimido, coerente com o ledger)>
+## Montagem
+- Corte de/para: <de que fio viemos → para qual vamos> · Onde cortar: <o pico>
+## Forma (anti-mesmice)
+<como este capítulo difere dos ~5 anteriores (formas_recentes)>
+## Notas de precisão factual
+<2–3 fatos de dossie-factual.md que o capítulo toca, com status VERIFICADO/HIPÓTESE>
 ## FIOS A AVANÇAR NESTE CAPÍTULO
 - Fio principal: <passo>
 - Subtrama ativa: <passo>
