@@ -116,8 +116,16 @@ enriquecidos (hoover: 3 relógios nomeados + DIA/HORA; romantasy: alvos RM3 + an
 DoD verde: vitest (138 testes; `exigencias-skill.test.ts` = 19), `tsc --noEmit`=0, gate
 funcional py (hoover accent-insensitive, rotação de POV romantasy, dan-brown regressão,
 skill inerte), sweep sintético (injeta+sinaliza+idempotente+no-op), `py_compile` do runner.
-⚠️ **`instalar-skills.ps1` + restart do worker PENDENTES** (código no HEAD ≠ produção; o
-runner/skill em produção ainda é o anterior até reinstalar+reiniciar).
+**Prova na página (2 subagentes opus, 3 caps/skill):** hoover e romantasy **6/6 caps passam**
+o detector; "coisa" desabou (hoover 7/3/2→1/1/1); todas as assinaturas garantidas com trecho.
+Achado honesto: a estrutura nasce correta; a higiene de ritmo/muleta exige 1–2 passes de
+refino (o que o gate por capítulo cobra). **INSTALADO EM PRODUÇÃO (2026-07-03 ~14:30 local):**
+`instalar-skills.ps1` rodado (backup `~/.claude/skill-backups/20260703143035/`; diff
+patch↔instalado = vazio nos 3; banner hoover no instalado) + worker reiniciado via
+`AtelierWorker` (conectado `17:30:38Z`, 1 instância). ⚠️ **Resume do `e45d6f6e` pendente**: o
+worker subiu limpo mas não re-reivindicou o job (anomalia PRÉ-EXISTENTE — a instância das
+16:33Z também ficou ~1h sem retomar; independe do deploy). Push dos 13 commits (`0c71887..HEAD`)
+retido para autorização do autor com as provas.
 
 
 Plataforma que orquestra agentes do Claude Code para produzir livros (front
