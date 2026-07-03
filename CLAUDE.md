@@ -122,9 +122,12 @@ Achado honesto: a estrutura nasce correta; a higiene de ritmo/muleta exige 1–2
 refino (o que o gate por capítulo cobra). **INSTALADO EM PRODUÇÃO (2026-07-03 ~14:30 local):**
 `instalar-skills.ps1` rodado (backup `~/.claude/skill-backups/20260703143035/`; diff
 patch↔instalado = vazio nos 3; banner hoover no instalado) + worker reiniciado via
-`AtelierWorker` (conectado `17:30:38Z`, 1 instância). ⚠️ **Resume do `e45d6f6e` pendente**: o
-worker subiu limpo mas não re-reivindicou o job (anomalia PRÉ-EXISTENTE — a instância das
-16:33Z também ficou ~1h sem retomar; independe do deploy). Push dos 13 commits (`0c71887..HEAD`)
+`AtelierWorker` (conectado `17:30:38Z`, 1 instância). ⚠️ **Resume do `e45d6f6e` NÃO é do deploy**: a
+produção está GLOBALMENTE PAUSADA — `worker_control.enabled=false` (setado 2026-07-03T13:12:34Z,
+via o toggle da web), ~4h ANTES do deploy. Com a flag false, `processamentoAtivo()` (index.ts:127)
+parqueia o loop e nada é reivindicado (a fila está sã: o picker escolhe `e45d6f6e`; 3 candidatos
+claimables). Religar = toggle na web / `worker_control.enabled=true` (confirmar se a pausa não é
+intencional). Ao religar, o cap 21 retoma no runner novo. Push dos 14 commits (`0c71887..HEAD`)
 retido para autorização do autor com as provas.
 
 
