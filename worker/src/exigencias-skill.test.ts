@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   exigenciasParaSkill, garantirRotacaoNaEstrutura, garantirSpecCompletaNoEditor,
-  garantirFatoDossieNoRevisor, MARCADOR_ROTACAO, MARCADOR_SPEC_COMPLETA, MARCADOR_FATO_DOSSIE,
+  garantirFatoDossieNoRevisor, garantirBlocoRevisorSkill,
+  MARCADOR_ROTACAO, MARCADOR_SPEC_COMPLETA, MARCADOR_FATO_DOSSIE,
+  MARCADOR_RELOGIOS_NARRADORA, MARCADOR_ROTACAO_POV, MARCADOR_CUSTO_ESCALA,
 } from "./exigencias-skill.js";
 
 const contar = (s: string, sub: string) => s.split(sub).length - 1;
@@ -10,10 +12,12 @@ const EDITOR = "---\nname: livro-editor\nmodel: haiku\n---\n## Spec\n- POV / fio
 const REVISOR = "---\nname: livro-revisor\nmodel: sonnet\n---\n## Checklist\n- [ ] PdV.\n";
 
 describe("exigenciasParaSkill — opt-in absoluto", () => {
-  it("dan-brown tem entrada; as demais são NO-OP", () => {
+  it("dan-brown/hoover/romantasy têm entrada; as demais são NO-OP", () => {
     expect(exigenciasParaSkill("skill-dan-brown")?.dossie).toBe(true);
+    expect(exigenciasParaSkill("hoover-mcfadden")?.marcadorNotas).toBe(MARCADOR_RELOGIOS_NARRADORA);
+    expect(exigenciasParaSkill("skill-romantasy")?.fios).toEqual({ min: 2, max: 2 });
     expect(exigenciasParaSkill("skill-jk-rowling")).toBeNull();
-    expect(exigenciasParaSkill("hoover-mcfadden")).toBeNull();
+    expect(exigenciasParaSkill("vesper-escritor-de-capitulos")).toBeNull();
     expect(exigenciasParaSkill(null)).toBeNull();
     expect(exigenciasParaSkill(undefined)).toBeNull();
   });
@@ -21,6 +25,7 @@ describe("exigenciasParaSkill — opt-in absoluto", () => {
     expect(garantirRotacaoNaEstrutura(ESTRUTURA, "skill-jk-rowling").mudou).toBe(false);
     expect(garantirSpecCompletaNoEditor(EDITOR, null).mudou).toBe(false);
     expect(garantirFatoDossieNoRevisor(REVISOR, "vesper-escritor-de-capitulos").mudou).toBe(false);
+    expect(garantirBlocoRevisorSkill(REVISOR, "skill-jk-rowling").mudou).toBe(false);
   });
 });
 
@@ -75,5 +80,72 @@ describe("garantirFatoDossieNoRevisor (dan-brown)", () => {
     const um = garantirFatoDossieNoRevisor(REVISOR, "skill-dan-brown").texto;
     expect(garantirFatoDossieNoRevisor(um, "skill-dan-brown").mudou).toBe(false);
     expect(contar(um, MARCADOR_FATO_DOSSIE)).toBe(1);
+  });
+  it("hoover/romantasy (dossie=false) → no-op", () => {
+    expect(garantirFatoDossieNoRevisor(REVISOR, "hoover-mcfadden").mudou).toBe(false);
+    expect(garantirFatoDossieNoRevisor(REVISOR, "skill-romantasy").mudou).toBe(false);
+  });
+});
+
+describe("SPEC-HM1/HM2 — hoover (relógios + narradora + pistas + DIA/HORA)", () => {
+  it("Estrutura: injeta RELOGIOS-NARRADORA (DIA/HORA avança, relógio move, presente)", () => {
+    const r = garantirRotacaoNaEstrutura(ESTRUTURA, "hoover-mcfadden");
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toContain(MARCADOR_RELOGIOS_NARRADORA);
+    expect(r.texto).toMatch(/DIA\/HORA corrente avança em toda spec/);
+    expect(r.texto).toMatch(/≥1 relógio da MATRIZ DE RELÓGIOS move por capítulo/);
+    expect(r.texto).toMatch(/1ª pessoa PRESENTE/);
+  });
+  it("Estrutura: idempotente (marcador 1×)", () => {
+    const um = garantirRotacaoNaEstrutura(ESTRUTURA, "hoover-mcfadden").texto;
+    expect(garantirRotacaoNaEstrutura(um, "hoover-mcfadden").mudou).toBe(false);
+    expect(contar(um, MARCADOR_RELOGIOS_NARRADORA)).toBe(1);
+  });
+  it("Editor: SPEC COMPLETA com Relógios/Pistas/Narradora/Dia-Hora/Gancho", () => {
+    const r = garantirSpecCompletaNoEditor(EDITOR, "hoover-mcfadden");
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toContain(MARCADOR_SPEC_COMPLETA);
+    expect(r.texto).toMatch(/Dia\/Hora corrente/);
+    expect(r.texto).toMatch(/\*\*Relógios:\*\*/);
+    expect(r.texto).toMatch(/\*\*Pistas:\*\*/);
+    expect(r.texto).toMatch(/\*\*Narradora:\*\*/);
+    expect(r.texto).toMatch(/\*\*Gancho:\*\*/);
+  });
+  it("Revisor: sem bloco extra (fair-play fica no LLM) → garantirBlocoRevisorSkill no-op", () => {
+    expect(garantirBlocoRevisorSkill(REVISOR, "hoover-mcfadden").mudou).toBe(false);
+  });
+});
+
+describe("SPEC-RM1/RM2 — romantasy (POV duplo + custo-escala + slow burn)", () => {
+  it("Estrutura: injeta ROTACAO-POV (nunca 2 caps no mesmo amante)", () => {
+    const r = garantirRotacaoNaEstrutura(ESTRUTURA, "skill-romantasy");
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toContain(MARCADOR_ROTACAO_POV);
+    expect(r.texto).toMatch(/nunca 2 capítulos seguidos no mesmo amante/);
+    expect(r.texto).toMatch(/Justificativa de POV/);
+  });
+  it("Estrutura: idempotente (marcador 1×)", () => {
+    const um = garantirRotacaoNaEstrutura(ESTRUTURA, "skill-romantasy").texto;
+    expect(garantirRotacaoNaEstrutura(um, "skill-romantasy").mudou).toBe(false);
+    expect(contar(um, MARCADOR_ROTACAO_POV)).toBe(1);
+  });
+  it("Editor: SPEC COMPLETA com Ponto de vista/Degrau slow burn/Custo de magia", () => {
+    const r = garantirSpecCompletaNoEditor(EDITOR, "skill-romantasy");
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toMatch(/\*\*Ponto de vista:\*\*/);
+    expect(r.texto).toMatch(/\*\*Degrau slow burn:\*\*/);
+    expect(r.texto).toMatch(/\*\*Custo de magia:\*\*/);
+  });
+  it("Revisor: injeta o item CUSTO-ESCALA (deus-ex proibido)", () => {
+    const r = garantirBlocoRevisorSkill(REVISOR, "skill-romantasy");
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toContain(MARCADOR_CUSTO_ESCALA);
+    expect(r.texto).toMatch(/Custo-escala da magia/);
+    expect(r.texto).toMatch(/deus-ex/);
+  });
+  it("Revisor: idempotente", () => {
+    const um = garantirBlocoRevisorSkill(REVISOR, "skill-romantasy").texto;
+    expect(garantirBlocoRevisorSkill(um, "skill-romantasy").mudou).toBe(false);
+    expect(contar(um, MARCADOR_CUSTO_ESCALA)).toBe(1);
   });
 });

@@ -50,18 +50,23 @@ export const CRAFT_POR_SKILL: Record<string, string> = {
 
   "hoover-mcfadden": `### Craft (thriller-romance + narradora não-confiável)
 - **Emoção crua (Hoover) + maquinaria de suspense (McFadden):** a intimidade dói e o enredo aperta ao mesmo tempo.
-- **Narradora NÃO-confiável com fair-play:** o que ela omite/distorce é jogável — o twist se sustenta na releitura, sem trapaça.
-- **Três relógios:** mantenha 2–3 contagens regressivas concorrentes visíveis.
-- **Gancho por capítulo + corte no pico**; capítulos curtos.
+- **1ª pessoa PRESENTE + DIA/HORA no topo:** a narração de Helena é no PRESENTE (pretérito é defeito de voz); todo capítulo abre ancorado no relógio (DIA N — HHhMM) e o tempo avança.
+- **Narradora NÃO-confiável com fair-play:** o que ela omite/distorce é jogável — o leitor tem o que ela percebe AGORA; o twist se sustenta na releitura, sem trapaça.
+- **Três relógios NOMEADOS (dono + deadline), ≥1 move por capítulo:** (A) a janela cirúrgica, (B) a doença da própria narradora, (C) o antagonista — concorrentes e visíveis na cena, cada um apertando ato a ato.
+- **Fio-M de memória** intercalado (itálico, voz secundária, fragmentos) contrapondo o presente — isento do piso de densidade.
+- **Gancho por capítulo + corte no pico**; capítulos curtos e densos (piso 2.000 nos de Helena).
 - **Custo emocional aterrissado:** a dor tem consequência, nunca melodrama gratuito.
-- **Twist plantado:** toda virada tem rastro anterior; releitura faz sentido duplo.`,
+- **Twist plantado:** toda revelação puxa uma pista semeada antes (Tabela de Pistas); releitura faz sentido duplo.`,
 
   "skill-romantasy": `### Craft (fantasia romântica de página-vira)
 - **Dois arcos entrelaçados:** o romance de alto risco E a fantasia épica — cada capítulo avança um, idealmente os dois.
-- **POV duplo** entre os amantes; **slow burn calibrado** (marcos de aproximação dosados).
-- **Magia de CUSTO:** todo poder cobra um preço concreto e crescente.
-- **Gancho cruel no fim de cada capítulo** (apelo BookTok).
-- **Fair-play da trama E do romance:** viradas plantadas; a química nasce de cena, não de declaração.`,
+- **POV duplo, troca só com INFORMAÇÃO NOVA:** alterne os amantes; nunca 2 capítulos seguidos no mesmo (sem justificativa) e nunca reconte a mesma cena pela outra cabeça.
+- **Slow burn sobe só por MÉRITO:** cada degrau de aproximação é ganho por evento/escolha, dosado — nunca resolução precoce nem salto sem causa.
+- **Magia de CUSTO pago e CRESCENTE:** todo poder decisivo paga um preço concreto plantado antes, e o custo ESCALA a cada uso (poder novo conveniente = deus-ex).
+- **Frase-soco (a voz BookTok):** o fragmento de ênfase é assinatura — use-o com pontaria, sem virar staccato vazio.
+- **Gancho cruel no fim de cada capítulo** (apelo BookTok), diferente dos anteriores.
+- **Fair-play da trama E do romance:** viradas plantadas; a química nasce de cena, não de declaração.
+- **Troque a muleta pelo concreto:** "coisa"/"algo" ≤1 por capítulo — nomeie o objeto, o gesto, a sensação.`,
 
   "vesper-escritor-de-capitulos": `### Craft (trilogia VÉSPER, spec-driven)
 - **Voz e léxico canônicos:** mantenha o vocabulário/mundo da Bíblia estáveis ao longo da trilogia.

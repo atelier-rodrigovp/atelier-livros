@@ -58,6 +58,7 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 
 # ----------------------------------------------------------------------------
 # Constantes da máquina de estados
@@ -722,6 +723,9 @@ CAD = dict(curta=4, enfase=3, colados=1, staccato_frac=0.35, min_frases=8,
 CAD_POR_SKILL = {
     "hoover-mcfadden": dict(CAD, staccato_frac=0.55, frag_enfase=20, frag_colados=6,
                             colados=8, clipe_neg=3, anafora=2),
+    # SPEC-RM3: frase-soco = assinatura BookTok; sobe so frag_enfase/frag_colados/anafora
+    # (staccato_frac fica no default 0.35). Muleta "coisa"/simile-andaime seguem fixas.
+    "skill-romantasy": dict(CAD, frag_enfase=6, frag_colados=1, anafora=2),
 }
 
 
@@ -746,6 +750,13 @@ def _skill_projeto(projeto):
 DIR_SPECS = "specs"
 EXIGE_SPEC_POR_SKILL = {
     "skill-dan-brown": dict(campos=["Fio de POV", "Dia/Hora"], max_mesmo_fio=3),
+    # SPEC-HM2: hoover e POV unico (Helena) — nao ha rotacao de fio (nenhum campo
+    # "Fio de POV"/"Ponto de vista" na spec), entao o guard de rotacao fica inerte;
+    # o gate cobra a DECLARACAO dos eixos da skill (relogios/pistas/narradora/DIA-HORA).
+    "hoover-mcfadden": dict(campos=["Dia/Hora", "Relogios", "Pistas", "Gancho", "Narradora"], max_mesmo_fio=6),
+    # SPEC-RM2: romantasy = POV duplo; o guard de rotacao (via "Ponto de vista") reprova
+    # 3 caps seguidos no mesmo amante sem "Justificativa de POV:".
+    "skill-romantasy": dict(campos=["Ponto de vista", "Degrau slow burn", "Custo de magia"], max_mesmo_fio=2),
 }
 
 
@@ -757,9 +768,17 @@ def _spec_try_marker(projeto, n):
     return os.path.join(projeto, DIR_SPECS, "_spec-{:02d}.try".format(int(n)))
 
 
+def _sem_acento(s):
+    """Normaliza acentos p/ matching robusto: o LLM escreve 'Relogios'/'Relógios'
+    indistintamente; o gate nao pode reprovar por causa de um acento."""
+    return unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode("ascii").lower()
+
+
 def _fio_da_spec(texto):
-    """Extrai o valor do campo 'Fio de POV' (ou 'POV / fio') de uma spec."""
-    m = re.search(u"(?:Fio de POV|POV\\s*/\\s*fio)[^:\\n]*:\\s*\\**\\s*([^\\n*]+)", texto or "", re.I | re.U)
+    """Extrai o valor do campo de POV/fio de uma spec. Aceita 'Fio de POV' (dan-brown),
+    'POV / fio' e 'Ponto de vista' (romantasy — SPEC-RM2). '' quando ausente."""
+    m = re.search(u"(?:Fio de POV|POV\\s*/\\s*fio|Ponto de vista)[^:\\n]*:\\s*\\**\\s*([^\\n*]+)",
+                  texto or "", re.I | re.U)
     return m.group(1).strip().lower() if m else ""
 
 
@@ -774,10 +793,12 @@ def gate_spec_capitulo(projeto, n):
             txt = fh.read()
     except OSError:
         return "spec ausente (specs/Spec-Capitulo-{:02d}.md)".format(int(n))
-    faltam = [c for c in exig["campos"] if c.lower() not in txt.lower()]
+    txt_norm = _sem_acento(txt)
+    faltam = [c for c in exig["campos"] if _sem_acento(c) not in txt_norm]
     if faltam:
         return "spec sem campo(s): {}".format(", ".join(faltam))
-    # rotacao: se os N anteriores tem o MESMO fio e este repete, exige justificativa
+    # rotacao: se os N anteriores tem o MESMO fio e este repete, exige justificativa.
+    # Aceita "Justificativa de fio" (dan-brown) OU "de POV"/"de ponto de vista" (romantasy).
     fio = _fio_da_spec(txt)
     if fio:
         anteriores = []
@@ -789,9 +810,10 @@ def gate_spec_capitulo(projeto, n):
                     anteriores.append(_fio_da_spec(fh.read()))
             except OSError:
                 anteriores.append(None)
+        tem_justificativa = bool(re.search(u"justificativa de (fio|pov|ponto de vista)", txt_norm))
         if (len(anteriores) == exig["max_mesmo_fio"] and all(a == fio for a in anteriores)
-                and "justificativa de fio" not in txt.lower()):
-            return ("{}o capitulo consecutivo no fio '{}' sem 'Justificativa de fio:'"
+                and not tem_justificativa):
+            return ("{}o capitulo consecutivo no fio '{}' sem 'Justificativa de fio/POV:'"
                     .format(exig["max_mesmo_fio"] + 1, fio))
     return None
 

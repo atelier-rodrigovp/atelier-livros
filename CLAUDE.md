@@ -88,6 +88,37 @@ existiam) — agora é fiação. Retrofit do Índice aplicado (matriz + dossiê 
 verificados por web + O-1 "costa de Nevada" e O-2 linha do tempo corrigidos no funil
 normal). Esqueleto das exigências das outras skills: Anexo D do relatório.
 
+**FASE B hoover/romantasy (2026-07-03 — ver `AUDITORIA-HOOVER-ROMANTASY.md`):** as 5 SPECs
+aplicadas (HM1/HM2/RM1/RM2/RM3). A auditoria na página (n=3/skill) provou o MESMO diagnóstico
+do dan-brown: as assinaturas ESTRUTURAIS das duas skills eram **emergentes/ausentes na
+fiação** (nenhuma entrada em `EXIGENCIAS_ESTRUTURAIS_POR_SKILL`/`EXIGE_SPEC_POR_SKILL`), e a
+VOZ da romantasy estava **mis-calibrada** (a frase-soco BookTok reprovava no `ORC_CADENCIA`
+default longo — staccatoPct medido só 16–23%). Agora fiado: **hoover** = 2ª entrada
+(`fios 1–2`, POV único Helena + fio-M; `camposSpec` Dia/Hora·Relógios·Pistas·Gancho·Narradora;
+`dossie:false`; `docsFundacao` = matriz-de-relogios.md + regras-da-narradora.md + seção
+`<!-- TABELA-PISTAS -->`; bloco `RELOGIOS-NARRADORA` nas Notas: DIA/HORA avança, ≥1 relógio
+move/cap, presente/1ª pessoa, piso 2.000). **romantasy** = 3ª entrada (`fios 2–2` POV duplo,
+`maxCapsMesmoFio:2`; `camposSpec` Ponto de vista·Degrau slow burn·Custo de magia; bloco
+`ROTACAO-POV` + item de revisor `CUSTO-ESCALA` contra deus-ex; `docsFundacao` = seções
+`MATRIZ-POV`/`CUSTO-MAGIA`/`ESCADA-BURN`) e **ORC próprio** (`ORC_CADENCIA_POR_SKILL`/
+`CAD_POR_SKILL`: `fragEnfase:6, fragColados:1, anafora:2`; staccatoFrac fica no default 0.35;
+muleta "coisa"/símile-andaime seguem FIXAS). **Interface generalizada**: `docsFundacao?`
+(verifica presença arquivo-OU-marcador e **SINALIZA** ausência, nunca gera — quem gera é o
+arquiteto) + `marcadorNotas` (idempotência por-skill) + `blocoRevisor`/`marcadorRevisor`
+(item extra de revisor); `dossie:boolean` do dan-brown **intacto** (testes inalterados).
+Gate do runner ganhou **matching robusto a acento** (`_sem_acento`: "Relógios"≡"Relogios") e
+`_fio_da_spec`/justificativa aceitam **"Ponto de vista"/"Justificativa de POV"** além de fio
+(dan-brown intacto). **Correção extra:** o capítulo-vitrine da hoover
+(`01-Capitulo-01-A-primeira-consulta.md`) violava 3 invariantes do próprio cânone (pretérito
+/ nome "Tomás Reis" vs "Tomas Adler" / 849<2.000 palavras) — **neutralizado com banner
+"AMOSTRA PRÉ-v1.0 — NÃO normativa"** via `worker/skill-patches/hoover-mcfadden/`; crafts
+enriquecidos (hoover: 3 relógios nomeados + DIA/HORA; romantasy: alvos RM3 + anti-"coisa").
+DoD verde: vitest (138 testes; `exigencias-skill.test.ts` = 19), `tsc --noEmit`=0, gate
+funcional py (hoover accent-insensitive, rotação de POV romantasy, dan-brown regressão,
+skill inerte), sweep sintético (injeta+sinaliza+idempotente+no-op), `py_compile` do runner.
+⚠️ **`instalar-skills.ps1` + restart do worker PENDENTES** (código no HEAD ≠ produção; o
+runner/skill em produção ainda é o anterior até reinstalar+reiniciar).
+
 
 Plataforma que orquestra agentes do Claude Code para produzir livros (front
 React+Vite+TS; Supabase; worker local em `worker/` via fila de jobs; deploy em

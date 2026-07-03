@@ -275,6 +275,16 @@ export const ORC_CADENCIA_POR_SKILL: Record<string, OrcamentoCadencia> = {
     ...ORC_CADENCIA,
     staccatoFrac: 0.55, fragEnfase: 20, fragColados: 6, colados: 8, clipeNeg: 3, anafora: 2,
   },
+  // SPEC-RM3 (auditoria hoover/romantasy, n=3): a frase-soco/fragmento de ênfase é a
+  // assinatura BookTok do gênero, mas o staccatoPct medido foi BAIXO (16–23%) — não é
+  // excesso de staccato, é a CONTAGEM de fragmentos que o orçamento longo criminalizava.
+  // Sobe SÓ fragEnfase/fragColados/anafora (folga menor que o hoover); staccatoFrac fica
+  // no default 0.35 (romantasy não estourou densidade). Muleta "coisa" e símile-andaime
+  // seguem FIXAS no detector de muletas/moldes (molde de IA em qualquer skill, não voz).
+  "skill-romantasy": {
+    ...ORC_CADENCIA,
+    fragEnfase: 6, fragColados: 1, anafora: 2,
+  },
 };
 export function orcCadenciaParaSkill(skill?: string | null): OrcamentoCadencia {
   return (skill && ORC_CADENCIA_POR_SKILL[skill]) || ORC_CADENCIA;
