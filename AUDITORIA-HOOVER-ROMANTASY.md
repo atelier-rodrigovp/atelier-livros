@@ -331,5 +331,36 @@ entrada = 14/14); `py_compile` do runner OK; paridade TS↔py do ORC por inspeç
 
 **PENDENTE (portão irreversível — aguarda confirmação):** `pwsh worker/skill-patches/instalar-skills.ps1`
 (propaga o runner patcheado + o banner da hoover para `~/.claude/skills/`) e **restart do worker**
-(código no HEAD ≠ produção). A **prova na página antes/depois** (re-gerar 3 caps por skill com a
-fundação corrigida) roda em seguida, com prioridade hoover se a cota apertar.
+(código no HEAD ≠ produção).
+
+### 7.1 Prova na página — EXECUTADA (2026-07-03, 2 subagentes opus, scratch `audit-*-B/`)
+
+Corrente corrigida reproduzida à mão na fundação sintética (perfil com `CRAFT-SKILL v2` +
+`ORÇAMENTO DE PÁGINA` verbatim do que os normalizadores produzem; Estrutura com as seções/docs
+exigidos; specs com os campos do `blocoSpecEditor`). Medição = detector real (`orcCadenciaParaSkill`
++ `contarMuletas` + `contarManeirismos`). Job `e45d6f6e` e WORK_DIRs reais intocados; cota respondeu
+OK em todos os throttle-checks (nenhuma cedência).
+
+**romantasy (3 caps, ORC próprio):** cap-01 (Sera, 1072p) · cap-02 (Kael, 980p) · cap-03 (Sera,
+935p) — **os 3 PASSAM** `cadenciaAcima`; "coisa" 0/1/1; símile-andaime 0/0/0. Contraste que fecha a
+RM3: os mesmos caps no ORC **default** reprovariam (cap-01 anáfora 2/1; cap-02 fragEnfase 3/2 — a
+frase-soco de propósito) → o ORC da skill **libera a assinatura BookTok** enquanto o detector de
+muletas **fixo** segura "coisa"/símile em ≤1 (duas travas em direções opostas). Assinaturas honradas
+com trecho: POV duplo motivado (troca entrega info nova), **custo-escala explícito** (cheiro de pão →
+nome da irmã morta: "a escada tinha degraus muito mais altos"), slow burn por mérito, ganchos vários.
+
+**hoover (3 caps, ORC próprio):** cap-01 1456p · cap-02 1421p · cap-03 1408p — **os 3 PASSAM**
+`cadenciaAcima` (staccato 18–22%, folga larga sob 55%); **"coisa" 7→1 / 3→1 / 2→1**; zero muleta
+acima. Assinaturas GARANTIDAS com trecho: 1ª pessoa **presente** (vs. exemplo-skill em pretérito);
+**DIA/HORA avançando** (16h10→21h40→07h20); relógios A/B/C movendo, um por capítulo; pistas
+rastreáveis (P-03/P-06 no cap-02, P-05 no cap-03 — nenhuma revelação sem semente); ganchos de 3
+tipos; fio-M de memória em itálico; nomes canônicos (Helena Whitmore, Tomas Adler, Julian Blackwood).
+
+**Achado honesto (vale para as duas):** a **estrutura nasce correta de fábrica** (presente, DIA/HORA,
+relógios/POV, pistas/custo, ganchos — 1ª passada), mas a **higiene de ritmo/muleta exigiu 1–2 passes
+de refino** guiados pelo número na caneta (o opus não nasce limpo; funde/varia molde até o detector
+passar). Ou seja: a corrente CHEGA ao alvo — que é exatamente o que o gate por capítulo existe para
+cobrar —, não acerta de primeira. Ressalvas: romantasy ficou abaixo do alvo de palavras (935–1072);
+hoover ficou 1408–1456 (acima do fallback ≥1400, **abaixo do piso duro 2.000** por escolha de
+extensão, não por cota); fundação sintética (não passou pelos normalizadores do worker) e sem o
+`gate_spec_capitulo` do runner (só o detector TS, que é a mesma verdade que o gate consome).
