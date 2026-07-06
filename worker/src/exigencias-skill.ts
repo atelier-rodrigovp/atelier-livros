@@ -303,7 +303,9 @@ export const CAMPOS_EDITORIAIS_SPEC =
   "<qual>` — a guarda registra em open_loops/paid_loops.\n" +
   "- **Modo:** dramático (ação / investigação-ativa / confronto / set-piece / perseguição / " +
   "fuga / escolha-irreversível) OU expositivo (exposição / entrevista / documento / " +
-  "diálogo-informativo) — a guarda mede a streak de exposição.\n";
+  "diálogo-informativo) — a guarda mede a streak de exposição.\n" +
+  "- **Beat central:** 1–2 linhas com o conceito/conflito NUCLEAR do capítulo (o revisor " +
+  "compara com os beats recentes — se repetir a mesma ideia sem evolução é eco-redundante).\n";
 
 export function garantirSpecCompletaNoEditor(conteudo: string, skill?: string | null): { texto: string; mudou: boolean } {
   const ex = exigenciasParaSkill(skill);

@@ -571,7 +571,7 @@ def prompt_revisao_capitulo(projeto, n, args, piso):
         "(fair-play, cota de tiques, info-dump, interioridade-com-custo, relogio, "
         "coincidencia, nao-reexposicao, corte-no-pico, exposicao dramatizada). Some a isso "
         "a EVIDENCIA REAL deste capitulo (contagens do detector, NAO recompute): {bloco_cad} "
-        "{bloco_inter} {bloco_prop}"
+        "{bloco_inter} {bloco_prop}{bloco_beats}"
         "Devolva uma LISTA de ate {maxed} EDICOES PONTUAIS (trecho -> correcao) que INJETAM "
         "propulsao (dramatize, corte no pico, encadeie a caca as pistas) e VARIAM o ritmo "
         "(FUNDA colados, quebre anafora/clipe), nao so cortam tique. NAO e recontacao nem o "
@@ -585,7 +585,8 @@ def prompt_revisao_capitulo(projeto, n, args, piso):
         "Regrave o MESMO {arq} (>= {piso} palavras).\n"
         "3) Encerre. NAO gere a critica nem a prosa na SUA sessao - so dispare os dois Tasks "
         "e confirme que {arq} foi regravado.\n"
-    ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_cad=bloco_cad, bloco_inter=bloco_inter, bloco_prop=bloco_prop)
+    ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_cad=bloco_cad, bloco_inter=bloco_inter,
+             bloco_prop=bloco_prop, bloco_beats=_beats_recentes(projeto, n))
 
 
 def prompt_review(k):
@@ -1195,7 +1196,23 @@ def _editorial_pos_aceite(projeto, cap):
     ed["exposition_risk"] = 1 if risco else 0
     if risco:
         log(projeto, "SINAL (exposition pos-revelacao): cap {} tende a reexplicar a revelacao anterior (use interpretacao CURTA + consequencia pratica).".format(cap))
+    beat = _campo_spec(sp, "Beat central")  # FASE 8 (Motif Ledger)
+    if beat:
+        ml = [m for m in ed.get("motif_ledger", []) if m.get("capitulo") != int(cap)]
+        ml.append({"capitulo": int(cap), "beat": beat, "funcao": "reforco"})  # revisor reclassifica
+        ed["motif_ledger"] = ml[-40:]
     save_estado_editorial(projeto, ed)
+
+
+def _beats_recentes(projeto, cap, n=8):
+    """FASE 8: as N ultimas linhas de beat (do motif_ledger) ANTES de cap, para o
+    prompt de revisao dar contexto ao revisor julgar eco-redundante."""
+    ml = [m for m in load_estado_editorial(projeto).get("motif_ledger", []) if int(m.get("capitulo", 0)) < int(cap)]
+    ml = ml[-n:]
+    if not ml:
+        return ""
+    linhas = u"\n".join(u"  - cap {}: {}".format(m.get("capitulo"), m.get("beat")) for m in ml)
+    return u"\nBEATS CENTRAIS RECENTES (para julgar eco-redundante — ver 'BEAT CENTRAL' no seu veredito):\n" + linhas + u"\n"
 
 
 # ----------------------------------------------------------------------------

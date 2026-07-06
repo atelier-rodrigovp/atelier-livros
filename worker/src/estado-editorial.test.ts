@@ -9,6 +9,7 @@ import {
 } from "./estado-editorial.js";
 import { exigenciasParaSkill, CAMPOS_EDITORIAIS_SPEC } from "./exigencias-skill.js";
 import { exposicaoPosRevelacaoRisco } from "./maneirismo.js";
+import { BLOCO_PROPULSAO, garantirPropulsaoRevisor } from "./craft-agentes.js";
 
 const proj = () => mkdtempSync(path.join(tmpdir(), "ed-"));
 
@@ -122,6 +123,22 @@ describe("Source Reveal Streak (Fase 4)", () => {
     expect(modoExpositivo("ação / perseguição")).toBe(false);
     expect(modoExpositivo("confronto no beco")).toBe(false);
     expect(modoExpositivo("")).toBe(false);
+  });
+});
+
+describe("Motif Ledger / Semantic Repetition (Fase 8)", () => {
+  it("BLOCO_PROPULSAO tem a pergunta de eco-redundante (estende o veredito, não 3º)", () => {
+    expect(BLOCO_PROPULSAO).toMatch(/BEAT CENTRAL — eco redundante/);
+    expect(BLOCO_PROPULSAO).toMatch(/ECO REDUNDANTE/);
+    expect(BLOCO_PROPULSAO).toMatch(/VEREDITO DE PROPULSÃO/); // continua o MESMO veredito
+  });
+  it("garantirPropulsaoRevisor faz upgrade in-place de bloco v1 sem motif", () => {
+    const antigo = "---\nrevisor\n---\n\n<!-- PROPULSAO v1 -->\n## VEREDITO DE PROPULSÃO\nPARIDADE COM A REVISÃO INLINE aqui.\n<!-- /PROPULSAO -->\n";
+    const r = garantirPropulsaoRevisor(antigo);
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toMatch(/BEAT CENTRAL — eco redundante/);
+    // idempotente na 2ª
+    expect(garantirPropulsaoRevisor(r.texto).mudou).toBe(false);
   });
 });
 

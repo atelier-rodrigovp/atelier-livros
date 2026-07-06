@@ -55,6 +55,17 @@ Fonte adicional OBRIGATÓRIA: o \`perfil-de-voz.md\` (voz + \`## CRAFT DA SKILL\
 - **Moldes nomeados (corte/dramatize mesmo fora das contagens):** símile-andaime ("como se"/"como quem"), eco de negação ("Não havia X… Havia Y"), antítese-haver, anáfora/staccato colado, decoração-sem-evento.
 - **Token estrangeiro/typo de geração:** palavra fora do PT-BR ("ninguño", "pero", "entonces") ou typo — aponte a linha e corrija na edição.`;
 
+// FASE 8 (Motif Ledger / Semantic Repetition): pergunta ADICIONAL ao veredito de
+// propulsão — o beat central deste capítulo é ECO REDUNDANTE de um anterior? O runner
+// injeta os BEATS CENTRAIS recentes (do motif_ledger) no prompt de revisão.
+export const ADENDO_MOTIF = `### BEAT CENTRAL — eco redundante? (Semantic Repetition)
+Você recebe os BEATS CENTRAIS dos últimos capítulos (listados no prompt de revisão, se houver).
+O beat DESTE capítulo repete a MESMA ideia/conflito nuclear de um beat anterior só com
+ROUPAGEM diferente — mesma ideia, SEM evolução (sugestão→prova→custo→escolha→consequência)?
+Se sim, é **ECO REDUNDANTE**: REPROVE e devolva edição que faça a ideia EVOLUIR (novo ângulo,
+custo, ou consequência), não reafirme o que o leitor já sabe. Classifique a função do beat:
+introdução / reforço / virada / pagamento / eco-redundante.`;
+
 export const BLOCO_PROPULSAO = `
 ${MARCADOR_PROPULSAO}
 
@@ -73,6 +84,8 @@ Se "bem escrito e CHATO": **REPROVE** e devolva edições que **INJETAM propuls�
 corte no pico, encadeie a caça às pistas) — não só cortam tique. Preserve sentido e voz.
 
 ${ADENDO_PARIDADE}
+
+${ADENDO_MOTIF}
 
 <!-- /PROPULSAO -->`;
 
@@ -99,9 +112,18 @@ export function garantirCraftLeituraEscritor(conteudo: string): { texto: string;
 export function garantirPropulsaoRevisor(conteudo: string): { texto: string; mudou: boolean } {
   const t = conteudo ?? "";
   if (t.includes(MARCADOR_PROPULSAO)) {
+    let texto = t, mudou = false;
     // upgrade SPEC-07: bloco v1 (sem o adendo de paridade) ganha o adendo in-place.
-    if (t.includes("PARIDADE COM A REVISÃO INLINE")) return { texto: t, mudou: false };
-    return { texto: t.replace("<!-- /PROPULSAO -->", `${ADENDO_PARIDADE}\n\n<!-- /PROPULSAO -->`), mudou: true };
+    if (!texto.includes("PARIDADE COM A REVISÃO INLINE")) {
+      texto = texto.replace("<!-- /PROPULSAO -->", `${ADENDO_PARIDADE}\n\n<!-- /PROPULSAO -->`);
+      mudou = true;
+    }
+    // upgrade FASE 8: bloco sem o adendo de motif/eco-redundante ganha in-place.
+    if (!texto.includes("BEAT CENTRAL — eco redundante")) {
+      texto = texto.replace("<!-- /PROPULSAO -->", `${ADENDO_MOTIF}\n\n<!-- /PROPULSAO -->`);
+      mudou = true;
+    }
+    return { texto, mudou };
   }
   return { texto: t.replace(/\s*$/, "") + "\n\n" + BLOCO_PROPULSAO + "\n", mudou: true };
 }
