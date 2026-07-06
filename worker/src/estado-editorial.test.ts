@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   lerEstadoEditorial, gravarEstadoEditorial, estadoEditorialDefault, mergeEstadoEditorial,
-  agenciaGenerica, processarNovidade,
+  agenciaGenerica, processarNovidade, modoExpositivo,
 } from "./estado-editorial.js";
 import { exigenciasParaSkill, CAMPOS_EDITORIAIS_SPEC } from "./exigencias-skill.js";
 
@@ -94,5 +94,16 @@ describe("Novelty Gate (Fase 3)", () => {
   it("campo universal Novidade + Modo no editor (CAMPOS_EDITORIAIS_SPEC)", () => {
     expect(CAMPOS_EDITORIAIS_SPEC).toMatch(/\*\*Novidade:\*\*/);
     expect(CAMPOS_EDITORIAIS_SPEC).toMatch(/\*\*Modo:\*\*/);
+  });
+});
+
+describe("Source Reveal Streak (Fase 4)", () => {
+  it("modoExpositivo classifica exposição vs dramático", () => {
+    expect(modoExpositivo("exposição")).toBe(true);
+    expect(modoExpositivo("entrevista com a testemunha")).toBe(true);
+    expect(modoExpositivo("documento / diálogo-informativo")).toBe(true);
+    expect(modoExpositivo("ação / perseguição")).toBe(false);
+    expect(modoExpositivo("confronto no beco")).toBe(false);
+    expect(modoExpositivo("")).toBe(false);
   });
 });

@@ -1092,9 +1092,40 @@ def _processar_novidade(estado, novidade):
     return estado
 
 
+# FASE 4 — Source Reveal Streak (espelha estado-editorial.ts modoExpositivo).
+_RE_MODO_EXPO = re.compile(u"exposi[çc][ãa]o|entrevista|documento|di[áa]logo[ -]informativo|informativo", re.I | re.U)
+
+
+def _modo_expositivo(modo):
+    return bool(_RE_MODO_EXPO.search(modo or ""))
+
+
+def _streak_guarda(projeto, cap):
+    """(ok, motivo). Reprova o 4o capitulo consecutivo em modo exposicao (varie).
+    hoover ISENTO (dialogo/interioridade e' a voz canonica da skill)."""
+    if _skill_projeto(projeto) == "hoover-mcfadden":
+        return (True, "")
+    def modo(n):
+        try:
+            with open(_spec_path(projeto, n), "r", encoding="utf-8") as fh:
+                return _campo_spec(fh.read(), "Modo")
+        except OSError:
+            return ""
+    if not _modo_expositivo(modo(cap)):
+        return (True, "")
+    consec = 0
+    k = int(cap) - 1
+    while k >= 1 and _modo_expositivo(modo(k)):
+        consec += 1
+        k -= 1
+    if consec >= 3:
+        return (False, u"source-streak: {}o capitulo consecutivo em modo exposicao (varie: acao/investigacao/confronto)".format(consec + 1))
+    return (True, "")
+
+
 def _editorial_pos_aceite(projeto, cap):
-    """Roda APOS aceitar o capitulo: atualiza estado-editorial. FASE 3 (Novelty loops).
-    (FASE 4 acrescenta a source_reveal_streak aqui.)"""
+    """Roda APOS aceitar o capitulo: atualiza estado-editorial. FASE 3 (Novelty loops) +
+    FASE 4 (source_reveal_streak: +1 se expositivo, zera se dramatico)."""
     try:
         with open(_spec_path(projeto, cap), "r", encoding="utf-8") as fh:
             sp = fh.read()
@@ -1104,6 +1135,9 @@ def _editorial_pos_aceite(projeto, cap):
     nov = _campo_spec(sp, "Novidade")
     if nov:
         ed = _processar_novidade(ed, nov)
+    md = _campo_spec(sp, "Modo")
+    if md:
+        ed["source_reveal_streak"] = int(ed.get("source_reveal_streak", 0)) + 1 if _modo_expositivo(md) else 0
     save_estado_editorial(projeto, ed)
 
 
@@ -1674,11 +1708,12 @@ def executar(projeto, args):
             ledger_mtime = os.path.getmtime(_ledger) if os.path.exists(_ledger) else 0
             ledger_ok = ledger_mtime > ledger_mtime_antes
             agencia_ok, agencia_motivo = _agencia_guarda(projeto, revisando_cap)  # FASE 2 (Agency)
+            streak_ok, streak_motivo = _streak_guarda(projeto, revisando_cap)     # FASE 4 (Source streak)
             try_path = _marcador_revtry(projeto, revisando_cap)
             ja_tentou = os.path.exists(try_path)
-            # 1a passada: exige piso + ledger gravado + tiques cairam + agencia (estrito).
+            # 1a passada: exige piso + ledger + tiques + agencia + streak (estrito).
             # 2a passada (ja_tentou): aceita com piso p/ nao travar, AVISA ALTO o que ficou off.
-            if piso_ok and (ja_tentou or (ledger_ok and tiques_ok and agencia_ok)):
+            if piso_ok and (ja_tentou or (ledger_ok and tiques_ok and agencia_ok and streak_ok)):
                 try:
                     os.makedirs(os.path.join(projeto, DIR_REVIEW), exist_ok=True)
                     with open(_marcador_revcap(projeto, revisando_cap), "w", encoding="utf-8") as fh:
@@ -1693,6 +1728,7 @@ def executar(projeto, args):
                 if not tiques_ok: pend.append("tiques nao baixaram")
                 if not ledger_ok: pend.append("CONTINUIDADE nao gravada no estado-narrativo")
                 if not agencia_ok: pend.append(agencia_motivo)  # FASE 2 (Agency)
+                if not streak_ok: pend.append(streak_motivo)    # FASE 4 (Source streak)
                 aviso = " [aceito p/ nao travar apos re-revisao; PENDENTE: {}]".format("; ".join(pend)) if pend else ""
                 log(projeto, "Capitulo {} revisado (delegado) -> aceito{}. cadencia excesso {}->{}; piso {}; ledger {}.".format(
                     revisando_cap, aviso, exc_antes, exc_depois, "ok" if piso_ok else "BAIXO", "ok" if ledger_ok else "NAO-GRAVADO"))

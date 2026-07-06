@@ -120,6 +120,13 @@ export function processarNovidade(estado: EstadoEditorial, novidade: string): Es
   return { ...estado, open_loops, paid_loops };
 }
 
+// FASE 4 (Source Reveal Streak). "Modo" expositivo = exposição/entrevista/documento/
+// diálogo-informativo. >3 seguidos → guarda exige variação (hoover isento: no runner).
+const _RE_MODO_EXPO = /exposi[çc][ãa]o|entrevista|documento|di[áa]logo[ -]informativo|informativo/i;
+export function modoExpositivo(modo: string | null | undefined): boolean {
+  return _RE_MODO_EXPO.test(modo ?? "");
+}
+
 function estadoPath(projDir: string): string {
   return path.join(projDir, "estado", ARQUIVO_ESTADO_EDITORIAL);
 }
