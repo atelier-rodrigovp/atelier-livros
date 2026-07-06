@@ -152,6 +152,13 @@ export const MULETAS: Muleta[] = [
     re: /\b(ninguño|ningún|ninguna|pero|entonces|mismo|misma|llegou|llegó|aunque|también|todavía|además)\b/gi,
     orc10k: 0,
   },
+  {
+    // AUDITORIA-DAN-BROWN-V2 FASE -1: léxico de Portugal vazando na prosa pt-BR (rede
+    // de segurança; a 1ª linha é a instrução em lexico-ptbr.ts). Alvo 0 (qualquer estoura).
+    termo: "léxico PT-PT (não pt-BR)",
+    re: /\b(telemóve(?:l|is)|ecrã|autocarro(?:s)?|comboio(?:s)?|frigorífico|casa de banho|pequeno-almoço|autoclismo|talho)\b/gi,
+    orc10k: 0,
+  },
 ];
 
 export interface MuletaContagem { termo: string; n: number; por10k: number; alvo: number; acima: boolean }
@@ -444,6 +451,13 @@ export function normalizarTrecho(s: string): string {
 
 export interface SlotAforistico { original: string; normalizado: string }
 
+// Fala direta OU tag de fala formulaico não são "assinatura autoral" — são ruído no
+// detector cross-capítulo (dialogo repetido / atribuição "disse X"). Exclui da extração.
+const _RE_TAG_FALA = /^(disse|perguntou|respondeu|murmurou|sussurrou|repetiu|retrucou|indagou|exclamou|gritou|falou|acrescentou|continuou|concluiu|observou)\b|,\s+(disse|perguntou|respondeu|murmurou|sussurrou|repetiu|retrucou|indagou|acrescentou|observou)\b/i;
+function ehDialogoOuTag(f: string): boolean {
+  return ehDialogo(f) || _RE_TAG_FALA.test((f ?? "").trim());
+}
+
 // Extrai os "slots aforísticos": frases isoladas (parágrafo próprio) OU trechos
 // após dois-pontos/travessão OU frases que batem num molde aforístico
 // (definicional/antítese/símile). São os slots que o modelo reaproveita.
@@ -452,10 +466,11 @@ export function extrairSlotsAforisticos(texto: string): SlotAforistico[] {
   const brutos: string[] = [];
   for (const par of t.split(/\n{2,}/)) {
     const fr = dividirFrases(par);
-    if (fr.length === 1) brutos.push(fr[0]); // parágrafo de UMA frase = aforismo isolado
+    if (fr.length === 1 && !ehDialogoOuTag(fr[0])) brutos.push(fr[0]); // parágrafo de UMA frase = aforismo isolado
   }
-  for (const m of t.matchAll(/[:—–]\s*([A-Za-zÀ-ÿ][^.!?\n:—–]{6,90}[.!?])/g)) brutos.push(m[1]);
+  for (const m of t.matchAll(/[:—–]\s*([A-Za-zÀ-ÿ][^.!?\n:—–]{6,90}[.!?])/g)) if (!ehDialogoOuTag(m[1])) brutos.push(m[1]);
   for (const f of dividirFrases(t)) {
+    if (ehDialogoOuTag(f)) continue;
     if (/\b[ée]\s+a\s+defini[çc][ãa]o\b/i.test(f) ||
         /\bcomo\s+(?:se|quando)\b/i.test(f) ||
         /\bn[ãa]o\s+\w[^.,;!?\n]{0,50}[,;]\s*(?:mas|e\s+sim|sen[ãa]o)\s+/i.test(f)) brutos.push(f);
@@ -481,6 +496,7 @@ export function extrairSlotsAforisticos(texto: string): SlotAforistico[] {
   // slots aforísticos (parágrafo isolado/molde) não pegam. Só o prefixo, filtrado por
   // conteúdo, comparado verbatim/shingle no ledger.
   for (const f of dividirFrases(t)) {
+    if (ehDialogoOuTag(f)) continue; // fala/tag não é assinatura autoral
     const pal = normalizarTrecho(f).split(" ").filter(Boolean);
     const origW = f.trim().split(/\s+/);
     for (const k of [6, 8]) if (pal.length > k) emit(origW.slice(0, k).join(" "), pal.slice(0, k).join(" "));

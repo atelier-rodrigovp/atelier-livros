@@ -163,6 +163,18 @@ desperdício mecânico; o 0xC0000142 foi da noite anterior (limite SEMANAL de fu
 qualidade (não throughput): contaminação **PT-PT** força rodadas extras de revisão — alvo futuro
 na origem (perfil/contextualizador), não no loop.
 
+**Refino pós-sweep (2026-07-06):** (1) `janelaDiversidade` da dan-brown apertada p/ `ratioMax 0.65`
+(o defeito real foi 0.7–0.8; 0.7 ficava na borda). (2) **Ruído do gap-1 reduzido**: `detectarRepeticaoCrossCapitulo`
+exclui fala direta + tag de fala formulaico (`ehDialogoOuTag`/`_eh_dialogo_ou_tag`) — no Índice
+gap1 caiu 20→17 mantendo o flagship. (3) **PT-PT na origem:** novo normalizador
+`worker/src/lexico-ptbr.ts` (`<!-- LEXICO-PTBR v1 -->`; padrão voz-regra4) injeta em `perfil-de-voz.md`
+a seção "ESCREVA EM pt-BR" (vocabulário telemóvel→celular etc. + **PRÓCLISE** pt-BR, não ênclise —
+o pedido do autor pedia ênclise por engano linguístico; corrigido) — roda após `criar_fundacao` e no
+início de `escrever_livro` (wiring em `jobs.ts`; **vale após próximo restart do node**) + retrofit
+via `scripts/aplicar-lexico-ptbr.ts` (Índice já semeado); rede de segurança = `telemóvel|ecrã|autocarro|
+comboio|casa de banho|…` no léxico `MULETAS` (alvo 0). Runner reinstalado (`20260706083947`, diff vazio;
+sem restart do node — gates Python spawnam frescos por capítulo). vitest 153 verdes.
+
 
 Plataforma que orquestra agentes do Claude Code para produzir livros (front
 React+Vite+TS; Supabase; worker local em `worker/` via fila de jobs; deploy em

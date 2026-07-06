@@ -106,8 +106,8 @@ export function avaliarRotacaoFio(
 const DAN_BROWN: ExigenciasSkill = {
   fios: { min: 2, max: 4 },
   maxCapsMesmoFio: 3,
-  maxCapsMesmoFioAbsoluto: 5,                        // ⚠️ nº a confirmar com o Rodrigo
-  janelaDiversidade: { tamanho: 10, ratioMax: 0.7 }, // pega o real "7 de 13–19" do Índice
+  maxCapsMesmoFioAbsoluto: 5,                         // confirmado
+  janelaDiversidade: { tamanho: 10, ratioMax: 0.65 }, // 0.65: o defeito real foi 0.7–0.8; 0.7 ficava na borda
   camposSpec: ["Fio de POV", "Dia/Hora"],
   dossie: true,
   marcadorNotas: MARCADOR_ROTACAO,

@@ -28,6 +28,7 @@ import { normalizarVozRegra4 } from "./voz-regra4.js";
 import { normalizarCraftSkill } from "./craft-skill.js";
 import { normalizarCraftNosAgentes } from "./craft-agentes.js";
 import { exigenciasParaSkill, normalizarExigenciasSkill } from "./exigencias-skill.js";
+import { normalizarLexicoPtbr } from "./lexico-ptbr.js";
 import { hidratarWorkDir } from "./hidratar.js";
 import { coletarTelemetria } from "./telemetria.js";
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
@@ -485,6 +486,8 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
     if (v.mudou) console.log(`[voz] Regra 4 / guarda injetada em ${v.arquivo}`);
     if (v.aviso) console.warn(`[voz] AVISO ${v.arquivo}: ${v.aviso}`);
   }
+  // Léxico pt-BR (anti-contaminação de português de Portugal — FASE -1). Idempotente.
+  { const l = await normalizarLexicoPtbr(dir); if (l.mudou) console.log(`[voz] léxico pt-BR injetado em ${l.arquivo}`); }
   // Injeta o RESUMO DE CRAFT da skill no perfil (motor + regras) — fecha a corrente
   // skill→fundação→escritor de forma determinística (não confia só na paráfrase do LLM).
   {
@@ -724,6 +727,8 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     if (v.mudou) console.log(`[voz] Regra 4 / guarda injetada em ${v.arquivo}`);
     if (v.aviso) console.warn(`[voz] AVISO ${v.arquivo}: ${v.aviso}`);
   }
+  // Léxico pt-BR (anti-contaminação de português de Portugal — FASE -1). Idempotente.
+  { const l = await normalizarLexicoPtbr(dir); if (l.mudou) console.log(`[voz] léxico pt-BR injetado em ${l.arquivo}`); }
   // Garante o resumo de craft da skill no perfil (corrige projetos vivos: do próximo
   // capítulo em diante o escritor escreve com o DNA da skill). Idempotente.
   {

@@ -691,6 +691,11 @@ _MULETAS = [
     (u"lexico estrangeiro (typo)",
      re.compile(u"\\b(ninguño|ningún|ninguna|pero|entonces|mismo|misma|llegou|llegó|aunque|también|todavía|además)\\b", re.I | re.U),
      0, 0.0),
+    # AUDITORIA-DAN-BROWN-V2 FASE -1: lexico de Portugal (rede de seguranca; a 1a linha
+    # e a instrucao no perfil via lexico-ptbr.ts). Alvo 0.
+    (u"lexico PT-PT (nao pt-BR)",
+     re.compile(u"\\b(telemóve(?:l|is)|ecrã|autocarro(?:s)?|comboio(?:s)?|frigorífico|casa de banho|pequeno-almoço|autoclismo|talho)\\b", re.I | re.U),
+     0, 0.0),
 ]
 
 
@@ -723,16 +728,27 @@ def _norm_trecho(s):
     return re.sub(u"\\s+", u" ", t).strip()
 
 
+_RE_TAG_FALA = re.compile(u"^(disse|perguntou|respondeu|murmurou|sussurrou|repetiu|retrucou|indagou|exclamou|gritou|falou|acrescentou|continuou|concluiu|observou)\\b|,\\s+(disse|perguntou|respondeu|murmurou|sussurrou|repetiu|retrucou|indagou|acrescentou|observou)\\b", re.I | re.U)
+
+
+def _eh_dialogo_ou_tag(f):
+    ff = (f or "").strip()
+    return bool(re.match(u"^[—–\\-\"'“”‘’]", ff, re.U)) or bool(_RE_TAG_FALA.search(ff))
+
+
 def _extrair_slots_aforisticos(texto):
     t = _sem_headings(texto or "")
     brutos = []
     for par in re.split(u"\n{2,}", t):
         fr = dividir_frases(par)
-        if len(fr) == 1:
+        if len(fr) == 1 and not _eh_dialogo_ou_tag(fr[0]):
             brutos.append(fr[0])
     for m in re.finditer(u"[:—–]\\s*([A-Za-zÀ-ÿ][^.!?\\n:—–]{6,90}[.!?])", t, re.U):
-        brutos.append(m.group(1))
+        if not _eh_dialogo_ou_tag(m.group(1)):
+            brutos.append(m.group(1))
     for f in dividir_frases(t):
+        if _eh_dialogo_ou_tag(f):
+            continue
         if re.search(u"\\b[ée]\\s+a\\s+defini[çc][ãa]o\\b", f, re.I | re.U) or re.search(u"\\bcomo\\s+(?:se|quando)\\b", f, re.I | re.U):
             brutos.append(f)
     seen, out = set(), []
@@ -755,6 +771,8 @@ def _extrair_slots_aforisticos(texto):
     # Prefixo (6 e 8 palavras) de TODA sentenca: a assinatura reciclada costuma ser o
     # INICIO de uma sentenca no meio de um paragrafo, que os slots aforisticos perdem.
     for f in dividir_frases(t):
+        if _eh_dialogo_ou_tag(f):
+            continue
         pal = [w for w in _norm_trecho(f).split(u" ") if w]
         ow = f.strip().split()
         for k in (6, 8):
@@ -968,7 +986,7 @@ EXIGE_SPEC_POR_SKILL = {
     # AUDITORIA-DAN-BROWN-V2 gap 2: max_absoluto (teto que Justificativa NAO derruba)
     # + janela (diversidade nos ultimos N). So skills com rotacao real (dan-brown/romantasy).
     "skill-dan-brown": dict(campos=["Fio de POV", "Dia/Hora"], max_mesmo_fio=3,
-                            max_absoluto=5, janela=dict(tamanho=10, ratio_max=0.7)),
+                            max_absoluto=5, janela=dict(tamanho=10, ratio_max=0.65)),
     # SPEC-HM2: hoover e POV unico (Helena) — sem rotacao; NAO recebe max_absoluto/janela.
     "hoover-mcfadden": dict(campos=["Dia/Hora", "Relogios", "Pistas", "Gancho", "Narradora"], max_mesmo_fio=6),
     # SPEC-RM2: romantasy = POV duplo; guard de rotacao via "Ponto de vista".

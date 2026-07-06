@@ -4,6 +4,7 @@ import {
   parseDiaHora, checarDiaHoraSequencia, contarMuletas,
 } from "./maneirismo.js";
 import { avaliarRotacaoFio } from "./exigencias-skill.js";
+import { garantirLexicoPtbr, MARCADOR_LEXICO_PTBR } from "./lexico-ptbr.js";
 
 // ---- Fase 1: repetição verbatim cross-capítulo (o caso real do Índice) ----
 describe("detectarRepeticaoCrossCapitulo (gap 1)", () => {
@@ -95,5 +96,27 @@ describe("léxico estrangeiro (gap 3a)", () => {
   it("PT-BR legítimo não estoura por 'llegou'", () => {
     const m = contarMuletas("Ele chegou cedo e esperou na porta.");
     expect(m.some((x) => x.termo.includes("estrangeiro"))).toBe(false);
+  });
+});
+
+// ---- item 3: léxico PT-PT (normalizador de origem + rede de segurança) ----
+describe("léxico PT-BR (FASE -1)", () => {
+  it("normalizador injeta a seção ESCREVA EM pt-BR + próclise (idempotente)", () => {
+    const r = garantirLexicoPtbr("# Perfil\n\nvoz densa.\n");
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toContain(MARCADOR_LEXICO_PTBR);
+    expect(r.texto).toMatch(/PORTUGU[ÊE]S DO BRASIL/);
+    expect(r.texto).toMatch(/PR[ÓO]CLISE/); // pt-BR usa próclise (não ênclise)
+    expect(r.texto).toMatch(/telem[óo]vel → celular/);
+    // idempotente
+    const um = garantirLexicoPtbr(r.texto);
+    expect(um.mudou).toBe(false);
+    expect(um.texto.split(MARCADOR_LEXICO_PTBR).length - 1).toBe(1);
+  });
+  it("rede de segurança: palavras PT-PT estouram (alvo 0), pt-BR não", () => {
+    const ptpt = contarMuletas("Atendeu o telemóvel e olhou o ecrã dentro do comboio.");
+    expect(ptpt.some((x) => x.termo.includes("PT-PT") && x.acima)).toBe(true);
+    const ptbr = contarMuletas("Atendeu o celular e olhou a tela dentro do trem.");
+    expect(ptbr.some((x) => x.termo.includes("PT-PT"))).toBe(false);
   });
 });
