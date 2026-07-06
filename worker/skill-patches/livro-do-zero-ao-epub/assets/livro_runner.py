@@ -129,6 +129,60 @@ def existe(projeto, rel):
 
 
 # ----------------------------------------------------------------------------
+# ESTADO EDITORIAL (camada editorial) — espelha worker/src/estado-editorial.ts.
+# estado/estado-editorial.json: estruturado, schema-free. Projeto sem o arquivo →
+# schema default (nao quebra legado). Alicerce das Fases 2-8.
+# ----------------------------------------------------------------------------
+ARQ_ESTADO_EDITORIAL = os.path.join("estado", "estado-editorial.json")
+
+
+def _estado_editorial_default():
+    return {
+        "motif_ledger": [], "open_loops": [], "paid_loops": [],
+        "source_reveal_streak": 0, "agency_balance": {}, "exposition_risk": 0,
+        "semantic_repetition_risk": 0, "last_high_impact_scene": None,
+        "commercial_blockers": [], "next_chapter_editorial_requirements": [],
+    }
+
+
+def _merge_estado_editorial(parcial):
+    d = _estado_editorial_default()
+    p = parcial or {}
+    for k, dv in d.items():
+        v = p.get(k, dv)
+        if isinstance(dv, list) and not isinstance(v, list):
+            v = dv
+        elif isinstance(dv, dict) and not isinstance(v, dict):
+            v = dv
+        elif isinstance(dv, int) and not isinstance(dv, bool) and not isinstance(v, (int, float)):
+            v = dv
+        d[k] = v
+    return d
+
+
+def load_estado_editorial(projeto):
+    try:
+        with open(os.path.join(projeto, ARQ_ESTADO_EDITORIAL), "r", encoding="utf-8") as fh:
+            return _merge_estado_editorial(json.load(fh))
+    except (OSError, ValueError):
+        return _estado_editorial_default()
+
+
+def save_estado_editorial(projeto, estado):
+    d = os.path.join(projeto, "estado")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    p = os.path.join(projeto, ARQ_ESTADO_EDITORIAL)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(_merge_estado_editorial(estado), fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    os.replace(tmp, p)
+
+
+# ----------------------------------------------------------------------------
 # VERDADE DO DISCO — o coração da blindagem
 # ----------------------------------------------------------------------------
 def contar_palavras(path):
