@@ -292,7 +292,13 @@ export function garantirRotacaoNaEstrutura(conteudo: string, skill?: string | nu
 export const CAMPOS_EDITORIAIS_SPEC =
   "- **Decisão/Ação:** quem DECIDIU, qual AÇÃO mudou a situação, qual o CUSTO, e qual " +
   "CONSEQUÊNCIA abre o próximo capítulo — cena de escolha/ação/erro/risco, não " +
-  "\"ele percebeu que…\" (vazio/genérico 2 caps seguidos do mesmo POV reprova na guarda).\n";
+  "\"ele percebeu que…\" (vazio/genérico 2 caps seguidos do mesmo POV reprova na guarda).\n" +
+  "- **Novidade:** o que este capítulo acrescenta (info nova / risco / decisão / relação " +
+  "mudou). Se abre um fio, escreva `pergunta aberta: <qual>`; se fecha um, `pergunta paga: " +
+  "<qual>` — a guarda registra em open_loops/paid_loops.\n" +
+  "- **Modo:** dramático (ação / investigação-ativa / confronto / set-piece / perseguição / " +
+  "fuga / escolha-irreversível) OU expositivo (exposição / entrevista / documento / " +
+  "diálogo-informativo) — a guarda mede a streak de exposição.\n";
 
 export function garantirSpecCompletaNoEditor(conteudo: string, skill?: string | null): { texto: string; mudou: boolean } {
   const ex = exigenciasParaSkill(skill);

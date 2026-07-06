@@ -1050,6 +1050,64 @@ def _agencia_guarda(projeto, cap):
 
 
 # ----------------------------------------------------------------------------
+# FASE 3 — Novelty Gate (espelha estado-editorial.ts processarNovidade).
+# ----------------------------------------------------------------------------
+def _extrair_perguntas(novidade):
+    n = novidade or ""
+    def m(pats):
+        for p in pats:
+            r = re.search(p, n, re.I | re.U)
+            if r:
+                return r.group(1).strip()
+        return None
+    abre = m([u"pergunta\\s+aberta\\s*:?\\s*(.+)", u"\\babre\\s*:\\s*(.+)"])
+    paga = m([u"pergunta\\s+paga\\s*:?\\s*(.+)", u"\\bpaga\\s*:\\s*(.+)", u"\\bresponde\\s*:\\s*(.+)"])
+    return abre, paga
+
+
+def _tokens_pt(s):
+    return set(w for w in _norm_trecho(s).split() if len(w) > 2)
+
+
+def _processar_novidade(estado, novidade):
+    abre, paga = _extrair_perguntas(novidade)
+    op = list(estado.get("open_loops", []))
+    pd = list(estado.get("paid_loops", []))
+    if paga:
+        a = _tokens_pt(paga)
+        best_i, best_s = -1, 0.0
+        for i, o in enumerate(op):
+            t = _tokens_pt(o)
+            s = len(a & t) / max(1, min(len(a), len(t)))
+            if s > best_s:
+                best_s, best_i = s, i
+        if best_s >= 0.3 and best_i >= 0:
+            pd.append(op.pop(best_i))
+        else:
+            pd.append(paga)
+    if abre:
+        op.append(abre)
+    estado["open_loops"] = op
+    estado["paid_loops"] = pd
+    return estado
+
+
+def _editorial_pos_aceite(projeto, cap):
+    """Roda APOS aceitar o capitulo: atualiza estado-editorial. FASE 3 (Novelty loops).
+    (FASE 4 acrescenta a source_reveal_streak aqui.)"""
+    try:
+        with open(_spec_path(projeto, cap), "r", encoding="utf-8") as fh:
+            sp = fh.read()
+    except OSError:
+        return
+    ed = load_estado_editorial(projeto)
+    nov = _campo_spec(sp, "Novidade")
+    if nov:
+        ed = _processar_novidade(ed, nov)
+    save_estado_editorial(projeto, ed)
+
+
+# ----------------------------------------------------------------------------
 # CADENCIA (ritmo das frases) — espelha worker/src/maneirismo.ts. Mede o staccato
 # que a Regra 4 da skill-dan-brown bane ("nunca dois fragmentos colados"): o
 # detector de moldes/muletas conta palavras; este conta RITMO.
@@ -1638,6 +1696,7 @@ def executar(projeto, args):
                 aviso = " [aceito p/ nao travar apos re-revisao; PENDENTE: {}]".format("; ".join(pend)) if pend else ""
                 log(projeto, "Capitulo {} revisado (delegado) -> aceito{}. cadencia excesso {}->{}; piso {}; ledger {}.".format(
                     revisando_cap, aviso, exc_antes, exc_depois, "ok" if piso_ok else "BAIXO", "ok" if ledger_ok else "NAO-GRAVADO"))
+                _editorial_pos_aceite(projeto, revisando_cap)  # FASES 3-4 (Novelty loops + streak)
                 continue
             # Guarda REPROVOU: re-revisa o MESMO cap no proximo loop (dirigido, bounded 1x).
             try:

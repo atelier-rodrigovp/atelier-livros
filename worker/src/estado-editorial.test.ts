@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   lerEstadoEditorial, gravarEstadoEditorial, estadoEditorialDefault, mergeEstadoEditorial,
-  agenciaGenerica,
+  agenciaGenerica, processarNovidade,
 } from "./estado-editorial.js";
-import { exigenciasParaSkill } from "./exigencias-skill.js";
+import { exigenciasParaSkill, CAMPOS_EDITORIAIS_SPEC } from "./exigencias-skill.js";
 
 const proj = () => mkdtempSync(path.join(tmpdir(), "ed-"));
 
@@ -71,5 +71,28 @@ describe("Agency Gate (Fase 2)", () => {
   it("agenciaGenerica: cena de escolha/ação concreta = NÃO genérico", () => {
     expect(agenciaGenerica("Cole decidiu não entregar o relógio ao rio e guardou a prova contra a própria regra, ao custo da vida")).toBe(false);
     expect(agenciaGenerica("Helena mente para Sam sobre o lapso, escolhe protegê-lo e assume o risco de ser descoberta")).toBe(false);
+  });
+});
+
+describe("Novelty Gate (Fase 3)", () => {
+  it("pergunta aberta → open_loops; pergunta paga (cap 2) → move p/ paid_loops", () => {
+    let e = estadoEditorialDefault();
+    e = processarNovidade(e, "info nova sobre o símbolo. pergunta aberta: quem matou Danny?");
+    expect(e.open_loops).toContain("quem matou Danny?");
+    expect(e.paid_loops).toEqual([]);
+    e = processarNovidade(e, "revelação forte. pergunta paga: quem matou Danny — foi o Curador");
+    expect(e.open_loops).toEqual([]);   // esvaziou
+    expect(e.paid_loops.length).toBe(1); // cresceu
+  });
+  it("paga sem match adiciona a paid sem esvaziar open não-relacionado", () => {
+    let e = estadoEditorialDefault();
+    e = processarNovidade(e, "pergunta aberta: onde está o arquivo P12?");
+    e = processarNovidade(e, "pergunta paga: a testemunha era falsa");
+    expect(e.open_loops).toEqual(["onde está o arquivo P12?"]); // não relacionado, fica
+    expect(e.paid_loops.length).toBe(1);
+  });
+  it("campo universal Novidade + Modo no editor (CAMPOS_EDITORIAIS_SPEC)", () => {
+    expect(CAMPOS_EDITORIAIS_SPEC).toMatch(/\*\*Novidade:\*\*/);
+    expect(CAMPOS_EDITORIAIS_SPEC).toMatch(/\*\*Modo:\*\*/);
   });
 });

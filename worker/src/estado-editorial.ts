@@ -78,6 +78,48 @@ export function agenciaGenerica(valor: string | null | undefined): boolean {
   return false;
 }
 
+// FASE 3 (Novelty Gate). O campo "Novidade" da spec responde a UMA pergunta; quando
+// abre um loop ("pergunta aberta: …") vira open_loops; quando paga ("pergunta paga: …"
+// / "responde: …") sai de open_loops e entra em paid_loops. Determinístico/testável.
+function _tokens(s: string): Set<string> {
+  return new Set(
+    (s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2)
+  );
+}
+function _melhorMatch(open: string[], alvo: string): number {
+  const a = _tokens(alvo);
+  let best = -1, bestScore = 0;
+  open.forEach((o, i) => {
+    const t = _tokens(o);
+    const inter = [...a].filter((x) => t.has(x)).length;
+    const score = inter / Math.max(1, Math.min(a.size, t.size));
+    if (score > bestScore) { bestScore = score; best = i; }
+  });
+  return bestScore >= 0.3 ? best : -1;
+}
+
+export function extrairPerguntas(novidade: string): { abre?: string; paga?: string } {
+  const n = novidade ?? "";
+  const abre = /pergunta\s+aberta\s*:?\s*(.+)/i.exec(n)?.[1]?.trim() || /\babre\s*:\s*(.+)/i.exec(n)?.[1]?.trim();
+  const paga = /pergunta\s+paga\s*:?\s*(.+)/i.exec(n)?.[1]?.trim() || /\bpaga\s*:\s*(.+)/i.exec(n)?.[1]?.trim() || /\bresponde\s*:\s*(.+)/i.exec(n)?.[1]?.trim();
+  return { abre, paga };
+}
+
+// Processa a "Novidade" de um capítulo contra os loops abertos. Puro (não grava).
+export function processarNovidade(estado: EstadoEditorial, novidade: string): EstadoEditorial {
+  const { abre, paga } = extrairPerguntas(novidade);
+  const open_loops = [...estado.open_loops];
+  const paid_loops = [...estado.paid_loops];
+  if (paga) {
+    const idx = _melhorMatch(open_loops, paga);
+    if (idx >= 0) { paid_loops.push(open_loops[idx]); open_loops.splice(idx, 1); }
+    else paid_loops.push(paga);
+  }
+  if (abre) open_loops.push(abre);
+  return { ...estado, open_loops, paid_loops };
+}
+
 function estadoPath(projDir: string): string {
   return path.join(projDir, "estado", ARQUIVO_ESTADO_EDITORIAL);
 }
