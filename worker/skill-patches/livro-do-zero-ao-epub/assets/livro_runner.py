@@ -527,10 +527,36 @@ def prompt_escrita_capitulo(n, piso):
     ).format(n=n, arq=nome_cap(n).replace("\\", "/"), piso=piso)
 
 
-def prompt_revisao_capitulo(projeto, n, args, piso):
+def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
     """Micro-loop por capitulo (Frente 2): revisor leve -> editor, ANTES de aceitar.
     Porta a arquitetura de papeis da Saga (livro-revisor / livro-editor) para o motor."""
     arq = nome_cap(n).replace("\\", "/")
+    # SPEC PROATIVA: ao FECHAR o capitulo N (este e o MESMO Task->livro-editor que ja
+    # atualiza estado-narrativo.md), pede tambem a materializacao da spec do PROXIMO
+    # capitulo — em vez de deixar o GATE SPEC reativo (gate_spec_capitulo) descobrir a
+    # ausencia so quando o runner ja decidiu escrever aquele capitulo (prompt_gerar_spec).
+    # Por que AQUI e nao "no inicio do ciclo N+1": entre aceitar a revisao de N e checar
+    # gate_spec_capitulo(N+1) nao ha NENHUMA chamada ao Claude no meio (e o mesmo loop
+    # Python sincrono) — pedir a spec "antes do gate rodar" exigiria outra chamada
+    # headless ali, que E o proprio caminho reativo. O livro-editor ja tem o formato
+    # "## SPEC COMPLETA" (marcador SPEC-COMPLETA) no seu system prompt (injetado por
+    # normalizarExigenciasSkill); aqui so REFERENCIAMOS esse bloco (nao repetimos os
+    # campos, que sao especificos por skill — dan-brown/hoover/romantasy divergem).
+    # Reusa gate_spec_capitulo para decidir SE vale a pena pedir (spec do alvo ja
+    # completa e valida -> nao pede de novo; retry da revisao de N tambem nao duplica).
+    alvo_spec = int(n) + 1
+    motivo_spec_proativo = None
+    if total and 1 <= alvo_spec <= int(total) and EXIGE_SPEC_POR_SKILL.get(_skill_projeto(projeto)):
+        motivo_spec_proativo = gate_spec_capitulo(projeto, alvo_spec)
+    bloco_spec_proativa = (
+        "3) Task -> `livro-editor`: TAMBEM materialize/corrija specs/Spec-Capitulo-{alvo:02d}.md "
+        "(motivo: {motivo}), seguindo o formato 'SPEC COMPLETA' que ja esta no SEU proprio "
+        "system prompt (bloco marcado SPEC-COMPLETA) — nao invente outro formato. Use a LINHA "
+        "do Capitulo {alvo} na Estrutura-do-Livro.md, a MATRIZ DE FIOS/POV e o estado/"
+        "estado-narrativo.md (JA atualizado no passo 2) como fontes. Isto e ADIANTAR o "
+        "pre-requisito do PROXIMO capitulo agora; o runner so vai escreve-lo depois.\n   "
+    ).format(alvo=alvo_spec, motivo=motivo_spec_proativo) if motivo_spec_proativo else ""
+    n_passo_final = 4 if bloco_spec_proativa else 3
     maxed = int(getattr(args, "max_edicoes_por_cap", 6))
     # Cota da Regra 4 (ritmo) COM AS CONTAGENS REAIS deste capitulo, para o revisor
     # cobrar por NUMERO, nao por impressao.
@@ -584,10 +610,12 @@ def prompt_revisao_capitulo(projeto, n, args, piso):
         "estado/estado-narrativo.md - NAO crie arquivo novo, NAO escreva noutro lugar; "
         "atualize NELE o que mudou (MCL, fios abertos, pistas plantadas/pagas, relogios). "
         "Regrave o MESMO {arq} (>= {piso} palavras).\n"
-        "3) Encerre. NAO gere a critica nem a prosa na SUA sessao - so dispare os dois Tasks "
-        "e confirme que {arq} foi regravado.\n"
+        "{bloco_spec_proativa}"
+        "{n_passo_final}) Encerre. NAO gere a critica nem a prosa na SUA sessao - so dispare os "
+        "Tasks acima e confirme que {arq} foi regravado.\n"
     ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_cad=bloco_cad, bloco_inter=bloco_inter,
-             bloco_prop=bloco_prop, bloco_beats=_beats_recentes(projeto, n))
+             bloco_prop=bloco_prop, bloco_beats=_beats_recentes(projeto, n),
+             bloco_spec_proativa=bloco_spec_proativa, n_passo_final=n_passo_final)
 
 
 # ----------------------------------------------------------------------------
@@ -1833,7 +1861,7 @@ def executar(projeto, args):
                 cads_antes_rev = cadencia_acima(ler_arquivo(projeto, nome_cap(revisando_cap)), _skill_projeto(projeto))
                 _ledger = os.path.join(projeto, "estado", "estado-narrativo.md")
                 ledger_mtime_antes = os.path.getmtime(_ledger) if os.path.exists(_ledger) else 0
-                prompt = prompt_revisao_capitulo(projeto, revisando_cap, args, piso)
+                prompt = prompt_revisao_capitulo(projeto, revisando_cap, args, piso, tot)
             else:
                 alvo = proximo_capitulo_pendente(projeto, tot, piso)
                 if alvo is None:
