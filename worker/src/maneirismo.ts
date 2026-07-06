@@ -149,7 +149,7 @@ export const MULETAS: Muleta[] = [
   // ocorrência estoura). "sino" ficou FORA de propósito: é palavra PT legítima (o sino).
   {
     termo: "léxico estrangeiro (typo de geração)",
-    re: /\b(ninguño|ningún|ninguna|pero|entonces|mismo|misma|aunque|también|todavía|además)\b/gi,
+    re: /\b(ninguño|ningún|ninguna|pero|entonces|mismo|misma|llegou|llegó|aunque|también|todavía|además)\b/gi,
     orc10k: 0,
   },
 ];
@@ -424,4 +424,154 @@ export function diagnosticarRepeticao(textoCompleto: string, capitulos: string[]
     cadencia,
     algumAcima: moldesAcima.length > 0 || muletasAcima.length > 0 || fecho.acima || ngramas.length > 0 || cadencia.length > 0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// 6) REPETIÇÃO VERBATIM CROSS-CAPÍTULO (AUDITORIA-DAN-BROWN-V2, gap 1). O detector
+//    acima só olha DENTRO de um capítulo; o modelo reaproveita frases-assinatura
+//    ENTRE capítulos ("A mão soube antes da cabeça" — cap-12 e cap-20 do Índice).
+//    UNIVERSAL (não entra em ORC_CADENCIA_POR_SKILL): repetir assinatura é defeito
+//    em qualquer gênero. Ledger = assinaturas-cross-capitulo.json (única fonte).
+// ---------------------------------------------------------------------------
+export function normalizarTrecho(s: string): string {
+  return (s ?? "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "") // tira acentos
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export interface SlotAforistico { original: string; normalizado: string }
+
+// Extrai os "slots aforísticos": frases isoladas (parágrafo próprio) OU trechos
+// após dois-pontos/travessão OU frases que batem num molde aforístico
+// (definicional/antítese/símile). São os slots que o modelo reaproveita.
+export function extrairSlotsAforisticos(texto: string): SlotAforistico[] {
+  const t = semHeadings(texto ?? "");
+  const brutos: string[] = [];
+  for (const par of t.split(/\n{2,}/)) {
+    const fr = dividirFrases(par);
+    if (fr.length === 1) brutos.push(fr[0]); // parágrafo de UMA frase = aforismo isolado
+  }
+  for (const m of t.matchAll(/[:—–]\s*([A-Za-zÀ-ÿ][^.!?\n:—–]{6,90}[.!?])/g)) brutos.push(m[1]);
+  for (const f of dividirFrases(t)) {
+    if (/\b[ée]\s+a\s+defini[çc][ãa]o\b/i.test(f) ||
+        /\bcomo\s+(?:se|quando)\b/i.test(f) ||
+        /\bn[ãa]o\s+\w[^.,;!?\n]{0,50}[,;]\s*(?:mas|e\s+sim|sen[ãa]o)\s+/i.test(f)) brutos.push(f);
+  }
+  const seen = new Set<string>();
+  const out: SlotAforistico[] = [];
+  const emit = (original: string, normalizado: string) => {
+    const nw = normalizado.split(" ").filter(Boolean).length;
+    const conteudo = normalizado.split(" ").filter((w) => w && !STOP.has(w)).length;
+    if (nw >= 3 && nw <= 16 && conteudo >= 3 && !seen.has(normalizado)) { seen.add(normalizado); out.push({ original: original.slice(0, 120), normalizado }); }
+  };
+  for (const b of brutos) {
+    const original = b.replace(/\s+/g, " ").trim();
+    const normalizado = normalizarTrecho(original);
+    const palavras = normalizado.split(" ").filter(Boolean);
+    emit(original, normalizado); // o slot aforístico inteiro (3–16 palavras)
+    for (const k of [6, 8]) if (palavras.length > k)
+      emit(original.split(/\s+/).slice(0, k).join(" "), palavras.slice(0, k).join(" "));
+  }
+  // Além dos slots aforísticos: o PREFIXO (6 e 8 palavras) de TODA sentença. A
+  // assinatura reciclada costuma ser o INÍCIO de uma sentença no meio de um parágrafo
+  // ("A mão soube antes da cabeça, do jeito…" vs "…, esterçou para a rampa") — que os
+  // slots aforísticos (parágrafo isolado/molde) não pegam. Só o prefixo, filtrado por
+  // conteúdo, comparado verbatim/shingle no ledger.
+  for (const f of dividirFrases(t)) {
+    const pal = normalizarTrecho(f).split(" ").filter(Boolean);
+    const origW = f.trim().split(/\s+/);
+    for (const k of [6, 8]) if (pal.length > k) emit(origW.slice(0, k).join(" "), pal.slice(0, k).join(" "));
+  }
+  return out;
+}
+
+function _shingles(norm: string, k = 4): Set<string> {
+  const w = norm.split(" ").filter(Boolean);
+  const s = new Set<string>();
+  for (let i = 0; i + k <= w.length; i++) s.add(w.slice(i, i + k).join(" "));
+  if (!s.size && w.length) s.add(w.join(" "));
+  return s;
+}
+function _jaccard(a: Set<string>, b: Set<string>): number {
+  if (!a.size || !b.size) return 0;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
+export interface RepeticaoCross { trecho: string; capituloAnterior: number; tipo: "verbatim" | "quase-verbatim"; score: number }
+
+// Compara os slots do capítulo atual contra o ledger de capítulos anteriores.
+export function detectarRepeticaoCrossCapitulo(
+  capituloAtual: string,
+  anteriores: { numero: number; trecho: string }[]
+): RepeticaoCross[] {
+  const slots = extrairSlotsAforisticos(capituloAtual);
+  const ant = anteriores.map((a) => {
+    const norm = normalizarTrecho(a.trecho);
+    return { numero: a.numero, norm, sh: _shingles(norm) };
+  });
+  const out: RepeticaoCross[] = [];
+  const jaVi = new Set<string>();
+  for (const s of slots) {
+    if (jaVi.has(s.normalizado)) continue;
+    const v = ant.find((a) => a.norm === s.normalizado);
+    if (v) { out.push({ trecho: s.original, capituloAnterior: v.numero, tipo: "verbatim", score: 1 }); jaVi.add(s.normalizado); continue; }
+    const ssh = _shingles(s.normalizado);
+    let best = { num: -1, score: 0 };
+    for (const a of ant) { const j = _jaccard(ssh, a.sh); if (j > best.score) best = { num: a.numero, score: j }; }
+    if (best.score >= 0.6) { out.push({ trecho: s.original, capituloAnterior: best.num, tipo: "quase-verbatim", score: Math.round(best.score * 100) / 100 }); jaVi.add(s.normalizado); }
+  }
+  return out;
+}
+
+export interface EntradaLedger { capitulo: number; trecho_normalizado: string; trecho_original: string }
+
+// Devolve as NOVAS entradas do ledger para um capítulo (o caller concatena/persiste).
+export function entradasLedgerDoCapitulo(capitulo: number, texto: string): EntradaLedger[] {
+  return extrairSlotsAforisticos(texto).map((s) => ({ capitulo, trecho_normalizado: s.normalizado, trecho_original: s.original }));
+}
+
+// ---------------------------------------------------------------------------
+// 7) ARITMÉTICA DE DIA/HORA (AUDITORIA-DAN-BROWN-V2, gap 3b). O gate de spec só
+//    confere PRESENÇA do campo; não faz a conta. Bug real: spec-16 "SEXTA DIA N+3"
+//    e spec-17 "SEXTA DIA N+4" — offset avança, dia-da-semana não. Formato medido:
+//    "Dia/Hora corrente:** <DIA-SEMANA>, DIA N+<k> — **<hora>**". Degrade gracioso:
+//    spec sem dia-da-semana OU sem N+k é ignorada (não dá para checar).
+// ---------------------------------------------------------------------------
+const _DIAS_SEMANA = ["domingo", "segunda", "terca", "quarta", "quinta", "sexta", "sabado"];
+
+export function parseDiaHora(texto: string): { dia: number; offset: number } | null {
+  const t = normalizarTrecho(texto); // minúsculo, sem acento (sabado, terca…)
+  let dia = -1;
+  for (let i = 0; i < _DIAS_SEMANA.length; i++) {
+    if (new RegExp(`\\b${_DIAS_SEMANA[i]}(?:\\s*feira)?\\b`).test(t)) { dia = i; break; }
+  }
+  const m = /\bdia n\s*\+?\s*(\d+)\b/.exec(t);
+  const offset = m ? parseInt(m[1], 10) : NaN;
+  if (dia < 0 || Number.isNaN(offset)) return null;
+  return { dia, offset };
+}
+
+export interface DiaHoraInconsistencia { capitulo: number; motivo: string }
+
+// Checa a sequência de specs (em ordem de capítulo): offset avança ⇒ dia-da-semana
+// avança na mesma medida (mod 7). Só usa a linha "Dia/Hora corrente".
+export function checarDiaHoraSequencia(specs: { numero: number; diaHoraLinha: string }[]): DiaHoraInconsistencia[] {
+  const parsed = specs
+    .map((s) => ({ numero: s.numero, dh: parseDiaHora(s.diaHoraLinha) }))
+    .filter((x) => x.dh) as { numero: number; dh: { dia: number; offset: number } }[];
+  const out: DiaHoraInconsistencia[] = [];
+  for (let i = 1; i < parsed.length; i++) {
+    const a = parsed[i - 1], b = parsed[i];
+    const dOff = b.dh.offset - a.dh.offset;
+    if (dOff < 0) { out.push({ capitulo: b.numero, motivo: `DIA N+${b.dh.offset} retrocede vs N+${a.dh.offset} (cap ${a.numero})` }); continue; }
+    const esperado = (((a.dh.dia + dOff) % 7) + 7) % 7;
+    if (b.dh.dia !== esperado)
+      out.push({ capitulo: b.numero, motivo: `${_DIAS_SEMANA[b.dh.dia]} em DIA N+${b.dh.offset} incoerente: cap ${a.numero} era ${_DIAS_SEMANA[a.dh.dia]} (N+${a.dh.offset}); +${dOff}d ⇒ ${_DIAS_SEMANA[esperado]}` });
+  }
+  return out;
 }

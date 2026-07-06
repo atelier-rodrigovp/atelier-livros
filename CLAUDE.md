@@ -130,6 +130,39 @@ claimables). Religar = toggle na web / `worker_control.enabled=true` (confirmar 
 intencional). Ao religar, o cap 21 retoma no runner novo. Push dos 14 commits (`0c71887..HEAD`)
 retido para autorização do autor com as provas.
 
+**AUDITORIA-DAN-BROWN-V2 + SPEC-13/14/15 (2026-07-06 — ver `AUDITORIA-DAN-BROWN-V2.md`):** a
+auditoria v2 do Índice provou que o gate estrutural funcionou (banda pós-gate mensuravelmente
+mais limpa E viva), mas achou 3 gaps que os campos-de-spec NÃO alcançam. Fiados no molde (TS
+testado = fonte; `livro_runner.py` = espelho que roda; sweep confirma nos capítulos reais):
+**SPEC-13 (gap 1) — repetição verbatim CROSS-capítulo** (`maneirismo.ts`
+`detectarRepeticaoCrossCapitulo`/`extrairSlotsAforisticos`/`entradasLedgerDoCapitulo`; espelho no
+runner + ledger único `assinaturas-cross-capitulo.json`): pega a frase-assinatura reciclada entre
+capítulos ("A mão soube antes da cabeça" cap-12↔cap-20) que o detector por-capítulo não vê;
+extrai slots aforísticos + o PREFIXO (6/8 palavras) de toda sentença (filtro de palavra-conteúdo),
+compara verbatim + shingle 4-grama ≥0.6; **UNIVERSAL** (todo projeto, não entra em
+`ORC_CADENCIA_POR_SKILL`); bounded em `gate_maneirismo_capitulo`; ledger atualizado por capítulo
+aceito. **SPEC-14 (gap 2) — monotonia de POV a nível-livro** (`exigencias-skill.ts`
+`avaliarRotacaoFio` + campos `maxCapsMesmoFioAbsoluto`/`janelaDiversidade`; espelho
+`EXIGE_SPEC_POR_SKILL`/`_avaliar_rotacao_fio` + `gate_spec_capitulo`): teto ABSOLUTO que
+`Justificativa de fio:` NÃO derruba + janela de diversidade — pega os 7 Helena seguidos (13–19)
+que o gate legalizava; **só skills com rotação real** (dan-brown `abs 5, janela {10,0.7}`;
+romantasy `abs 3, {6,0.6}` — ⚠️ **nºs a confirmar com o Rodrigo**); **hoover NÃO** (POV único).
+Fio normalizado ao código canônico (`H (Helena Caires)`→`h`). **SPEC-15 (gap 3) — dois pontuais:**
+léxico `llegou/llegó` na lista estrangeira (`MULETAS`/`_MULETAS`, alvo 0 — o vazamento do cap-16);
+e **aritmética de Dia/Hora** (`parseDiaHora`/`checarDiaHoraSequencia`; espelho `_checar_dia_hora`
+no `gate_spec_capitulo`): offset `DIA N+k` avança ⇒ dia-da-semana avança na mesma medida (mod 7) —
+pega o `SEXTA N+3`→`SEXTA N+4` do cap-17. **Sweep read-only** (`worker/scripts/auditar-cross-continuidade.ts`)
+confirmou os 4 achados nos capítulos reais (gap1=20, gap2=17, gap3a=1, gap3b=1) e semeou o ledger
+do Índice. DoD verde: vitest 151 (novos: `auditoria-v2.test.ts` 13), `tsc`=0, gate py funcional
+(`test_gate2` 10/10 + regressão), `py_compile` OK. **Instalado em produção** (runner reinstalado
+`20260706070512`, diff patch↔instalado vazio); NÃO exigiu restart do node (gates são Python,
+spawnados frescos por capítulo — valem do próximo capítulo em diante). **Prosa já publicada NÃO
+reescrita** (decisão do Rodrigo). **FASE -1 (throughput da madrugada):** medido — a noite rendeu
+4 caps (29–32) em ~62% produtivo / **38% throttle REAL do Max** (2h45, tratado certo) / ~0%
+desperdício mecânico; o 0xC0000142 foi da noite anterior (limite SEMANAL de fundo). Sinal novo de
+qualidade (não throughput): contaminação **PT-PT** força rodadas extras de revisão — alvo futuro
+na origem (perfil/contextualizador), não no loop.
+
 
 Plataforma que orquestra agentes do Claude Code para produzir livros (front
 React+Vite+TS; Supabase; worker local em `worker/` via fila de jobs; deploy em

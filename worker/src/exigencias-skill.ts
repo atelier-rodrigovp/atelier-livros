@@ -56,11 +56,58 @@ export interface ExigenciasSkill {
   blocoRevisor?: string;      // item extra injetado no livro-revisor (ex.: CUSTO-ESCALA da romantasy)
   marcadorRevisor?: string;   // marcador de idempotência do blocoRevisor
   docsFundacao?: DocFundacao[]; // docs de fundação verificados por presença (hoover/romantasy)
+  // AUDITORIA-DAN-BROWN-V2 gap 2: monotonia de POV/fio a nível-livro. maxCapsMesmoFio
+  // (acima) só exige Justificativa; estes dois são tetos que a justificativa NÃO derruba.
+  // Só para skills com rotação real (dan-brown/romantasy) — hoover NÃO tem (POV único).
+  maxCapsMesmoFioAbsoluto?: number;               // teto DURO, mesmo com 'Justificativa de fio:'
+  janelaDiversidade?: { tamanho: number; ratioMax: number }; // nos últimos N specs, nenhum fio > ratioMax
+}
+
+// Avalia a monotonia de fio a nível-livro. `fios` = sequência de fios (um por
+// capítulo, em ordem). Devolve os motivos de reprovação para o capítulo `n` (1-based).
+// Puro/testável; espelhado em livro_runner.py (gate_spec_capitulo).
+export function avaliarRotacaoFio(
+  fios: (string | null)[],
+  n: number,
+  ex: { maxCapsMesmoFioAbsoluto?: number; janelaDiversidade?: { tamanho: number; ratioMax: number } }
+): string[] {
+  const out: string[] = [];
+  // Normaliza o fio ao CÓDIGO/POV canônico: "H (Helena Caires…)" / "H (principal)" /
+  // "H (Helena)" → "h". Sem isso a descrição varia por capítulo e caps do MESMO POV
+  // não contam como iguais (o real do Índice). Corta no 1º "(" ou travessão.
+  const norm = (f: string | null) => (f ?? "").split(/[(—–]/)[0].trim().toLowerCase();
+  const seq = fios.slice(0, n).map(norm);
+  const atual = seq[n - 1];
+  if (!atual) return out;
+  // teto absoluto: quantos capítulos consecutivos (contando este) no mesmo fio?
+  if (ex.maxCapsMesmoFioAbsoluto && ex.maxCapsMesmoFioAbsoluto > 0) {
+    let consec = 0;
+    for (let i = n - 1; i >= 0 && seq[i] === atual; i--) consec++;
+    if (consec > ex.maxCapsMesmoFioAbsoluto)
+      out.push(`teto absoluto: ${consec} caps consecutivos no fio '${atual}' (máx ${ex.maxCapsMesmoFioAbsoluto}, Justificativa NÃO derruba)`);
+  }
+  // janela de diversidade: nos últimos `tamanho` caps, nenhum fio pode passar de ratioMax
+  const jd = ex.janelaDiversidade;
+  if (jd && jd.tamanho > 0) {
+    const jan = seq.slice(Math.max(0, n - jd.tamanho));
+    if (jan.length >= jd.tamanho) {
+      const cont = new Map<string, number>();
+      for (const f of jan) if (f) cont.set(f, (cont.get(f) ?? 0) + 1);
+      for (const [f, c] of cont) {
+        const ratio = c / jan.length;
+        if (ratio > jd.ratioMax)
+          out.push(`monotonia: fio '${f}' em ${c}/${jan.length} dos últimos caps (${Math.round(ratio * 100)}% > ${Math.round(jd.ratioMax * 100)}%)`);
+      }
+    }
+  }
+  return out;
 }
 
 const DAN_BROWN: ExigenciasSkill = {
   fios: { min: 2, max: 4 },
   maxCapsMesmoFio: 3,
+  maxCapsMesmoFioAbsoluto: 5,                        // ⚠️ nº a confirmar com o Rodrigo
+  janelaDiversidade: { tamanho: 10, ratioMax: 0.7 }, // pega o real "7 de 13–19" do Índice
   camposSpec: ["Fio de POV", "Dia/Hora"],
   dossie: true,
   marcadorNotas: MARCADOR_ROTACAO,
@@ -162,6 +209,8 @@ const HOOVER: ExigenciasSkill = {
 const ROMANTASY: ExigenciasSkill = {
   fios: { min: 2, max: 2 },
   maxCapsMesmoFio: 2,
+  maxCapsMesmoFioAbsoluto: 3,                       // ⚠️ nº a confirmar (POV duplo é mais apertado)
+  janelaDiversidade: { tamanho: 6, ratioMax: 0.6 },
   camposSpec: ["Ponto de vista", "Degrau slow burn", "Custo de magia"],
   dossie: false,
   marcadorNotas: MARCADOR_ROTACAO_POV,

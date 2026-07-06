@@ -689,7 +689,7 @@ _MULETAS = [
     # SPEC-08: token estrangeiro/typo de geracao (lista LITERAL; "sino" fora — e PT).
     # budget 0 = qualquer ocorrencia estoura. Espelha o TS.
     (u"lexico estrangeiro (typo)",
-     re.compile(u"\\b(ninguño|ningún|ninguna|pero|entonces|mismo|misma|aunque|también|todavía|además)\\b", re.I | re.U),
+     re.compile(u"\\b(ninguño|ningún|ninguna|pero|entonces|mismo|misma|llegou|llegó|aunque|también|todavía|además)\\b", re.I | re.U),
      0, 0.0),
 ]
 
@@ -702,6 +702,222 @@ def muletas_acima_cap(texto):
         if n > budget:
             out.append((nome, n, budget))
     return out
+
+
+# ----------------------------------------------------------------------------
+# AUDITORIA-DAN-BROWN-V2 (espelha worker/src/maneirismo.ts + exigencias-skill.ts).
+# gap 1: repeticao verbatim CROSS-capitulo (ledger assinaturas-cross-capitulo.json).
+# gap 2: monotonia de POV/fio a nivel-livro. gap 3b: aritmetica de Dia/Hora.
+# ----------------------------------------------------------------------------
+_STOP_NG = set((
+    u"a o as os um uma uns umas de da do das dos e em no na nos nas que se com por para "
+    u"ao à às aos seu sua seus suas é era foi fora ele ela eles elas isso isto lhe lhes me te "
+    u"mas como mais já não sim ou nem entre sobre sem até onde quando quem qual cada todo toda "
+    u"dele dela deles delas num numa pelo pela pelos pelas").split())
+
+
+def _norm_trecho(s):
+    t = unicodedata.normalize("NFD", s or "")
+    t = u"".join(c for c in t if unicodedata.category(c) != "Mn").lower()
+    t = re.sub(u"[^a-z0-9\\s]", u" ", t, flags=re.U)
+    return re.sub(u"\\s+", u" ", t).strip()
+
+
+def _extrair_slots_aforisticos(texto):
+    t = _sem_headings(texto or "")
+    brutos = []
+    for par in re.split(u"\n{2,}", t):
+        fr = dividir_frases(par)
+        if len(fr) == 1:
+            brutos.append(fr[0])
+    for m in re.finditer(u"[:—–]\\s*([A-Za-zÀ-ÿ][^.!?\\n:—–]{6,90}[.!?])", t, re.U):
+        brutos.append(m.group(1))
+    for f in dividir_frases(t):
+        if re.search(u"\\b[ée]\\s+a\\s+defini[çc][ãa]o\\b", f, re.I | re.U) or re.search(u"\\bcomo\\s+(?:se|quando)\\b", f, re.I | re.U):
+            brutos.append(f)
+    seen, out = set(), []
+
+    def emit(orig, norm):
+        pal = [w for w in norm.split(u" ") if w]
+        cont = len([w for w in pal if w not in _STOP_NG])
+        if 3 <= len(pal) <= 16 and cont >= 3 and norm not in seen:
+            seen.add(norm)
+            out.append({"original": orig[:120], "normalizado": norm})
+
+    for b in brutos:
+        orig = re.sub(u"\\s+", u" ", b).strip()
+        norm = _norm_trecho(orig)
+        pal = [w for w in norm.split(u" ") if w]
+        emit(orig, norm)
+        for k in (6, 8):
+            if len(pal) > k:
+                emit(u" ".join(orig.split()[:k]), u" ".join(pal[:k]))
+    # Prefixo (6 e 8 palavras) de TODA sentenca: a assinatura reciclada costuma ser o
+    # INICIO de uma sentenca no meio de um paragrafo, que os slots aforisticos perdem.
+    for f in dividir_frases(t):
+        pal = [w for w in _norm_trecho(f).split(u" ") if w]
+        ow = f.strip().split()
+        for k in (6, 8):
+            if len(pal) > k:
+                emit(u" ".join(ow[:k]), u" ".join(pal[:k]))
+    return out
+
+
+def _shingles(norm, k=4):
+    w = [x for x in norm.split(u" ") if x]
+    s = set(u" ".join(w[i:i + k]) for i in range(0, len(w) - k + 1))
+    if not s and w:
+        s.add(u" ".join(w))
+    return s
+
+
+def _jaccard(a, b):
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    return inter / float(len(a) + len(b) - inter)
+
+
+LEDGER_CROSS = "assinaturas-cross-capitulo.json"
+
+
+def _ler_ledger_cross(projeto):
+    try:
+        with open(os.path.join(projeto, LEDGER_CROSS), "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return []
+
+
+def _escrever_ledger_cross(projeto, entradas):
+    with open(os.path.join(projeto, LEDGER_CROSS), "w", encoding="utf-8") as fh:
+        json.dump(entradas, fh, ensure_ascii=False, indent=0)
+
+
+def detectar_repeticao_cross(texto_atual, anteriores):
+    """anteriores: list de {'numero','trecho'}. Devolve list de
+    {'trecho','cap','tipo','score'} (verbatim/quase-verbatim)."""
+    slots = _extrair_slots_aforisticos(texto_atual)
+    ant = [{"numero": a["numero"], "norm": _norm_trecho(a["trecho"]),
+            "sh": _shingles(_norm_trecho(a["trecho"]))} for a in anteriores]
+    out, ja = [], set()
+    for s in slots:
+        if s["normalizado"] in ja:
+            continue
+        v = next((a for a in ant if a["norm"] == s["normalizado"]), None)
+        if v:
+            out.append({"trecho": s["original"], "cap": v["numero"], "tipo": "verbatim", "score": 1.0})
+            ja.add(s["normalizado"])
+            continue
+        ssh = _shingles(s["normalizado"])
+        best = {"num": -1, "score": 0.0}
+        for a in ant:
+            j = _jaccard(ssh, a["sh"])
+            if j > best["score"]:
+                best = {"num": a["numero"], "score": j}
+        if best["score"] >= 0.6:
+            out.append({"trecho": s["original"], "cap": best["num"], "tipo": "quase-verbatim", "score": round(best["score"], 2)})
+            ja.add(s["normalizado"])
+    return out
+
+
+def _atualizar_ledger_com_cap(projeto, n):
+    """Regrava as entradas do capitulo n no ledger (idempotente em re-run)."""
+    txt = ler_arquivo(projeto, nome_cap(n))
+    if not txt:
+        return
+    ledger = [e for e in _ler_ledger_cross(projeto) if int(e.get("capitulo", 0)) != int(n)]
+    for s in _extrair_slots_aforisticos(txt):
+        ledger.append({"capitulo": int(n), "trecho_normalizado": s["normalizado"], "trecho_original": s["original"]})
+    _escrever_ledger_cross(projeto, ledger)
+
+
+# gap 2: monotonia de POV/fio a nivel-livro (espelha avaliarRotacaoFio no TS).
+def _avaliar_rotacao_fio(fios, n, exig):
+    out = []
+    # Normaliza ao codigo/POV canonico ("H (Helena Caires)" -> "h"): corta no 1o "(".
+    seq = [re.split(u"[(—–]", (f or ""))[0].strip().lower() for f in fios[:n]]
+    if not seq or not seq[n - 1]:
+        return out
+    atual = seq[n - 1]
+    absoluto = exig.get("max_absoluto")
+    if absoluto and absoluto > 0:
+        consec = 0
+        i = n - 1
+        while i >= 0 and seq[i] == atual:
+            consec += 1
+            i -= 1
+        if consec > absoluto:
+            out.append(u"teto absoluto: {} caps consecutivos no fio '{}' (max {}, Justificativa NAO derruba)".format(consec, atual, absoluto))
+    jd = exig.get("janela")
+    if jd and jd.get("tamanho", 0) > 0:
+        jan = seq[max(0, n - jd["tamanho"]):n]
+        if len(jan) >= jd["tamanho"]:
+            cont = {}
+            for f in jan:
+                if f:
+                    cont[f] = cont.get(f, 0) + 1
+            for f, c in cont.items():
+                ratio = c / float(len(jan))
+                if ratio > jd["ratio_max"]:
+                    out.append(u"monotonia: fio '{}' em {}/{} dos ultimos caps ({}% > {}%)".format(
+                        f, c, len(jan), int(round(ratio * 100)), int(round(jd["ratio_max"] * 100))))
+    return out
+
+
+# gap 3b: aritmetica de Dia/Hora (espelha parseDiaHora/checarDiaHoraSequencia no TS).
+_DIAS_SEMANA = [u"domingo", u"segunda", u"terca", u"quarta", u"quinta", u"sexta", u"sabado"]
+
+
+def _parse_dia_hora(texto):
+    t = _norm_trecho(texto)
+    dia = -1
+    for i, d in enumerate(_DIAS_SEMANA):
+        if re.search(u"\\b" + d + u"(?:\\s*feira)?\\b", t):
+            dia = i
+            break
+    m = re.search(u"\\bdia n\\s*\\+?\\s*(\\d+)\\b", t)
+    if dia < 0 or not m:
+        return None
+    return (dia, int(m.group(1)))
+
+
+def _dia_hora_linha(texto):
+    for l in (texto or "").split(u"\n"):
+        if re.search(u"Dia/Hora corrente", l, re.I):
+            return l
+    return ""
+
+
+def _checar_dia_hora(projeto, n):
+    """Checa o Dia/Hora do cap n contra o ultimo spec valido anterior. Motivo ou None."""
+    def dh(k):
+        try:
+            with open(_spec_path(projeto, k), "r", encoding="utf-8") as fh:
+                return _parse_dia_hora(_dia_hora_linha(fh.read()))
+        except OSError:
+            return None
+    atual = dh(n)
+    if not atual:
+        return None
+    prev = None
+    for k in range(int(n) - 1, 0, -1):
+        p = dh(k)
+        if p:
+            prev = (k, p)
+            break
+    if not prev:
+        return None
+    kprev, (da, oa) = prev[0], prev[1]
+    db, ob = atual
+    d_off = ob - oa
+    if d_off < 0:
+        return u"Dia/Hora: DIA N+{} retrocede vs N+{} (cap {})".format(ob, oa, kprev)
+    esperado = ((da + d_off) % 7 + 7) % 7
+    if db != esperado:
+        return u"Dia/Hora: {} em DIA N+{} incoerente (cap {} era {} N+{}; +{}d => {})".format(
+            _DIAS_SEMANA[db], ob, kprev, _DIAS_SEMANA[da], oa, d_off, _DIAS_SEMANA[esperado])
+    return None
 
 
 # ----------------------------------------------------------------------------
@@ -749,14 +965,15 @@ def _skill_projeto(projeto):
 # ----------------------------------------------------------------------------
 DIR_SPECS = "specs"
 EXIGE_SPEC_POR_SKILL = {
-    "skill-dan-brown": dict(campos=["Fio de POV", "Dia/Hora"], max_mesmo_fio=3),
-    # SPEC-HM2: hoover e POV unico (Helena) — nao ha rotacao de fio (nenhum campo
-    # "Fio de POV"/"Ponto de vista" na spec), entao o guard de rotacao fica inerte;
-    # o gate cobra a DECLARACAO dos eixos da skill (relogios/pistas/narradora/DIA-HORA).
+    # AUDITORIA-DAN-BROWN-V2 gap 2: max_absoluto (teto que Justificativa NAO derruba)
+    # + janela (diversidade nos ultimos N). So skills com rotacao real (dan-brown/romantasy).
+    "skill-dan-brown": dict(campos=["Fio de POV", "Dia/Hora"], max_mesmo_fio=3,
+                            max_absoluto=5, janela=dict(tamanho=10, ratio_max=0.7)),
+    # SPEC-HM2: hoover e POV unico (Helena) — sem rotacao; NAO recebe max_absoluto/janela.
     "hoover-mcfadden": dict(campos=["Dia/Hora", "Relogios", "Pistas", "Gancho", "Narradora"], max_mesmo_fio=6),
-    # SPEC-RM2: romantasy = POV duplo; o guard de rotacao (via "Ponto de vista") reprova
-    # 3 caps seguidos no mesmo amante sem "Justificativa de POV:".
-    "skill-romantasy": dict(campos=["Ponto de vista", "Degrau slow burn", "Custo de magia"], max_mesmo_fio=2),
+    # SPEC-RM2: romantasy = POV duplo; guard de rotacao via "Ponto de vista".
+    "skill-romantasy": dict(campos=["Ponto de vista", "Degrau slow burn", "Custo de magia"], max_mesmo_fio=2,
+                            max_absoluto=3, janela=dict(tamanho=6, ratio_max=0.6)),
 }
 
 
@@ -815,6 +1032,22 @@ def gate_spec_capitulo(projeto, n):
                 and not tem_justificativa):
             return ("{}o capitulo consecutivo no fio '{}' sem 'Justificativa de fio/POV:'"
                     .format(exig["max_mesmo_fio"] + 1, fio))
+    # gap 2: teto absoluto + janela de diversidade (Justificativa NAO derruba).
+    if exig.get("max_absoluto") or exig.get("janela"):
+        fios_seq = []
+        for k in range(1, int(n) + 1):
+            try:
+                with open(_spec_path(projeto, k), "r", encoding="utf-8") as fh:
+                    fios_seq.append(_fio_da_spec(fh.read()))
+            except OSError:
+                fios_seq.append("")
+        motivos = _avaliar_rotacao_fio(fios_seq, int(n), exig)
+        if motivos:
+            return "; ".join(motivos)
+    # gap 3b: aritmetica de Dia/Hora (offset avanca => dia-da-semana avanca).
+    dh = _checar_dia_hora(projeto, n)
+    if dh:
+        return dh
     return None
 
 
@@ -943,27 +1176,37 @@ def gate_maneirismo_capitulo(projeto, n, args):
     offs = maneirismos_acima(txt)
     muls = muletas_acima_cap(txt)
     cads = cadencia_acima(txt, _skill_projeto(projeto))
-    if not offs and not muls and not cads:
-        return
-    lista = "; ".join(["{} {}x".format(nome, cnt) for nome, cnt in offs] +
-                      ["MULETA {} {}x (alvo <= {})".format(nome, cnt, b) for nome, cnt, b in muls] +
-                      ["CADENCIA {} {}x (alvo <= {})".format(nome, cnt, alvo) for nome, cnt, alvo in cads])
-    arq = nome_cap(n).replace("\\", "/")
-    log(projeto, "GATE CAP {}: acima do orcamento -> reescrevendo ({}).".format(n, lista))
-    prompt = (
-        "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n"
-        "REVISAO DE PROSA do {arq}: os itens abaixo estao SOBRE-REPRESENTADOS neste "
-        "capitulo (contagem real). Reduza CADA UM ao alvo. Para MULETAS (ex.: 'coisa'), "
-        "TROQUE pela coisa concreta a que se refere (objeto, ideia, gesto) — nunca deixe "
-        "'coisa' generica. Para MOLDES, desadense o tique com sintaxe variada. Para "
-        "CADENCIA (ritmo), VARIE o comprimento das frases — FUNDA as frases curtas coladas "
-        "numa frase mais longa e encadeada onde for revelacao, quebre a anafora, corte o "
-        "clipe de negacao repetido; nunca dois fragmentos colados (Regra 4). NAO basta "
-        "cortar palavra: a instrucao e variar o RITMO. PRESERVE sentido e voz; NAO "
-        "reescreva a cena a toa. Regrave o MESMO arquivo {arq}.\n"
-        "Itens acima do orcamento: {lista}\n"
-    ).format(arq=arq, lista=lista)
-    run_claude(projeto, prompt, args)
+    # gap 1: repeticao verbatim/quase-verbatim CROSS-capitulo (ledger, caps < n).
+    ledger = _ler_ledger_cross(projeto)
+    anteriores = [{"numero": e["capitulo"], "trecho": e.get("trecho_original", "")}
+                  for e in ledger if int(e.get("capitulo", 0)) < int(n)]
+    reps = detectar_repeticao_cross(txt, anteriores)
+    if offs or muls or cads or reps:
+        lista = "; ".join(["{} {}x".format(nome, cnt) for nome, cnt in offs] +
+                          ["MULETA {} {}x (alvo <= {})".format(nome, cnt, b) for nome, cnt, b in muls] +
+                          ["CADENCIA {} {}x (alvo <= {})".format(nome, cnt, alvo) for nome, cnt, alvo in cads] +
+                          [u"REPETICAO CROSS-CAP '{}' (= cap {})".format(r["trecho"], r["cap"]) for r in reps])
+        arq = nome_cap(n).replace("\\", "/")
+        log(projeto, "GATE CAP {}: acima do orcamento -> reescrevendo ({}).".format(n, lista))
+        prompt = (
+            "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n"
+            "REVISAO DE PROSA do {arq}: os itens abaixo estao SOBRE-REPRESENTADOS neste "
+            "capitulo (contagem real). Reduza CADA UM ao alvo. Para MULETAS (ex.: 'coisa'), "
+            "TROQUE pela coisa concreta a que se refere (objeto, ideia, gesto) — nunca deixe "
+            "'coisa' generica. Para MOLDES, desadense o tique com sintaxe variada. Para "
+            "CADENCIA (ritmo), VARIE o comprimento das frases — FUNDA as frases curtas coladas "
+            "numa frase mais longa e encadeada onde for revelacao, quebre a anafora, corte o "
+            "clipe de negacao repetido; nunca dois fragmentos colados (Regra 4). Para "
+            "REPETICAO CROSS-CAP, o trecho ja apareceu num capitulo ANTERIOR (frase-assinatura "
+            "reciclada) — REESCREVA-O com imagem/sintaxe nova aqui, sem repetir o molde do "
+            "capitulo citado. NAO basta cortar palavra: a instrucao e variar. PRESERVE sentido "
+            "e voz; NAO reescreva a cena a toa. Regrave o MESMO arquivo {arq}.\n"
+            "Itens acima do orcamento: {lista}\n"
+        ).format(arq=arq, lista=lista)
+        run_claude(projeto, prompt, args)
+    # Atualiza o ledger cross-capitulo com os slots deste capitulo (apos aceitar/
+    # reescrever). Idempotente por capitulo. Roda mesmo quando o capitulo passou limpo.
+    _atualizar_ledger_com_cap(projeto, n)
 
 
 # ----------------------------------------------------------------------------
