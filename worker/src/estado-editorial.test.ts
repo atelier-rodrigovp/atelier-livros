@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   lerEstadoEditorial, gravarEstadoEditorial, estadoEditorialDefault, mergeEstadoEditorial,
-  agenciaGenerica, processarNovidade, modoExpositivo,
+  agenciaGenerica, processarNovidade, modoExpositivo, modoSetPiece,
 } from "./estado-editorial.js";
 import { exigenciasParaSkill, CAMPOS_EDITORIAIS_SPEC } from "./exigencias-skill.js";
 import { exposicaoPosRevelacaoRisco } from "./maneirismo.js";
@@ -121,5 +121,21 @@ describe("Source Reveal Streak (Fase 4)", () => {
     expect(modoExpositivo("ação / perseguição")).toBe(false);
     expect(modoExpositivo("confronto no beco")).toBe(false);
     expect(modoExpositivo("")).toBe(false);
+  });
+});
+
+describe("Set Piece Scheduler (Fase 6)", () => {
+  it("modoSetPiece = alto impacto (não investigação)", () => {
+    expect(modoSetPiece("set-piece no museu")).toBe(true);
+    expect(modoSetPiece("confronto")).toBe(true);
+    expect(modoSetPiece("perseguição de carro")).toBe(true);
+    expect(modoSetPiece("escolha-irreversível")).toBe(true);
+    expect(modoSetPiece("investigação-ativa")).toBe(false);
+    expect(modoSetPiece("exposição")).toBe(false);
+  });
+  it("opt-in por skill: dan-brown/romantasy = 7; hoover = undefined", () => {
+    expect(exigenciasParaSkill("skill-dan-brown")!.setPieceIntervalo).toBe(7);
+    expect(exigenciasParaSkill("skill-romantasy")!.setPieceIntervalo).toBe(7);
+    expect(exigenciasParaSkill("hoover-mcfadden")!.setPieceIntervalo).toBeUndefined();
   });
 });

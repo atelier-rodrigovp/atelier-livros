@@ -127,6 +127,13 @@ export function modoExpositivo(modo: string | null | undefined): boolean {
   return _RE_MODO_EXPO.test(modo ?? "");
 }
 
+// FASE 6 (Set Piece): cena de ALTO IMPACTO (set-piece/confronto/perseguição/fuga/
+// escolha-irreversível). Não conta "investigação-ativa" (é dramático, mas não set-piece).
+const _RE_MODO_SETPIECE = /set[- ]?piece|confronto|persegui|fuga|escolha[- ]irrevers/i;
+export function modoSetPiece(modo: string | null | undefined): boolean {
+  return _RE_MODO_SETPIECE.test(modo ?? "");
+}
+
 function estadoPath(projDir: string): string {
   return path.join(projDir, "estado", ARQUIVO_ESTADO_EDITORIAL);
 }

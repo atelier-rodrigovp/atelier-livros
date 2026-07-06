@@ -61,6 +61,9 @@ export interface ExigenciasSkill {
   // Só para skills com rotação real (dan-brown/romantasy) — hoover NÃO tem (POV único).
   maxCapsMesmoFioAbsoluto?: number;               // teto DURO, mesmo com 'Justificativa de fio:'
   janelaDiversidade?: { tamanho: number; ratioMax: number }; // nos últimos N specs, nenhum fio > ratioMax
+  // FASE 6 (Set Piece Scheduler): 1 cena de alto impacto a cada N caps (opt-in por skill).
+  // dan-brown/romantasy: 7. hoover: sem entrada (a estrutura dela é relógio+pista, não set-piece).
+  setPieceIntervalo?: number;
 }
 
 // Avalia a monotonia de fio a nível-livro. `fios` = sequência de fios (um por
@@ -108,6 +111,7 @@ const DAN_BROWN: ExigenciasSkill = {
   maxCapsMesmoFio: 3,
   maxCapsMesmoFioAbsoluto: 5,                         // confirmado
   janelaDiversidade: { tamanho: 10, ratioMax: 0.65 }, // 0.65: o defeito real foi 0.7–0.8; 0.7 ficava na borda
+  setPieceIntervalo: 7,                               // ⚠️ intervalo a confirmar com o Rodrigo
   camposSpec: ["Fio de POV", "Dia/Hora", "Decisão/Ação"],
   dossie: true,
   marcadorNotas: MARCADOR_ROTACAO,
@@ -211,6 +215,7 @@ const ROMANTASY: ExigenciasSkill = {
   maxCapsMesmoFio: 2,
   maxCapsMesmoFioAbsoluto: 3,                       // ⚠️ nº a confirmar (POV duplo é mais apertado)
   janelaDiversidade: { tamanho: 6, ratioMax: 0.6 },
+  setPieceIntervalo: 7,                             // ⚠️ intervalo a confirmar
   camposSpec: ["Ponto de vista", "Degrau slow burn", "Custo de magia", "Decisão/Ação"],
   dossie: false,
   marcadorNotas: MARCADOR_ROTACAO_POV,

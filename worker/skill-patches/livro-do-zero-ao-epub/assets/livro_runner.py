@@ -1123,6 +1123,36 @@ def _streak_guarda(projeto, cap):
     return (True, "")
 
 
+# FASE 6 — Set Piece Scheduler (espelha estado-editorial.ts modoSetPiece). AVISA (nao bloqueia).
+_RE_MODO_SETPIECE = re.compile(u"set[- ]?piece|confronto|persegui|fuga|escolha[- ]irrevers", re.I | re.U)
+
+
+def _modo_setpiece(modo):
+    return bool(_RE_MODO_SETPIECE.search(modo or ""))
+
+
+def _setpiece_guarda(projeto, cap):
+    """(ok, motivo). AVISO (ritmo, nao bloqueia): N caps sem set-piece. Opt-in por skill
+    (set_piece_intervalo); skill sem entrada = no-op (hoover)."""
+    exig = EXIGE_SPEC_POR_SKILL.get(_skill_projeto(projeto)) or {}
+    intervalo = exig.get("set_piece_intervalo")
+    if not intervalo:
+        return (True, "")
+    ultimo = 0
+    for n in range(int(cap), 0, -1):
+        try:
+            with open(_spec_path(projeto, n), "r", encoding="utf-8") as fh:
+                if _modo_setpiece(_campo_spec(fh.read(), "Modo")):
+                    ultimo = n
+                    break
+        except OSError:
+            pass
+    desde = int(cap) - ultimo if ultimo else int(cap)
+    if desde >= intervalo:
+        return (False, u"set-piece: {} capitulos sem cena de alto impacto (intervalo alvo {})".format(desde, intervalo))
+    return (True, "")
+
+
 # FASE 5 — Exposition Control pos-revelacao (espelha maneirismo.ts). SINALIZA.
 def _houve_revelacao(projeto, cap):
     """cap teve revelacao forte? (Pistas: Paga: ... OU Novidade com 'pergunta paga')."""
@@ -1159,6 +1189,8 @@ def _editorial_pos_aceite(projeto, cap):
     md = _campo_spec(sp, "Modo")
     if md:
         ed["source_reveal_streak"] = int(ed.get("source_reveal_streak", 0)) + 1 if _modo_expositivo(md) else 0
+        if _modo_setpiece(md):
+            ed["last_high_impact_scene"] = int(cap)  # FASE 6
     risco = _exposicao_pos_revelacao(ler_arquivo(projeto, nome_cap(cap)), _houve_revelacao(projeto, int(cap) - 1))
     ed["exposition_risk"] = 1 if risco else 0
     if risco:
@@ -1215,12 +1247,12 @@ EXIGE_SPEC_POR_SKILL = {
     # + janela (diversidade nos ultimos N). So skills com rotacao real (dan-brown/romantasy).
     # editorial Fase 2: "Decisao/Acao" universal em toda skill gated (matching accent-insensitive).
     "skill-dan-brown": dict(campos=["Fio de POV", "Dia/Hora", "Decisao/Acao"], max_mesmo_fio=3,
-                            max_absoluto=5, janela=dict(tamanho=10, ratio_max=0.65)),
-    # SPEC-HM2: hoover e POV unico (Helena) — sem rotacao; NAO recebe max_absoluto/janela.
+                            max_absoluto=5, janela=dict(tamanho=10, ratio_max=0.65), set_piece_intervalo=7),
+    # SPEC-HM2: hoover e POV unico (Helena) — sem rotacao; NAO recebe max_absoluto/janela/set_piece.
     "hoover-mcfadden": dict(campos=["Dia/Hora", "Relogios", "Pistas", "Gancho", "Narradora", "Decisao/Acao"], max_mesmo_fio=6),
     # SPEC-RM2: romantasy = POV duplo; guard de rotacao via "Ponto de vista".
     "skill-romantasy": dict(campos=["Ponto de vista", "Degrau slow burn", "Custo de magia", "Decisao/Acao"], max_mesmo_fio=2,
-                            max_absoluto=3, janela=dict(tamanho=6, ratio_max=0.6)),
+                            max_absoluto=3, janela=dict(tamanho=6, ratio_max=0.6), set_piece_intervalo=7),
 }
 
 
@@ -1734,6 +1766,7 @@ def executar(projeto, args):
             ledger_ok = ledger_mtime > ledger_mtime_antes
             agencia_ok, agencia_motivo = _agencia_guarda(projeto, revisando_cap)  # FASE 2 (Agency)
             streak_ok, streak_motivo = _streak_guarda(projeto, revisando_cap)     # FASE 4 (Source streak)
+            setpiece_ok, setpiece_motivo = _setpiece_guarda(projeto, revisando_cap)  # FASE 6 (aviso, nao bloqueia)
             try_path = _marcador_revtry(projeto, revisando_cap)
             ja_tentou = os.path.exists(try_path)
             # 1a passada: exige piso + ledger + tiques + agencia + streak (estrito).
@@ -1754,6 +1787,7 @@ def executar(projeto, args):
                 if not ledger_ok: pend.append("CONTINUIDADE nao gravada no estado-narrativo")
                 if not agencia_ok: pend.append(agencia_motivo)  # FASE 2 (Agency)
                 if not streak_ok: pend.append(streak_motivo)    # FASE 4 (Source streak)
+                if not setpiece_ok: pend.append(setpiece_motivo)  # FASE 6 (ritmo, so aviso)
                 aviso = " [aceito p/ nao travar apos re-revisao; PENDENTE: {}]".format("; ".join(pend)) if pend else ""
                 log(projeto, "Capitulo {} revisado (delegado) -> aceito{}. cadencia excesso {}->{}; piso {}; ledger {}.".format(
                     revisando_cap, aviso, exc_antes, exc_depois, "ok" if piso_ok else "BAIXO", "ok" if ledger_ok else "NAO-GRAVADO"))
