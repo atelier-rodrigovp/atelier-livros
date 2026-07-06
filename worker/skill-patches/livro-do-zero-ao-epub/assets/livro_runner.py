@@ -53,6 +53,7 @@ Uso:
 import argparse
 import datetime
 import glob
+import hashlib
 import json
 import os
 import re
@@ -589,22 +590,150 @@ def prompt_revisao_capitulo(projeto, n, args, piso):
              bloco_prop=bloco_prop, bloco_beats=_beats_recentes(projeto, n))
 
 
-def prompt_review(k):
+# ----------------------------------------------------------------------------
+# REVIEW incremental — escopo pela VERDADE DO DISCO.
+# Espelha worker/src/review-incremental.ts (capitulosAlterados / escopoReview); os
+# testes DoD vivem la (vitest). Este runner Python e quem roda de fato.
+#
+# A iteracao 1 varre o livro inteiro (insubstituivel para achar os problemas
+# iniciais). Da 2a em diante, a REESCRITA anterior so mexeu em alguns capitulos:
+# relemos SO esses (+vizinhos) e ancoramos os demais na nota anterior. O sinal
+# PRIMARIO do escopo e o hash dos arquivos capitulo-NN.md, NAO a lista de pendencias
+# auto-relatada — um capitulo que regrediu MUDOU no disco -> entra no escopo; um
+# capitulo fora do escopo e byte-a-byte identico -> nao pode ter regredido em
+# silencio. Nao mexemos no que a nota SIGNIFICA (veredito holistico do livro), so em
+# quanta prosa e relida para chega-la.
+# ----------------------------------------------------------------------------
+ARQ_HASHES_REVIEW = os.path.join(DIR_REVIEW, "_hashes-review.json")
+
+
+def _hash_capitulos(projeto, total):
+    """Mapa {str(n): sha1(conteudo)} dos capitulo-NN.md existentes (verdade do disco)."""
+    h = {}
+    for n in range(1, int(total) + 1):
+        p = os.path.join(projeto, nome_cap(n))
+        if os.path.exists(p):
+            try:
+                with open(p, "rb") as fh:
+                    h[str(n)] = hashlib.sha1(fh.read()).hexdigest()
+            except OSError:
+                pass
+    return h
+
+
+def _carregar_hashes_review(projeto):
+    try:
+        with open(os.path.join(projeto, ARQ_HASHES_REVIEW), "r", encoding="utf-8") as fh:
+            d = json.load(fh)
+            return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _salvar_hashes_review(projeto, hashes):
+    try:
+        os.makedirs(os.path.join(projeto, DIR_REVIEW), exist_ok=True)
+        with open(os.path.join(projeto, ARQ_HASHES_REVIEW), "w", encoding="utf-8") as fh:
+            json.dump(hashes, fh, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
+def capitulos_alterados(antes, depois):
+    """Capitulos cujo hash mudou/surgiu/sumiu entre dois snapshots (mirror do TS)."""
+    a = antes or {}
+    d = depois or {}
+    nums = set()
+    for k in set(list(a.keys()) + list(d.keys())):
+        if a.get(k) != d.get(k):
+            try:
+                n = int(k)
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                nums.add(n)
+    return sorted(nums)
+
+
+def escopo_review_incremental(iteracao, total, alterados, pendencias_caps, vizinhanca=1):
+    """Escopo da iteracao de REVIEW (mirror de escopoReview no TS). Iteracao 1 ->
+    livro inteiro; 2+ -> (alterados no disco U pendencias) + vizinhos, recortado a
+    [1,total]. Sem nada verificavel mudado -> conservador (livro inteiro)."""
+    total = max(0, int(total or 0))
+    todos = list(range(1, total + 1))
+    if int(iteracao) <= 1:
+        return {"livro_inteiro": True, "escopo": todos, "carregados": []}
+    dentro = lambda c: isinstance(c, int) and 1 <= c <= total
+    semente = set()
+    for c in (alterados or []):
+        if dentro(c):
+            semente.add(c)
+    for c in (pendencias_caps or []):
+        if dentro(c):
+            semente.add(c)
+    if not semente:
+        return {"livro_inteiro": True, "escopo": todos, "carregados": []}
+    esc = set()
+    for c in semente:
+        for d in range(-int(vizinhanca), int(vizinhanca) + 1):
+            v = c + d
+            if dentro(v):
+                esc.add(v)
+    escopo = sorted(esc)
+    escset = set(escopo)
+    carregados = [c for c in todos if c not in escset]
+    return {"livro_inteiro": False, "escopo": escopo, "carregados": carregados}
+
+
+def prompt_review(k, escopo_info=None, nota_anterior=None):
     arq = "{}/review-iter-{}.md".format(DIR_REVIEW, k)
+    # Iteracao 1 (ou fallback conservador): varredura completa do manuscrito INTEIRO.
+    if not escopo_info or escopo_info.get("livro_inteiro"):
+        return (
+            PREAMBULO +
+            "\nFASE REVIEW (iteracao {k}). Avalie o manuscrito de verdade.\n"
+            "- Rode a skill `book-bestseller-review` sobre "
+            "manuscrito/MANUSCRITO-MESTRE.md.\n"
+            "- GRAVE O RELATORIO COMPLETO da skill no arquivo '{arq}' (o relatorio "
+            "inteiro, com a analise por dimensao e as fraquezas — nao um resumo). O "
+            "runner so aceita esta fase se esse arquivo existir e for substancial.\n"
+            "- Determine a nota final 0.0-10.0 e, na ULTIMA linha do arquivo '{arq}' E "
+            "tambem no stdout, imprima exatamente 'NOTA_FINAL: X.X'.\n"
+            "- Grave as fraquezas acionaveis em 'pendencias_review' (lista de "
+            "{{id,capitulo,localizacao,problema,severidade,resolvido:false}}), maior "
+            "severidade primeiro. NAO altere fase_atual; o runner decide a bifurcacao.\n"
+        ).format(k=k, arq=arq)
+    # Iteracao 2+: REVIEW INCREMENTAL. So os capitulos alterados (+vizinhos) sao
+    # relidos em profundidade; os demais estao INALTERADOS desde a review anterior e a
+    # avaliacao deles CONTINUA VALENDO. A NOTA_FINAL segue sendo o veredito HOLISTICO
+    # do LIVRO INTEIRO (ancorado na nota anterior, ajustado pelo que mudou).
+    escopo = escopo_info.get("escopo") or []
+    arquivos = ", ".join("manuscrito/capitulo-{:02d}.md".format(c) for c in escopo)
+    lista_esc = ", ".join(str(c) for c in escopo)
+    n_carregados = len(escopo_info.get("carregados") or [])
+    ancora = ("A review anterior deu NOTA_FINAL {:.1f} ao livro inteiro. "
+              .format(float(nota_anterior)) if nota_anterior is not None else "")
     return (
         PREAMBULO +
-        "\nFASE REVIEW (iteracao {k}). Avalie o manuscrito de verdade.\n"
-        "- Rode a skill `book-bestseller-review` sobre "
-        "manuscrito/MANUSCRITO-MESTRE.md.\n"
-        "- GRAVE O RELATORIO COMPLETO da skill no arquivo '{arq}' (o relatorio "
-        "inteiro, com a analise por dimensao e as fraquezas — nao um resumo). O "
-        "runner so aceita esta fase se esse arquivo existir e for substancial.\n"
-        "- Determine a nota final 0.0-10.0 e, na ULTIMA linha do arquivo '{arq}' E "
-        "tambem no stdout, imprima exatamente 'NOTA_FINAL: X.X'.\n"
-        "- Grave as fraquezas acionaveis em 'pendencias_review' (lista de "
+        "\nFASE REVIEW (iteracao {k}, INCREMENTAL). {ancora}A REESCRITA anterior mexeu "
+        "SO em alguns capitulos. Os outros {ncar} capitulos estao INALTERADOS desde a "
+        "review anterior (byte-a-byte) — a avaliacao deles CONTINUA VALENDO; NAO os "
+        "releia nem invente problema neles.\n"
+        "- Releia EM PROFUNDIDADE apenas estes capitulos (arquivos): {arquivos}.\n"
+        "- Rode a skill `book-bestseller-review` focada nesses capitulos: confirme se as "
+        "pendencias anteriores neles foram RESOLVIDAS e cace qualquer defeito NOVO "
+        "introduzido pela reescrita (incluindo continuidade com os capitulos vizinhos).\n"
+        "- A NOTA_FINAL deve refletir o LIVRO INTEIRO: parta da nota anterior (os "
+        "capitulos inalterados a sustentam) e ajuste-a pelo que mudou nos capitulos "
+        "{lista}. NAO baixe a nota de partes que voce nao releu.\n"
+        "- GRAVE O RELATORIO COMPLETO no arquivo '{arq}' (analise dos capitulos "
+        "reavaliados + o veredito do livro). Na ULTIMA linha do arquivo E no stdout, "
+        "imprima exatamente 'NOTA_FINAL: X.X'.\n"
+        "- Grave as fraquezas acionaveis em 'pendencias_review' (mesmo formato: "
         "{{id,capitulo,localizacao,problema,severidade,resolvido:false}}), maior "
         "severidade primeiro. NAO altere fase_atual; o runner decide a bifurcacao.\n"
-    ).format(k=k, arq=arq)
+    ).format(k=k, ancora=ancora, ncar=n_carregados, arquivos=arquivos,
+             lista=lista_esc, arq=arq)
 
 PROMPT_REESCRITA = (
     PREAMBULO +
@@ -1729,7 +1858,29 @@ def executar(projeto, args):
                 else:
                     prompt = prompt_escrita_capitulo(alvo, piso)
         elif fase == "REVIEW":
-            prompt = prompt_review(iter_before + 1)
+            k_rev = iter_before + 1
+            total_rev = _i(state.get("total_capitulos_previstos"))
+            if k_rev <= 1:
+                # 1a iteracao: varredura completa (nao ha snapshot anterior para diff).
+                escopo_info = {"livro_inteiro": True,
+                               "escopo": list(range(1, total_rev + 1)), "carregados": []}
+            else:
+                # 2a+: escopo pela VERDADE DO DISCO (hash) U pendencias anteriores.
+                hashes_antes = _carregar_hashes_review(projeto)
+                hashes_agora = _hash_capitulos(projeto, total_rev)
+                alterados = capitulos_alterados(hashes_antes, hashes_agora)
+                pend_caps = []
+                for p in (state.get("pendencias_review") or []):
+                    try:
+                        pend_caps.append(int(p.get("capitulo")))
+                    except (TypeError, ValueError, AttributeError):
+                        pass
+                escopo_info = escopo_review_incremental(k_rev, total_rev, alterados, pend_caps)
+                log(projeto, "REVIEW iter {}: escopo {} = {} (alterados no disco={}, carregados={}).".format(
+                    k_rev, "INTEIRO (fallback)" if escopo_info["livro_inteiro"] else "INCREMENTAL",
+                    escopo_info["escopo"] if not escopo_info["livro_inteiro"] else len(escopo_info["escopo"]),
+                    alterados, len(escopo_info["carregados"])))
+            prompt = prompt_review(k_rev, escopo_info, state.get("ultima_nota"))
         elif fase == "REESCRITA":
             prompt = PROMPT_REESCRITA
         elif fase == "DESMANEIRISMO":
@@ -1849,6 +2000,9 @@ def executar(projeto, args):
                     state.setdefault("historico_notas", []).append(nota)
                     log(projeto, "REVIEW aceita: relatorio {} chars, nota {}.".format(len(report), nota))
                     save_state(projeto, state)
+                    # Snapshot do manuscrito RECEM-AVALIADO: a proxima REVIEW faz o diff
+                    # contra ele para saber o que a REESCRITA mexeu (escopo incremental).
+                    _salvar_hashes_review(projeto, _hash_capitulos(projeto, _i(state.get("total_capitulos_previstos"))))
             else:
                 log(projeto, "REVIEW REJEITADA: review-iter-{}.md ausente/curto "
                              "({} chars < {}). Sem nota — re-disparando.".format(
