@@ -1123,9 +1123,30 @@ def _streak_guarda(projeto, cap):
     return (True, "")
 
 
+# FASE 5 — Exposition Control pos-revelacao (espelha maneirismo.ts). SINALIZA.
+def _houve_revelacao(projeto, cap):
+    """cap teve revelacao forte? (Pistas: Paga: ... OU Novidade com 'pergunta paga')."""
+    try:
+        with open(_spec_path(projeto, cap), "r", encoding="utf-8") as fh:
+            sp = fh.read()
+    except OSError:
+        return False
+    if re.search(u"paga", _campo_spec(sp, "Pistas") or "", re.I | re.U):
+        return True
+    _, paga = _extrair_perguntas(_campo_spec(sp, "Novidade"))
+    return bool(paga)
+
+
+def _exposicao_pos_revelacao(texto_atual, houve_antes):
+    if not houve_antes:
+        return False
+    acima, ep, dp = interioridade_sem_evento(texto_atual)
+    return bool(acima or (len(dividir_frases(texto_atual)) >= 10 and ep > 50 and dp < 10))
+
+
 def _editorial_pos_aceite(projeto, cap):
     """Roda APOS aceitar o capitulo: atualiza estado-editorial. FASE 3 (Novelty loops) +
-    FASE 4 (source_reveal_streak: +1 se expositivo, zera se dramatico)."""
+    FASE 4 (source_reveal_streak) + FASE 5 (exposition_risk pos-revelacao, sinaliza)."""
     try:
         with open(_spec_path(projeto, cap), "r", encoding="utf-8") as fh:
             sp = fh.read()
@@ -1138,6 +1159,10 @@ def _editorial_pos_aceite(projeto, cap):
     md = _campo_spec(sp, "Modo")
     if md:
         ed["source_reveal_streak"] = int(ed.get("source_reveal_streak", 0)) + 1 if _modo_expositivo(md) else 0
+    risco = _exposicao_pos_revelacao(ler_arquivo(projeto, nome_cap(cap)), _houve_revelacao(projeto, int(cap) - 1))
+    ed["exposition_risk"] = 1 if risco else 0
+    if risco:
+        log(projeto, "SINAL (exposition pos-revelacao): cap {} tende a reexplicar a revelacao anterior (use interpretacao CURTA + consequencia pratica).".format(cap))
     save_estado_editorial(projeto, ed)
 
 

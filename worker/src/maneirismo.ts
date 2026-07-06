@@ -391,6 +391,17 @@ export function interioridadeSemEvento(texto: string, min = 10): InterioridadeSi
   };
 }
 
+// FASE 5 — Exposition Control ESPECIALIZADO (pós-revelação; SINALIZA, não bloqueia).
+// Se o capítulo ANTERIOR teve revelação forte (pista paga / pergunta paga), o capítulo
+// atual só pode ter interpretação emocional CURTA + consequência prática. Excesso de
+// prosa conceitual reexplicando a revelação = aviso. Reusa interioridadeSemEvento com
+// um limiar mais SENSÍVEL (pós-revelação a régua aperta: estática >0.5 e diálogo <0.10).
+export function exposicaoPosRevelacaoRisco(textoAtual: string, houveRevelacaoAntes: boolean): boolean {
+  if (!houveRevelacaoAntes) return false;
+  const s = interioridadeSemEvento(textoAtual);
+  return s.acima || (s.frases >= 10 && s.estaticaPct > 50 && s.dialogoPct < 10);
+}
+
 // ---------------------------------------------------------------------------
 // Resumos
 // ---------------------------------------------------------------------------

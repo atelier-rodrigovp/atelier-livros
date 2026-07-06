@@ -7,6 +7,7 @@ import {
   agenciaGenerica, processarNovidade, modoExpositivo,
 } from "./estado-editorial.js";
 import { exigenciasParaSkill, CAMPOS_EDITORIAIS_SPEC } from "./exigencias-skill.js";
+import { exposicaoPosRevelacaoRisco } from "./maneirismo.js";
 
 const proj = () => mkdtempSync(path.join(tmpdir(), "ed-"));
 
@@ -94,6 +95,21 @@ describe("Novelty Gate (Fase 3)", () => {
   it("campo universal Novidade + Modo no editor (CAMPOS_EDITORIAIS_SPEC)", () => {
     expect(CAMPOS_EDITORIAIS_SPEC).toMatch(/\*\*Novidade:\*\*/);
     expect(CAMPOS_EDITORIAIS_SPEC).toMatch(/\*\*Modo:\*\*/);
+  });
+});
+
+describe("Exposition Control pós-revelação (Fase 5)", () => {
+  const conceitual =
+    "A memória é uma reconstrução. É o que a mente faz. A verdade era uma abstração. " +
+    "Havia um padrão. Ela era o padrão. Tudo era memória. A ideia era vasta. O conceito parecia infinito. " +
+    "Nada existia além do pensamento. Era assim que a mente funcionava. Sempre havia sido assim.";
+  it("sinaliza reexplicação conceitual SÓ quando houve revelação antes", () => {
+    expect(exposicaoPosRevelacaoRisco(conceitual, true)).toBe(true);
+    expect(exposicaoPosRevelacaoRisco(conceitual, false)).toBe(false);
+  });
+  it("prosa com ação/diálogo NÃO sinaliza mesmo pós-revelação", () => {
+    const ativo = '— Corra! — gritou Cole.\n\nEla correu. A porta bateu. Ele puxou a arma. O carro derrapou. — Vai! — ela gritou, e saltaram.';
+    expect(exposicaoPosRevelacaoRisco(ativo, true)).toBe(false);
   });
 });
 
