@@ -134,6 +134,39 @@ export function modoSetPiece(modo: string | null | undefined): boolean {
   return _RE_MODO_SETPIECE.test(modo ?? "");
 }
 
+// FASE 7 (Commercial Blocker Report). Mapeia um issue (motivo de gate/guarda) para uma
+// instrução de reescrita acionável. Consolida issues → BlockerReport por capítulo.
+export function rewriteParaIssue(issue: string): string {
+  const i = (issue ?? "").toLowerCase();
+  if (i.includes("agencia") || i.includes("decis")) return "Adicione uma cena de ESCOLHA/AÇÃO/erro/risco para o POV central (não 'ele percebeu').";
+  if (i.includes("source-streak") || i.includes("exposicao") || i.includes("exposição")) return "VARIE o modo dramático: ação / investigação-ativa / confronto no lugar de exposição.";
+  if (i.includes("set-piece")) return "Insira uma cena de ALTO IMPACTO (set-piece / confronto / perseguição).";
+  if (i.includes("monotonia") || i.includes("teto absoluto") || i.includes("fio")) return "ROTACIONE o POV — outro fio conduz o próximo capítulo (a justificativa não basta).";
+  if (i.includes("dia/hora")) return "Corrija a aritmética de DIA/HORA (offset ↔ dia-da-semana coerentes).";
+  if (i.includes("cross-cap") || i.includes("repeticao") || i.includes("repetição")) return "Reescreva a frase-assinatura reciclada com imagem/sintaxe nova.";
+  if (i.includes("pt-pt") || i.includes("estrangeiro")) return "Troque o termo por pt-BR (léxico do Brasil).";
+  if (i.includes("continuidade") || i.includes("ledger")) return "Grave a continuidade no estado-narrativo.md.";
+  if (i.includes("tiques") || i.includes("cadencia") || i.includes("cadência")) return "Reduza os tiques de cadência ao orçamento (funda staccato, quebre anáfora).";
+  return "Reveja o item apontado e ajuste a prosa.";
+}
+
+export function consolidarBlocker(chapter: number, issues: string[]): BlockerReport {
+  const iss = (issues ?? []).filter(Boolean);
+  return {
+    chapter,
+    approved: iss.length === 0,
+    issues: iss,
+    rewrite_instructions: [...new Set(iss.map(rewriteParaIssue))],
+  };
+}
+
+// Anexa/atualiza um BlockerReport em commercial_blockers (dedup por capítulo, cap size 40).
+export function registrarBlocker(estado: EstadoEditorial, report: BlockerReport): EstadoEditorial {
+  const commercial_blockers = estado.commercial_blockers.filter((b) => b.chapter !== report.chapter);
+  commercial_blockers.push(report);
+  return { ...estado, commercial_blockers: commercial_blockers.slice(-40) };
+}
+
 function estadoPath(projDir: string): string {
   return path.join(projDir, "estado", ARQUIVO_ESTADO_EDITORIAL);
 }

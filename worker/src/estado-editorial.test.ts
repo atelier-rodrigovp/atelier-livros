@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   lerEstadoEditorial, gravarEstadoEditorial, estadoEditorialDefault, mergeEstadoEditorial,
   agenciaGenerica, processarNovidade, modoExpositivo, modoSetPiece,
+  consolidarBlocker, registrarBlocker, rewriteParaIssue,
 } from "./estado-editorial.js";
 import { exigenciasParaSkill, CAMPOS_EDITORIAIS_SPEC } from "./exigencias-skill.js";
 import { exposicaoPosRevelacaoRisco } from "./maneirismo.js";
@@ -121,6 +122,31 @@ describe("Source Reveal Streak (Fase 4)", () => {
     expect(modoExpositivo("ação / perseguição")).toBe(false);
     expect(modoExpositivo("confronto no beco")).toBe(false);
     expect(modoExpositivo("")).toBe(false);
+  });
+});
+
+describe("Commercial Blocker Report (Fase 7)", () => {
+  it("consolidarBlocker: issues → approved=false + rewrite_instructions dedup", () => {
+    const r = consolidarBlocker(17, ["monotonia: fio h em 8/10", "Dia/Hora: incoerente"]);
+    expect(r.chapter).toBe(17);
+    expect(r.approved).toBe(false);
+    expect(r.rewrite_instructions.length).toBe(2);
+    expect(r.rewrite_instructions.some((x) => /ROTACIONE o POV/.test(x))).toBe(true);
+  });
+  it("sem issues → approved=true", () => {
+    expect(consolidarBlocker(9, []).approved).toBe(true);
+  });
+  it("registrarBlocker faz dedup por capítulo", () => {
+    let e = estadoEditorialDefault();
+    e = registrarBlocker(e, consolidarBlocker(3, ["monotonia"]));
+    e = registrarBlocker(e, consolidarBlocker(3, ["Dia/Hora"])); // re-registro do mesmo cap
+    expect(e.commercial_blockers.filter((b) => b.chapter === 3).length).toBe(1);
+    expect(e.commercial_blockers[0].issues).toEqual(["Dia/Hora"]);
+  });
+  it("rewriteParaIssue mapeia motivos conhecidos", () => {
+    expect(rewriteParaIssue("agencia: generico")).toMatch(/ESCOLHA\/AÇÃO/);
+    expect(rewriteParaIssue("source-streak: 4o")).toMatch(/VARIE o modo/);
+    expect(rewriteParaIssue("set-piece: 8 caps")).toMatch(/ALTO IMPACTO/);
   });
 });
 

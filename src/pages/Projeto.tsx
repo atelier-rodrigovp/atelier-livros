@@ -552,6 +552,7 @@ export default function Projeto() {
           <TabsTrigger value="capas">Capas</TabsTrigger>
           <TabsTrigger value="epubs">EPUBs</TabsTrigger>
           <TabsTrigger value="publicacao">Publicação</TabsTrigger>
+          <TabsTrigger value="editorial">Editorial</TabsTrigger>
         </TabsList>
 
         {/* FUNDAÇÃO */}
@@ -1097,6 +1098,44 @@ export default function Projeto() {
             })}
             {!editions.length && <p className="text-muted-foreground">Crie a edição primeiro.</p>}
           </div>
+        </TabsContent>
+
+        <TabsContent value="editorial">
+          <Card>
+            <CardHeader>
+              <CardTitle>Observações editoriais</CardTitle>
+              <CardDescription>
+                Avisos por capítulo da camada editorial (POV, cadência, cross-capítulo, continuidade).
+                Rode <code>worker/scripts/relatorio-editorial.ts</code> para atualizar.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const je = jobs.find((j) => (j.tipo as string) === "qualidade_editorial");
+                const blockers: any[] = ((je?.payload as any)?.commercial_blockers ?? []).filter((b: any) => b?.issues?.length);
+                if (!blockers.length)
+                  return <p className="text-sm text-muted-foreground">Sem observações editoriais ainda — rode o relatório para popular.</p>;
+                return (
+                  <div className="space-y-3">
+                    {blockers.slice().sort((a, b) => a.chapter - b.chapter).map((b) => (
+                      <div key={b.chapter} className="rounded-md border p-3">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="destructive">cap {b.chapter}</Badge>
+                          <span className="text-sm font-medium">{b.issues.length} observação(ões)</span>
+                        </div>
+                        <ul className="mt-2 list-disc pl-5 text-sm text-muted-foreground">
+                          {b.issues.map((i: string, k: number) => <li key={k}>{i}</li>)}
+                        </ul>
+                        {b.rewrite_instructions?.length ? (
+                          <p className="mt-2 text-xs"><span className="font-medium">Correção sugerida: </span>{b.rewrite_instructions.join(" · ")}</p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
