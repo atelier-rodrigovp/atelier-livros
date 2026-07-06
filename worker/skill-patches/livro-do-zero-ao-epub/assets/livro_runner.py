@@ -993,6 +993,63 @@ def _checar_dia_hora(projeto, n):
 
 
 # ----------------------------------------------------------------------------
+# FASE 2 — Agency Gate (espelha worker/src/estado-editorial.ts agenciaGenerica).
+# ----------------------------------------------------------------------------
+def _campo_spec(texto, campo):
+    """Extrai o valor de um campo '- **Campo:** valor' da spec (accent-insensitive)."""
+    alvo = _sem_acento(campo)
+    for l in (texto or "").split("\n"):
+        if alvo in _sem_acento(l) and ":" in l:
+            return l.split(":", 1)[1].strip().lstrip("*").strip()
+    return ""
+
+
+_RE_PERCEPCAO_PY = re.compile(u"\\b(percebe|percebeu|nota|notou|sente|sentiu|entende|entendeu|imagina|imaginou|pensa|pensou|lembra|lembrou|repara|reparou|observa|observou)\\b", re.I | re.U)
+_RE_ACAO_PY = re.compile(u"\\b(decid\\w+|escolh\\w+|faz|fez|age|agiu|arrisc\\w+|mat[ao]u?|ment\\w+|fog\\w+|fugiu|confront\\w+|roub\\w+|entrega|entregou|revela|revelou|abre|abriu|quebra|quebrou|corta|cortou|liga|ligou|invade|invadiu|persegue|perseguiu|salva|salvou|trai|traiu|destr[oó]i|destruiu)\\b", re.I | re.U)
+
+
+def _agencia_generica(valor):
+    v = (valor or "").strip()
+    if len([w for w in v.split() if w]) < 8:
+        return True
+    if _RE_PERCEPCAO_PY.search(v) and not _RE_ACAO_PY.search(v):
+        return True
+    return False
+
+
+def _fio_norm(f):
+    return re.split(u"[(—–]", (f or ""))[0].strip().lower()
+
+
+def _agencia_guarda(projeto, cap):
+    """(ok, motivo). Reprova se 'Decisao/Acao' vier generico 2 caps seguidos do MESMO
+    fio. Atualiza agency_balance no estado-editorial. Bounded na guarda do Fix C."""
+    def spec_txt(n):
+        try:
+            with open(_spec_path(projeto, n), "r", encoding="utf-8") as fh:
+                return fh.read()
+        except OSError:
+            return ""
+    cur = spec_txt(cap)
+    if not cur:
+        return (True, "")
+    val = _campo_spec(cur, "Decisao/Acao")
+    fio = _fio_da_spec(cur) or _campo_spec(cur, "Ponto de vista")
+    if not _agencia_generica(val):
+        if fio:
+            ed = load_estado_editorial(projeto)
+            ed["agency_balance"][_fio_norm(fio)] = int(ed["agency_balance"].get(_fio_norm(fio), 0)) + 1
+            save_estado_editorial(projeto, ed)
+        return (True, "")
+    prev = spec_txt(int(cap) - 1)
+    if prev and _agencia_generica(_campo_spec(prev, "Decisao/Acao")):
+        fprev = _fio_da_spec(prev) or _campo_spec(prev, "Ponto de vista")
+        if fprev and _fio_norm(fprev) == _fio_norm(fio):
+            return (False, u"agencia: 'Decisao/Acao' generico 2 caps seguidos do fio '{}' (cena de escolha/acao ausente)".format(_fio_norm(fio)))
+    return (True, "")
+
+
+# ----------------------------------------------------------------------------
 # CADENCIA (ritmo das frases) — espelha worker/src/maneirismo.ts. Mede o staccato
 # que a Regra 4 da skill-dan-brown bane ("nunca dois fragmentos colados"): o
 # detector de moldes/muletas conta palavras; este conta RITMO.
@@ -1039,12 +1096,13 @@ DIR_SPECS = "specs"
 EXIGE_SPEC_POR_SKILL = {
     # AUDITORIA-DAN-BROWN-V2 gap 2: max_absoluto (teto que Justificativa NAO derruba)
     # + janela (diversidade nos ultimos N). So skills com rotacao real (dan-brown/romantasy).
-    "skill-dan-brown": dict(campos=["Fio de POV", "Dia/Hora"], max_mesmo_fio=3,
+    # editorial Fase 2: "Decisao/Acao" universal em toda skill gated (matching accent-insensitive).
+    "skill-dan-brown": dict(campos=["Fio de POV", "Dia/Hora", "Decisao/Acao"], max_mesmo_fio=3,
                             max_absoluto=5, janela=dict(tamanho=10, ratio_max=0.65)),
     # SPEC-HM2: hoover e POV unico (Helena) — sem rotacao; NAO recebe max_absoluto/janela.
-    "hoover-mcfadden": dict(campos=["Dia/Hora", "Relogios", "Pistas", "Gancho", "Narradora"], max_mesmo_fio=6),
+    "hoover-mcfadden": dict(campos=["Dia/Hora", "Relogios", "Pistas", "Gancho", "Narradora", "Decisao/Acao"], max_mesmo_fio=6),
     # SPEC-RM2: romantasy = POV duplo; guard de rotacao via "Ponto de vista".
-    "skill-romantasy": dict(campos=["Ponto de vista", "Degrau slow burn", "Custo de magia"], max_mesmo_fio=2,
+    "skill-romantasy": dict(campos=["Ponto de vista", "Degrau slow burn", "Custo de magia", "Decisao/Acao"], max_mesmo_fio=2,
                             max_absoluto=3, janela=dict(tamanho=6, ratio_max=0.6)),
 }
 
@@ -1557,11 +1615,12 @@ def executar(projeto, args):
             # (a versao delegada pode escrever num arquivo avulso -> continuidade perdida).
             ledger_mtime = os.path.getmtime(_ledger) if os.path.exists(_ledger) else 0
             ledger_ok = ledger_mtime > ledger_mtime_antes
+            agencia_ok, agencia_motivo = _agencia_guarda(projeto, revisando_cap)  # FASE 2 (Agency)
             try_path = _marcador_revtry(projeto, revisando_cap)
             ja_tentou = os.path.exists(try_path)
-            # 1a passada: exige piso + ledger gravado + tiques cairam (estrito). 2a passada
-            # (ja_tentou): aceita com piso p/ nao travar, mas AVISA ALTO o que ficou off.
-            if piso_ok and (ja_tentou or (ledger_ok and tiques_ok)):
+            # 1a passada: exige piso + ledger gravado + tiques cairam + agencia (estrito).
+            # 2a passada (ja_tentou): aceita com piso p/ nao travar, AVISA ALTO o que ficou off.
+            if piso_ok and (ja_tentou or (ledger_ok and tiques_ok and agencia_ok)):
                 try:
                     os.makedirs(os.path.join(projeto, DIR_REVIEW), exist_ok=True)
                     with open(_marcador_revcap(projeto, revisando_cap), "w", encoding="utf-8") as fh:
@@ -1575,6 +1634,7 @@ def executar(projeto, args):
                 pend = []
                 if not tiques_ok: pend.append("tiques nao baixaram")
                 if not ledger_ok: pend.append("CONTINUIDADE nao gravada no estado-narrativo")
+                if not agencia_ok: pend.append(agencia_motivo)  # FASE 2 (Agency)
                 aviso = " [aceito p/ nao travar apos re-revisao; PENDENTE: {}]".format("; ".join(pend)) if pend else ""
                 log(projeto, "Capitulo {} revisado (delegado) -> aceito{}. cadencia excesso {}->{}; piso {}; ledger {}.".format(
                     revisando_cap, aviso, exc_antes, exc_depois, "ok" if piso_ok else "BAIXO", "ok" if ledger_ok else "NAO-GRAVADO"))

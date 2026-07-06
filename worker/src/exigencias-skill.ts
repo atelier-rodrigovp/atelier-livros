@@ -108,7 +108,7 @@ const DAN_BROWN: ExigenciasSkill = {
   maxCapsMesmoFio: 3,
   maxCapsMesmoFioAbsoluto: 5,                         // confirmado
   janelaDiversidade: { tamanho: 10, ratioMax: 0.65 }, // 0.65: o defeito real foi 0.7–0.8; 0.7 ficava na borda
-  camposSpec: ["Fio de POV", "Dia/Hora"],
+  camposSpec: ["Fio de POV", "Dia/Hora", "Decisão/Ação"],
   dossie: true,
   marcadorNotas: MARCADOR_ROTACAO,
   promptFundacao:
@@ -156,7 +156,7 @@ const DAN_BROWN: ExigenciasSkill = {
 const HOOVER: ExigenciasSkill = {
   fios: { min: 1, max: 2 },
   maxCapsMesmoFio: 6,
-  camposSpec: ["Dia/Hora", "Relógios", "Pistas", "Gancho", "Narradora"],
+  camposSpec: ["Dia/Hora", "Relógios", "Pistas", "Gancho", "Narradora", "Decisão/Ação"],
   dossie: false,
   marcadorNotas: MARCADOR_RELOGIOS_NARRADORA,
   promptFundacao:
@@ -211,7 +211,7 @@ const ROMANTASY: ExigenciasSkill = {
   maxCapsMesmoFio: 2,
   maxCapsMesmoFioAbsoluto: 3,                       // ⚠️ nº a confirmar (POV duplo é mais apertado)
   janelaDiversidade: { tamanho: 6, ratioMax: 0.6 },
-  camposSpec: ["Ponto de vista", "Degrau slow burn", "Custo de magia"],
+  camposSpec: ["Ponto de vista", "Degrau slow burn", "Custo de magia", "Decisão/Ação"],
   dossie: false,
   marcadorNotas: MARCADOR_ROTACAO_POV,
   promptFundacao:
@@ -287,11 +287,19 @@ export function garantirRotacaoNaEstrutura(conteudo: string, skill?: string | nu
 
 // livro-editor.md gerado: injeta o formato de SPEC COMPLETA (o arquiteto instalava
 // um formato que dropava Montagem/Dia-Hora/Forma/factual). Idempotente.
+// Campos editoriais UNIVERSAIS (camada editorial) — injetados na SPEC COMPLETA de toda
+// skill gated. Fase 2: Decisão/Ação. (Fases 3/4 acrescentam Novidade/Modo aqui.)
+export const CAMPOS_EDITORIAIS_SPEC =
+  "- **Decisão/Ação:** quem DECIDIU, qual AÇÃO mudou a situação, qual o CUSTO, e qual " +
+  "CONSEQUÊNCIA abre o próximo capítulo — cena de escolha/ação/erro/risco, não " +
+  "\"ele percebeu que…\" (vazio/genérico 2 caps seguidos do mesmo POV reprova na guarda).\n";
+
 export function garantirSpecCompletaNoEditor(conteudo: string, skill?: string | null): { texto: string; mudou: boolean } {
   const ex = exigenciasParaSkill(skill);
   const t = conteudo ?? "";
   if (!ex || t.includes(MARCADOR_SPEC_COMPLETA)) return { texto: t, mudou: false };
-  return { texto: t.replace(/\s*$/, "") + "\n\n" + ex.blocoSpecEditor + "\n", mudou: true };
+  const bloco = ex.blocoSpecEditor.replace(MARCADOR_SPEC_COMPLETA_FIM, CAMPOS_EDITORIAIS_SPEC + "\n" + MARCADOR_SPEC_COMPLETA_FIM);
+  return { texto: t.replace(/\s*$/, "") + "\n\n" + bloco + "\n", mudou: true };
 }
 
 // livro-revisor.md gerado: item "fato real vs dossiê" (só p/ skill com dossiê).

@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   lerEstadoEditorial, gravarEstadoEditorial, estadoEditorialDefault, mergeEstadoEditorial,
+  agenciaGenerica,
 } from "./estado-editorial.js";
+import { exigenciasParaSkill } from "./exigencias-skill.js";
 
 const proj = () => mkdtempSync(path.join(tmpdir(), "ed-"));
 
@@ -52,5 +54,22 @@ describe("estado-editorial (Fase 1)", () => {
     const e = mergeEstadoEditorial({ open_loops: "não-é-array" as any, source_reveal_streak: "x" as any });
     expect(e.open_loops).toEqual([]);
     expect(e.source_reveal_streak).toBe(0);
+  });
+});
+
+describe("Agency Gate (Fase 2)", () => {
+  it("campo universal 'Decisão/Ação' em toda skill gated", () => {
+    for (const s of ["skill-dan-brown", "hoover-mcfadden", "skill-romantasy"]) {
+      expect(exigenciasParaSkill(s)!.camposSpec).toContain("Decisão/Ação");
+    }
+  });
+  it("agenciaGenerica: vazio/curto ou percepção passiva = genérico", () => {
+    expect(agenciaGenerica("")).toBe(true);
+    expect(agenciaGenerica("ele percebeu")).toBe(true);
+    expect(agenciaGenerica("Helena percebeu que algo estava errado com a memória dela e ficou pensando")).toBe(true); // só percepção
+  });
+  it("agenciaGenerica: cena de escolha/ação concreta = NÃO genérico", () => {
+    expect(agenciaGenerica("Cole decidiu não entregar o relógio ao rio e guardou a prova contra a própria regra, ao custo da vida")).toBe(false);
+    expect(agenciaGenerica("Helena mente para Sam sobre o lapso, escolhe protegê-lo e assume o risco de ser descoberta")).toBe(false);
   });
 });

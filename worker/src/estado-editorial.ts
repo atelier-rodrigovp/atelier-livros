@@ -65,6 +65,19 @@ export function mergeEstadoEditorial(parcial: Partial<EstadoEditorial> | null | 
   };
 }
 
+// FASE 2 (Agency Gate). Heurística leve (estilo interioridadeSemEvento): o valor do
+// campo "Decisão/Ação" da spec é genérico/vazio? Genérico = <8 palavras OU percepção
+// passiva ("ele percebeu que…") sem verbo de ação/escolha. NÃO usa IA — só conta/regex.
+const _RE_PERCEPCAO = /\b(percebe|percebeu|nota|notou|sente|sentiu|entende|entendeu|imagina|imaginou|pensa|pensou|lembra|lembrou|repara|reparou|observa|observou)\b/i;
+const _RE_ACAO = /\b(decid\w+|escolh\w+|faz|fez|age|agiu|arrisc\w+|mat[ao]u?|ment\w+|fog\w+|fugiu|confront\w+|roub\w+|entrega|entregou|revela|revelou|abre|abriu|quebra|quebrou|corta|cortou|liga|ligou|invade|invadiu|persegue|perseguiu|salva|salvou|trai|traiu|destr[óo]i|destruiu)\b/i;
+export function agenciaGenerica(valor: string | null | undefined): boolean {
+  const v = (valor ?? "").trim();
+  const nw = (v.match(/\S+/g) ?? []).length;
+  if (nw < 8) return true;                                 // vazio/curto demais
+  if (_RE_PERCEPCAO.test(v) && !_RE_ACAO.test(v)) return true; // só percepção passiva
+  return false;
+}
+
 function estadoPath(projDir: string): string {
   return path.join(projDir, "estado", ARQUIVO_ESTADO_EDITORIAL);
 }
