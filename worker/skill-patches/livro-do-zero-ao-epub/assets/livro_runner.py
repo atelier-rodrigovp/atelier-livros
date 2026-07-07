@@ -578,9 +578,13 @@ def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
         bloco_cad = "dentro do orcamento de tiques contados; mas NAO confie so na lista (veja o item holistico)."
     # Sinal heuristico de interioridade-sem-evento (evidencia para o revisor, nao bloqueio).
     inter_flag, est_pct, dlg_pct = interioridade_sem_evento(txt_cap)
-    bloco_inter = ("ALERTA: {}% das frases sao copula/percepcao e so {}% tem dialogo -> o "
-                   "capitulo pode estar 'bem escrito e CHATO' (sensacao sobre sensacao, "
-                   "sem que nada aconteca na cena). Dramatize ou corte a decoracao."
+    bloco_inter = ("SINAL FORTE de interioridade-sem-evento: {}% das frases sao "
+                   "copula/percepcao e so {}% tem dialogo. Isto e CANDIDATO A REPROVACAO (nao "
+                   "alerta soft): se o capitulo tambem NAO avanca a trama nesta cena (nenhuma "
+                   "decisao-com-consequencia, virada, pista ou acao que mude a cena), REPROVE e "
+                   "peca revisao dirigida que ANCORE a interioridade num EVENTO — nao apenas "
+                   "'dramatize'. Interioridade real ANCORADA em decisao/acao PASSA; introspeccao "
+                   "decorativa sem evento NAO (regra 'algo ACONTECE')."
                    ).format(est_pct, dlg_pct) if inter_flag else \
                   "densidade de acao/dialogo aceitavel ({}% estatico).".format(est_pct)
     # VEREDITO DE PROPULSAO ("isto esta vivo?"): por padrao roda no revisor (sonnet);
@@ -1099,6 +1103,26 @@ def _avaliar_rotacao_fio(fios, n, exig):
                 if ratio > jd["ratio_max"]:
                     out.append(u"monotonia: fio '{}' em {}/{} dos ultimos caps ({}% > {}%)".format(
                         f, c, len(jan), int(round(ratio * 100)), int(round(jd["ratio_max"] * 100))))
+    # fio RECORRENTE ausente demais (o cacador sumindo — dual do teto absoluto). Fio PRIMARIO
+    # (1o token antes de '+'; exclui apoio). Recorrente = apareceu >=2x; ausente por mais de
+    # max_caps_fio_ausente caps consecutivos -> sinaliza (espelha avaliarRotacaoFio no TS).
+    ausente_max = exig.get("max_caps_fio_ausente")
+    if ausente_max and ausente_max > 0:
+        prim = [p.split(u"+")[0].strip() for p in seq]
+        freq = {}
+        for p in prim:
+            if p:
+                freq[p] = freq.get(p, 0) + 1
+        for fio, c in freq.items():
+            if c < 2:
+                continue
+            ausente = 0
+            i = n - 1
+            while i >= 0 and prim[i] != fio:
+                ausente += 1
+                i -= 1
+            if ausente > ausente_max:
+                out.append(u"fio recorrente '{}' ausente ha {} caps (max {} — cacador/ironia dramatica nao pode sumir tanto)".format(fio, ausente, ausente_max))
     return out
 
 
@@ -1432,7 +1456,8 @@ EXIGE_SPEC_POR_SKILL = {
     # editor os omitia e os gates ficavam inertes (cap 34 do Indice passou limpo). Agora
     # cobrados (matching heading/label via _campo_presente — "Modo" curto NAO casa "de modo que").
     "skill-dan-brown": dict(campos=["Fio de POV", "Dia/Hora", "Decisao/Acao", "Modo", "Novidade"], max_mesmo_fio=3,
-                            max_absoluto=5, janela=dict(tamanho=10, ratio_max=0.65), set_piece_intervalo=7),
+                            max_absoluto=5, janela=dict(tamanho=10, ratio_max=0.65), set_piece_intervalo=7,
+                            max_caps_fio_ausente=3),  # o fio C (cacador) nao fica mais de 3 caps fora
     # SPEC-HM2: hoover e POV unico (Helena) — sem rotacao; NAO recebe max_absoluto/janela/set_piece.
     "hoover-mcfadden": dict(campos=["Dia/Hora", "Relogios", "Pistas", "Gancho", "Narradora", "Decisao/Acao", "Modo", "Novidade"], max_mesmo_fio=6),
     # SPEC-RM2: romantasy = POV duplo; guard de rotacao via "Ponto de vista".

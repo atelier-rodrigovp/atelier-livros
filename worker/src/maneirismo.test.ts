@@ -420,3 +420,30 @@ describe("FASE 2 — classificarGanchoFinal: acurácia medida + alternância", (
     expect(alternanciaGanchoSinal(["indefinido", "indefinido", "indefinido"]).repetido).toBe(false);
   });
 });
+
+// FASE 3 — o sinal que PESA no veredito: cap estilo "cap 33" (introspecção majoritária, zero
+// evento) dispara (candidato a reprovação); interioridade REAL ancorada em decisão/ação passa.
+describe("FASE 3 — interioridade-sem-evento: reprova o cap-33-style, poupa a ancorada em decisão", () => {
+  const CAP33_STYLE =
+    "Reyland não se sobressaltou. Aos sessenta e três anos, o sobressalto já era um luxo. " +
+    "A sala estava imóvel no escuro. Havia caixas de arquivo nas paredes. Ele era um homem que guardava tudo. " +
+    "A memória era uma espiral que sempre voltava ao centro. O silêncio existia como um objeto. " +
+    "Tudo o que ele sabia estava catalogado. A verdade era suscetível. O passado tinha um cheiro de papel. " +
+    "Nada nele imaginava a derrota. A crença era a arma mais barata de todas.";
+  const REYLAND_COM_DECISAO =
+    "Reyland leu a linha uma segunda vez. Depois abriu a gaveta e tirou a pasta. " +
+    "— Traga o Curador — disse ao telefone, e desligou antes da resposta. A mão dele encontrou a caneta. " +
+    "Riscou um nome na lista. Levantou-se, foi até a estante e puxou o dossiê de Helena. " +
+    "Escreveu a primeira linha da carta à mão, e só então sentiu o peso do que fazia.";
+
+  it("cap-33-style (introspecção sem evento) → SINAL dispara (candidato a reprovação)", () => {
+    const r = interioridadeSemEvento(CAP33_STYLE);
+    expect(r.acima).toBe(true);
+    expect(r.estaticaPct).toBeGreaterThan(60);
+    expect(r.dialogoPct).toBeLessThan(6);
+  });
+  it("interioridade REAL ancorada em decisão/ação → NÃO dispara (sem falso-positivo)", () => {
+    // mesmo personagem, mesma profundidade — mas pendurada em decisão/ação/diálogo
+    expect(interioridadeSemEvento(REYLAND_COM_DECISAO).acima).toBe(false);
+  });
+});

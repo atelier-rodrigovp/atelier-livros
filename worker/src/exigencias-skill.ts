@@ -61,6 +61,11 @@ export interface ExigenciasSkill {
   // Só para skills com rotação real (dan-brown/romantasy) — hoover NÃO tem (POV único).
   maxCapsMesmoFioAbsoluto?: number;               // teto DURO, mesmo com 'Justificativa de fio:'
   janelaDiversidade?: { tamanho: number; ratioMax: number }; // nos últimos N specs, nenhum fio > ratioMax
+  // DUAL do teto absoluto: um fio RECORRENTE não pode DESAPARECER por > N caps. Fecha o gap
+  // "o caçador (fio de ironia dramática) sumiu 33-36 apesar da regra": a Estrutura já declara
+  // "o fio C não fica mais de 3 caps fora da página" — este número enforça isso. Genérico
+  // (qualquer fio primário recorrente), o caçador é o caso central.
+  maxCapsFioAusente?: number;
   // FASE 6 (Set Piece Scheduler): 1 cena de alto impacto a cada N caps (opt-in por skill).
   // dan-brown/romantasy: 7. hoover: sem entrada (a estrutura dela é relógio+pista, não set-piece).
   setPieceIntervalo?: number;
@@ -72,7 +77,7 @@ export interface ExigenciasSkill {
 export function avaliarRotacaoFio(
   fios: (string | null)[],
   n: number,
-  ex: { maxCapsMesmoFioAbsoluto?: number; janelaDiversidade?: { tamanho: number; ratioMax: number } }
+  ex: { maxCapsMesmoFioAbsoluto?: number; janelaDiversidade?: { tamanho: number; ratioMax: number }; maxCapsFioAusente?: number }
 ): string[] {
   const out: string[] = [];
   // Normaliza o fio ao CÓDIGO/POV canônico: "H (Helena Caires…)" / "H (principal)" /
@@ -103,6 +108,23 @@ export function avaliarRotacaoFio(
       }
     }
   }
+  // fio RECORRENTE ausente demais (o caçador sumindo — dual do teto absoluto). Considera o fio
+  // PRIMÁRIO (1º token antes de '+'), o que exclui apoio (aparece só como 'H+apoio', nunca
+  // primário sozinho). Um fio primário que já apareceu ≥2× é um FIO recorrente; se some por mais
+  // de maxCapsFioAusente caps consecutivos, sinaliza (o caçador/ironia dramática não pode evaporar).
+  if (ex.maxCapsFioAusente && ex.maxCapsFioAusente > 0) {
+    const primario = (f: string) => f.split("+")[0].trim();
+    const prim = seq.map(primario);
+    const freq = new Map<string, number>();
+    for (const p of prim) if (p) freq.set(p, (freq.get(p) ?? 0) + 1);
+    for (const [fio, c] of freq) {
+      if (c < 2) continue; // não recorrente (apoio/one-off) → não se exige recorrência
+      let ausente = 0;
+      for (let i = n - 1; i >= 0 && prim[i] !== fio; i--) ausente++;
+      if (ausente > ex.maxCapsFioAusente)
+        out.push(`fio recorrente '${fio}' ausente há ${ausente} caps (máx ${ex.maxCapsFioAusente} — fio de ironia dramática/caçador não pode sumir tanto)`);
+    }
+  }
   return out;
 }
 
@@ -111,6 +133,7 @@ const DAN_BROWN: ExigenciasSkill = {
   maxCapsMesmoFio: 3,
   maxCapsMesmoFioAbsoluto: 5,                         // confirmado
   janelaDiversidade: { tamanho: 10, ratioMax: 0.65 }, // 0.65: o defeito real foi 0.7–0.8; 0.7 ficava na borda
+  maxCapsFioAusente: 3,                               // Estrutura: "o fio C não fica mais de 3 caps fora"
   setPieceIntervalo: 7,                               // ⚠️ intervalo a confirmar com o Rodrigo
   // "Modo"/"Novidade": campos editoriais que ALIMENTAM os gates Source Reveal Streak
   // (Modo) e Novelty (Novidade) + Set-Piece (Modo). Estavam DESCRITOS no system prompt do

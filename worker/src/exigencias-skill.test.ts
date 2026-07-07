@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   exigenciasParaSkill, garantirRotacaoNaEstrutura, garantirSpecCompletaNoEditor,
-  garantirFatoDossieNoRevisor, garantirBlocoRevisorSkill,
+  garantirFatoDossieNoRevisor, garantirBlocoRevisorSkill, avaliarRotacaoFio,
   MARCADOR_ROTACAO, MARCADOR_SPEC_COMPLETA, MARCADOR_FATO_DOSSIE,
   MARCADOR_RELOGIOS_NARRADORA, MARCADOR_ROTACAO_POV, MARCADOR_CUSTO_ESCALA,
 } from "./exigencias-skill.js";
@@ -173,5 +173,43 @@ describe("FASE 2 — Modo/Novidade agora no camposSpec de toda skill gated (cegu
     expect(r.texto).toContain("**Novidade:**");
     // idempotente
     expect(garantirSpecCompletaNoEditor(r.texto, "skill-dan-brown").mudou).toBe(false);
+  });
+});
+
+// FASE 2 — fio caçador não pode sumir: dual do teto absoluto. maxCapsFioAusente=3.
+describe("FASE 2 — avaliarRotacaoFio: fio recorrente (caçador) ausente demais dispara", () => {
+  const EX = { maxCapsFioAusente: 3 };
+
+  it("DENTRO do intervalo (C ausente 3 caps) → NÃO dispara", () => {
+    // C aparece nos caps 1 e 4 (recorrente); depois 5,6,7 sem C = ausência de 3
+    const fios = ["C", "H", "R", "C", "H", "H", "H"];
+    const motivos = avaliarRotacaoFio(fios, 7, EX);
+    expect(motivos.some((m) => /fio recorrente 'c' ausente/.test(m))).toBe(false);
+  });
+
+  it("ALÉM do intervalo (C ausente 4 caps seguidos) → DISPARA", () => {
+    const fios = ["C", "H", "R", "C", "H", "H", "H", "H"];
+    const motivos = avaliarRotacaoFio(fios, 8, EX);
+    expect(motivos.some((m) => /fio recorrente 'c' ausente há 4 caps/.test(m))).toBe(true);
+  });
+
+  it("o próprio capítulo TER o fio caçador zera a ausência (não dispara)", () => {
+    const fios = ["C", "H", "R", "C", "H", "H", "H", "C"]; // cap 8 volta pro caçador
+    expect(avaliarRotacaoFio(fios, 8, EX).some((m) => /'c' ausente/.test(m))).toBe(false);
+  });
+
+  it("fio de APOIO (nunca primário sozinho: 'H+Sam') NÃO é exigido de volta", () => {
+    // Sam só aparece como co-POV; o primário é sempre H → 'sam' não é fio recorrente primário
+    const fios = ["H+Sam", "H", "H", "H", "H", "H", "H"];
+    expect(avaliarRotacaoFio(fios, 7, EX).some((m) => /sam/.test(m))).toBe(false);
+  });
+
+  it("fio primário em compostos ('C+R') conta como presença do caçador", () => {
+    const fios = ["C", "H", "R", "C+R", "H", "H", "H"]; // C presente no cap 4 via 'C+R'
+    expect(avaliarRotacaoFio(fios, 7, EX).some((m) => /'c' ausente/.test(m))).toBe(false);
+  });
+
+  it("dan-brown carrega maxCapsFioAusente=3 na fundação", () => {
+    expect(exigenciasParaSkill("skill-dan-brown")!.maxCapsFioAusente).toBe(3);
   });
 });
