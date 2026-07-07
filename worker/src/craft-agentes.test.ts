@@ -135,3 +135,24 @@ describe("FASE 2 — interioridade-sem-evento como reprovação (skill-agnóstic
     expect(garantirPropulsaoRevisor(r.texto).mudou).toBe(false);
   });
 });
+
+describe("FASE 2 — reforços de revisor: variedade de gancho + ancoragem física (skill-agnóstico)", () => {
+  it("injeção nova traz variedade de gancho (consultivo) e ancoragem física na interioridade", () => {
+    const t = garantirPropulsaoRevisor("# rev\n").texto;
+    expect(t).toMatch(/VARIEDADE DE GANCHO/);
+    expect(t).toMatch(/virada \/ pergunta \/ soco emocional \/ relógio/);
+    expect(t).toMatch(/detalhe físico\/sensorial concreto/);      // item 3: ancoragem física
+    expect(t).not.toMatch(/hoover|romantasy|dan-brown/);           // genérico de verdade
+  });
+  it("UPGRADE: bloco antigo ganha o adendo de gancho sem duplicar marcador", () => {
+    const antigo = garantirPropulsaoRevisor("# rev\n").texto
+      .replace(/### VARIEDADE DE GANCHO[\s\S]*?(?=\n\n<!-- \/PROPULSAO -->)/, "")
+      .replace(/\n{3,}/g, "\n\n");
+    expect(antigo).not.toMatch(/VARIEDADE DE GANCHO/);
+    const r = garantirPropulsaoRevisor(antigo);
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toMatch(/VARIEDADE DE GANCHO/);
+    expect(contar(r.texto, MARCADOR_PROPULSAO)).toBe(1);
+    expect(garantirPropulsaoRevisor(r.texto).mudou).toBe(false);
+  });
+});

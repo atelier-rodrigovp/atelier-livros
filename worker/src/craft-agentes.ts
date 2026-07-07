@@ -113,7 +113,23 @@ dirigida que ANCORE a interioridade num evento (uma escolha que custa, uma açã
 cena, uma pista decifrada sob pressão) — a interioridade fica, mas pendurada num
 acontecimento. NÃO confunda com interioridade REAL ancorada em decisão/ação (essa passa):
 o teste é "algo mudou na cena por causa disto?". Vale para toda voz — a intimista/lírica
-também precisa de evento; densidade de sentimento não substitui acontecimento.`;
+também precisa de evento; densidade de sentimento não substitui acontecimento. E a interioridade
+mora num CORPO: ancore-a em detalhe físico/sensorial concreto (o que os olhos do POV veem,
+o que a mão toca) — é a camada que mais some no capítulo raso, junto com a própria interioridade.`;
+
+// VARIEDADE DE TIPO DE GANCHO (consultivo — skill-agnóstico). Skills com gancho tipado
+// (hoover-mcfadden, romantasy) pedem NÃO repetir o mesmo tipo de gancho 3 capítulos seguidos
+// (virada / pergunta / soco emocional / relógio). Um classificador determinístico
+// (maneirismo.ts::classificarGanchoFinal) acerta pergunta/relógio com alta confiança, mas a
+// fronteira virada×soco é fuzzy (~50%) — por isso é SINAL consultivo, não gate. O prompt de
+// revisão pode trazer a sequência recente de tipos; o revisor julga a monotonia de fecho.
+export const ADENDO_VARIEDADE_GANCHO = `### VARIEDADE DE GANCHO — o mesmo tipo de fecho 3× seguidos é mesmice
+Se a skill tipa o gancho de fim (virada / pergunta / soco emocional / relógio), o capítulo NÃO
+deve fechar no MESMO tipo dos 2 anteriores. O prompt pode trazer um SINAL com a sequência
+recente de tipos (classificação heurística — trate como pista, não veredito). Se os últimos 3
+fecham igual (ex.: três perguntas retóricas seguidas, três socos emocionais seguidos): peça um
+tipo de gancho DIFERENTE, sem enfraquecer a tensão. Não confunda variar o TIPO com enfraquecer
+o gancho — todo capítulo ainda fecha em gancho honesto.`;
 
 export const BLOCO_PROPULSAO = `
 ${MARCADOR_PROPULSAO}
@@ -141,6 +157,8 @@ ${ADENDO_REDUNDANCIA_CONCEITUAL}
 ${ADENDO_CAUSAL_GNOMICO}
 
 ${ADENDO_INTERIORIDADE}
+
+${ADENDO_VARIEDADE_GANCHO}
 
 <!-- /PROPULSAO -->`;
 
@@ -191,6 +209,11 @@ export function garantirPropulsaoRevisor(conteudo: string): { texto: string; mud
     // upgrade: interioridade-sem-evento como gatilho de reprovação (skill-agnóstico).
     if (!texto.includes("INTERIORIDADE-SEM-EVENTO — reprova")) {
       texto = texto.replace("<!-- /PROPULSAO -->", `${ADENDO_INTERIORIDADE}\n\n<!-- /PROPULSAO -->`);
+      mudou = true;
+    }
+    // upgrade: variedade de tipo de gancho (consultivo).
+    if (!texto.includes("VARIEDADE DE GANCHO")) {
+      texto = texto.replace("<!-- /PROPULSAO -->", `${ADENDO_VARIEDADE_GANCHO}\n\n<!-- /PROPULSAO -->`);
       mudou = true;
     }
     return { texto, mudou };

@@ -407,7 +407,11 @@ export function contarCausalGnomico(texto: string): CausalGnomicoSinal {
 // sem diálogo → prosa "bem escrita e chata", sensação sobre sensação sem que nada
 // aconteça na cena. Alimenta o REVISOR (não rejeita sozinho — pode ser uma abertura
 // contemplativa legítima). Conservador: exige densidade alta E diálogo quase nulo.
-const RE_ESTATICO = /\b(é|era|foi|s[ãa]o|eram|est[áa]|estava|estavam|parece|parecia|pareciam|h[áa]|havia|houve|sentia|sente|sentiu|lembrava|lembra|imaginava|imagina|pensava|tinha|existia)\b/i;
+// Fronteira Unicode-aware: o `\b` do JS (ASCII) NÃO reconhece vogal acentuada como
+// caractere de palavra, então `\bé\b`/`\bestá\b`/`\bhá\b` NUNCA casavam — bloqueava a
+// detecção de estática em prosa no PRESENTE (o tempo verbal do hoover-mcfadden). Trocado
+// por lookarounds `\p{L}\d_` com flag `u`. A LISTA de palavras é idêntica; só a fronteira muda.
+const RE_ESTATICO = /(?<![\p{L}\d_])(é|era|foi|s[ãa]o|eram|est[áa]|estava|estavam|parece|parecia|pareciam|h[áa]|havia|houve|sentia|sente|sentiu|lembrava|lembra|imaginava|imagina|pensava|tinha|existia)(?![\p{L}\d_])/iu;
 export interface InterioridadeSinal { frases: number; estaticaPct: number; dialogoPct: number; acima: boolean }
 export function interioridadeSemEvento(texto: string, min = 10): InterioridadeSinal {
   const fr = dividirFrases(texto);
@@ -422,6 +426,41 @@ export function interioridadeSemEvento(texto: string, min = 10): InterioridadeSi
     dialogoPct: Math.round(dp * 1000) / 10,
     acima: fr.length >= min && ep > 0.6 && dp < 0.06,
   };
+}
+
+// TIPO DE GANCHO (fim de capítulo) — classificador heurístico + sinal de alternância.
+// A skill hoover-mcfadden (e a romantasy) pedem VARIAR o tipo de gancho: "não termine 3
+// capítulos seguidos no mesmo tipo". Tipos: virada (fato novo derruba o anterior), pergunta
+// (algo se abre sem resposta), soco emocional (verdade do coração), relógio (o prazo aperta).
+// pergunta e relógio são detectáveis com boa confiança; virada×soco é a fronteira fuzzy —
+// por isso o mecanismo é CONSULTIVO (sinaliza a repetição, NÃO bloqueia/regenera), mesmo
+// padrão do tique causal-gnômico. Genérico (sem parâmetro de skill): quem usa é o revisor.
+export type TipoGancho = "pergunta" | "relogio" | "virada" | "soco" | "indefinido";
+const _RE_RELOGIO_GANCHO = /(?<![\p{L}])(horas?|minutos?|segundos?|dias?|semanas?|prazo|amanh[ãa]|meia-noite|madrugada|rel[óo]gio|contagem|faltavam?|faltam?|restavam?|restam?|esgot\p{L}*|antes que|tempo)(?![\p{L}])/iu;
+const _RE_VIRADA_GANCHO = /(?<![\p{L}])(descobr\p{L}+|percebi|soube|entendi|afinal|n[ãa]o era|era el[ea]|mentira|mentiu|nunca (foi|houve|existiu)|o nome del\p{L}+|a verdade era|na verdade)(?![\p{L}])/iu;
+const _RE_SOCO_GANCHO = /(?<![\p{L}])(amei?|amava|amor|perdi|perda|medo|sozinh\p{L}+|d[óo]i|do[íi]a|cora[çc][ãa]o|chor\p{L}+|saudade|culpa|vazio|adeus|para sempre|nunca mais)(?![\p{L}])/iu;
+
+/** Classifica o TIPO do gancho pelo(s) parágrafo(s) final(is) de um capítulo. Heurístico. */
+export function classificarGanchoFinal(texto: string): TipoGancho {
+  const fr = dividirFrases(texto);
+  if (!fr.length) return "indefinido";
+  const ultima = fr[fr.length - 1];
+  const ultimas = fr.slice(-2).join(" ");
+  if (/[?]["'”’»)\]]*$/.test(ultima)) return "pergunta";          // termina em pergunta
+  if (_RE_RELOGIO_GANCHO.test(ultimas)) return "relogio";         // léxico de prazo/tempo
+  if (_RE_VIRADA_GANCHO.test(ultimas)) return "virada";           // revelação factual
+  if (_RE_SOCO_GANCHO.test(ultimas) || palavrasFrase(ultima) <= 6) return "soco"; // punch emocional/curto
+  return "indefinido";
+}
+
+export interface AlternanciaGanchoSinal { repetido: boolean; tipo: TipoGancho; sequencia: number }
+/** SINAL consultivo (não bloqueia): true se os últimos ≥3 ganchos são do MESMO tipo (≠indefinido). */
+export function alternanciaGanchoSinal(tipos: TipoGancho[]): AlternanciaGanchoSinal {
+  if (!tipos.length) return { repetido: false, tipo: "indefinido", sequencia: 0 };
+  const ultimo = tipos[tipos.length - 1];
+  let seq = 1;
+  for (let i = tipos.length - 1; i > 0 && tipos[i] === tipos[i - 1]; i--) seq++;
+  return { repetido: seq >= 3 && ultimo !== "indefinido", tipo: ultimo, sequencia: seq };
 }
 
 // FASE 5 — Exposition Control ESPECIALIZADO (pós-revelação; SINALIZA, não bloqueia).

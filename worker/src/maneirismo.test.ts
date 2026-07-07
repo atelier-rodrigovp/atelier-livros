@@ -4,6 +4,7 @@ import {
   ngramasSobrerepresentados, diagnosticarRepeticao, contarMuletas,
   dividirFrases, diagnosticarCadencia, cadenciaAcima, interioridadeSemEvento,
   orcCadenciaParaSkill, ORC_CADENCIA, contarCausalGnomico, LIMIAR_CAUSAL_GNOMICO,
+  classificarGanchoFinal, alternanciaGanchoSinal,
 } from "./maneirismo.js";
 
 const TRECHO_EVANGELHO =
@@ -338,5 +339,84 @@ describe("FASE 2 — interioridadeSemEvento pega 2 vozes diferentes, sem condici
       "Puxo com força e saio para o corredor. Desço correndo. O elevador não vem, então tomo a escada.";
     expect(interioridadeSemEvento(COM_EVENTO_A).acima).toBe(false);
     expect(interioridadeSemEvento(COM_EVENTO_B).acima).toBe(false);
+  });
+});
+
+// FASE 0 — RE_ESTATICO corrigido: prosa no PRESENTE com cópula ACENTUADA (é/está/há) agora
+// conta como estática. Antes o \b ASCII bloqueava, e interioridadeSemEvento ficava CEGO em
+// 1ª pessoa presente — exatamente o tempo verbal do hoover-mcfadden.
+describe("FASE 0 — interioridadeSemEvento enxerga estática no PRESENTE (é/está/há)", () => {
+  it("introspecção 1ª pessoa PRESENTE (hoover) com cópula acentuada → acima=true (antes era false)", () => {
+    const PRESENTE_ACENTUADO =
+      "A casa está silenciosa demais. Há um cano que range no escuro. O medo está em tudo. " +
+      "Nada aqui é real. A dúvida é um peso constante. O escuro é uma presença. Minha mente é um campo minado. " +
+      "Tudo está fora do lugar. A verdade é suscetível. O tempo é uma espiral. A lembrança é minha inimiga. " +
+      "O silêncio é denso.";
+    const r = interioridadeSemEvento(PRESENTE_ACENTUADO);
+    expect(r.acima).toBe(true);
+    expect(r.estaticaPct).toBeGreaterThan(60); // antes do fix ficava ~0 (acentos não casavam)
+  });
+  it("não-regressão: palavra acentuada NÃO-estática não vira falso-positivo ('estável' != 'está')", () => {
+    // frases de ação com acento mas sem cópula da lista → não deve inflar estática
+    const ACAO_ACENTUADA =
+      "— Corre — grita ela, e o prédio instável treme. Ela pula a mureta. Ninguém vê. " +
+      "O carro derrapa e some. Ela arromba a última porta.";
+    expect(interioridadeSemEvento(ACAO_ACENTUADA).acima).toBe(false);
+  });
+});
+
+// FASE 2 item 1 — classificador de TIPO DE GANCHO + sinal de alternância (CONSULTIVO).
+// Corpus rotulado (final de capítulo) calibrado nos 4 tipos que a skill hoover-mcfadden define.
+describe("FASE 2 — classificarGanchoFinal: acurácia medida + alternância", () => {
+  const CORPUS: Array<{ txt: string; tipo: string }> = [
+    // pergunta (esperado alta confiança)
+    { txt: "Ela abriu a porta do quarto. A cama estava feita. Então quem tinha dormido no sofá?", tipo: "pergunta" },
+    { txt: "O laudo dizia outra coisa. Eu li de novo, devagar. Por que Marcus mentiria sobre isso?", tipo: "pergunta" },
+    { txt: "Guardei o bilhete no bolso. E se ele já soubesse desde o começo?", tipo: "pergunta" },
+    { txt: "A foto era antiga. Mas o vestido era o meu. Como ele tinha essa foto?", tipo: "pergunta" },
+    // relogio (esperado alta confiança)
+    { txt: "Olhei o relógio da parede. Faltavam menos de seis horas para a cirurgia.", tipo: "relogio" },
+    { txt: "O prazo do plano de saúde vencia amanhã ao meio-dia, e eu ainda não tinha decidido.", tipo: "relogio" },
+    { txt: "Ele disse que voltava às onze. Restavam quarenta minutos.", tipo: "relogio" },
+    { txt: "A contagem já tinha começado. Três dias, no máximo, antes que descobrissem.", tipo: "relogio" },
+    // virada (fronteira fuzzy)
+    { txt: "Abri a gaveta procurando a receita. Não era uma receita. Era a certidão de óbito dele — datada de antes de eu o conhecer.", tipo: "virada" },
+    { txt: "Reconheci a letra na hora. Afinal, era a minha própria letra.", tipo: "virada" },
+    { txt: "Liguei para o número. Do outro lado, atendeu a voz da minha irmã, que eu enterrei há dez anos.", tipo: "virada" },
+    { txt: "Então eu soube: o homem no corredor não tinha vindo me salvar.", tipo: "virada" },
+    // soco emocional (fronteira fuzzy)
+    { txt: "Ele segurou minha mão como sempre segurava. E pela primeira vez em anos, senti medo dele.", tipo: "soco" },
+    { txt: "Fechei os olhos. Amei aquele homem mais do que amei a minha própria vida. E isso ia me matar.", tipo: "soco" },
+    { txt: "A casa ficou em silêncio. Sozinha, de novo.", tipo: "soco" },
+    { txt: "Nunca mais.", tipo: "soco" },
+  ];
+
+  it("acurácia geral medida no corpus + pergunta/relógio ~100%", () => {
+    let acertos = 0;
+    const porTipo: Record<string, { ok: number; n: number }> = {};
+    for (const { txt, tipo } of CORPUS) {
+      const got = classificarGanchoFinal(txt);
+      porTipo[tipo] ??= { ok: 0, n: 0 };
+      porTipo[tipo].n++;
+      if (got === tipo) { acertos++; porTipo[tipo].ok++; }
+    }
+    const acc = acertos / CORPUS.length;
+    // eslint-disable-next-line no-console
+    console.log(`[gancho] acurácia geral: ${(acc * 100).toFixed(0)}% (${acertos}/${CORPUS.length}) — por tipo:`,
+      Object.fromEntries(Object.entries(porTipo).map(([k, v]) => [k, `${v.ok}/${v.n}`])));
+    // tipos confiáveis: pergunta e relógio devem acertar tudo (por isso o mecanismo é útil como sinal)
+    expect(porTipo["pergunta"].ok).toBe(porTipo["pergunta"].n);
+    expect(porTipo["relogio"].ok).toBe(porTipo["relogio"].n);
+    // acurácia geral baixa o bastante para NÃO virar gate — só sinal consultivo (DoD)
+    expect(acc).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it("alternanciaGanchoSinal: 3 do mesmo tipo seguidos → repetido=true; variado → false", () => {
+    expect(alternanciaGanchoSinal(["pergunta", "pergunta", "pergunta"]).repetido).toBe(true);
+    expect(alternanciaGanchoSinal(["relogio", "pergunta", "pergunta", "pergunta"]).repetido).toBe(true);
+    expect(alternanciaGanchoSinal(["pergunta", "relogio", "pergunta"]).repetido).toBe(false);
+    expect(alternanciaGanchoSinal(["soco", "soco"]).repetido).toBe(false); // só 2 → ok
+    // 'indefinido' repetido não conta como tique de mesmice (não sabemos o tipo)
+    expect(alternanciaGanchoSinal(["indefinido", "indefinido", "indefinido"]).repetido).toBe(false);
   });
 });
