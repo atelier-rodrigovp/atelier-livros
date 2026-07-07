@@ -182,3 +182,33 @@ describe("Set Piece Scheduler (Fase 6)", () => {
     expect(exigenciasParaSkill("hoover-mcfadden")!.setPieceIntervalo).toBeUndefined();
   });
 });
+
+// FASE 2 — prova do "antes/depois do fix": os gates editoriais REAGEM quando Modo/Novidade
+// chegam preenchidos (agora enforçados no camposSpec) e ficam INERTES quando vazios (o estado
+// pré-fix, em que o editor os omitia). Mesmo input → comportamento muda com o campo presente.
+describe("FASE 2 — Novelty (Novidade) e Set-Piece/Streak (Modo) reagem ao campo preenchido", () => {
+  it("Novelty Gate: 'Novidade' com pergunta aberta/paga move open_loops/paid_loops", () => {
+    const base = estadoEditorialDefault();
+    // INERTE quando vazio (estado pré-fix: campo ausente/vazio)
+    const inerte = processarNovidade(base, "");
+    expect(inerte.open_loops).toEqual([]);
+    expect(inerte.paid_loops).toEqual([]);
+    // REAGE quando preenchido
+    const abre = processarNovidade(base, "pergunta aberta: quem é o Curador");
+    expect(abre.open_loops).toContain("quem é o Curador");
+    const paga = processarNovidade(abre, "pergunta paga: quem é o Curador");
+    expect(paga.paid_loops.length).toBe(1);
+    expect(paga.open_loops).toEqual([]);
+  });
+
+  it("Set-Piece/Streak: 'Modo' preenchido é reconhecido; vazio é inerte", () => {
+    // vazio → nenhum gate reage (pré-fix)
+    expect(modoSetPiece("")).toBe(false);
+    expect(modoExpositivo("")).toBe(false);
+    // preenchido → reage (dramático/set-piece vs expositivo)
+    expect(modoSetPiece("dramático (set-piece / perseguição)")).toBe(true);
+    expect(modoExpositivo("expositivo (entrevista / documento)")).toBe(true);
+    // e são distintos (set-piece não é lido como exposição)
+    expect(modoExpositivo("dramático (set-piece)")).toBe(false);
+  });
+});

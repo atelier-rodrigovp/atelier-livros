@@ -3,7 +3,7 @@ import {
   contarManeirismos, resumoManeirismo, fechoEpigramatico,
   ngramasSobrerepresentados, diagnosticarRepeticao, contarMuletas,
   dividirFrases, diagnosticarCadencia, cadenciaAcima, interioridadeSemEvento,
-  orcCadenciaParaSkill, ORC_CADENCIA,
+  orcCadenciaParaSkill, ORC_CADENCIA, contarCausalGnomico, LIMIAR_CAUSAL_GNOMICO,
 } from "./maneirismo.js";
 
 const TRECHO_EVANGELHO =
@@ -262,5 +262,45 @@ describe("diagnosticarRepeticao — agregado", () => {
     const d = diagnosticarRepeticao(cap.repeat(3), [cap, cap, cap]);
     expect(d.algumAcima).toBe(true);
     expect(d.moldes.length).toBeGreaterThan(0);
+  });
+});
+
+// FASE 3 — cláusula causal-gnômica (SINAL consultivo, não gate). Medição contra corpus real
+// (caps 30–36) deu ~44–45% de falso-positivo para um gate determinístico → mecanismo é
+// consultivo (contador + categoria nomeada no revisor), nunca gera regen sozinho.
+describe("FASE 3 — contarCausalGnomico (sinal, não cota)", () => {
+  // As 4 instâncias REAIS do cap. 35 fornecidas pelo Rodrigo (frases completas).
+  const CAP35 = [
+    "Às três da manhã Helena parou de esperar pelo sono, porque esperar era uma maneira de mentir para si mesma sobre ainda ter escolha.",
+    "Começou pelo controle, porque um experimento sem controle é só medo com aparência de método.",
+    "E respirou, porque estava tudo errado do jeito certo.",
+    "Estava liso como uma superfície onde ninguém nunca tocou porque nunca houve o que tocar — gravado e devolvido, não vivido e guardado.",
+  ].join(" ");
+
+  it("captura as 4 instâncias reais do cap. 35 e sinaliza acima do limiar", () => {
+    const r = contarCausalGnomico(CAP35);
+    expect(r.n).toBe(4);
+    expect(r.acima).toBe(true);               // 4 > limiar (2) → tique provável
+    expect(LIMIAR_CAUSAL_GNOMICO).toBe(2);
+  });
+
+  it("NÃO dispara em causais concretos legítimos (nome próprio / dígito / referente concreto)", () => {
+    const concretos = [
+      "Ela correu porque Nora estava esperando no carro.",       // nome próprio → escapa
+      "Voltou porque o relógio marcava 3 horas.",                 // dígito → escapa
+      "Trancou a porta porque Reyland tinha a chave.",            // nome próprio → escapa
+    ].join(" ");
+    expect(contarCausalGnomico(concretos).n).toBe(0);
+    expect(contarCausalGnomico(concretos).acima).toBe(false);
+  });
+
+  it("é CONSULTIVO: não entra na cota Regra 4 (cadenciaAcima não ganha tique causal)", () => {
+    const nomes = cadenciaAcima(CAP35).map((t) => t.nome).join("|");
+    expect(nomes).not.toMatch(/causal|gnôm|porque/i);
+  });
+
+  it("diálogo (fala) não conta como aforismo de narração", () => {
+    const dialogo = "— Eu vim porque a verdade é sempre uma armadilha.";
+    expect(contarCausalGnomico(dialogo).n).toBe(0);
   });
 });

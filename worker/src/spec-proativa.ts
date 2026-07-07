@@ -33,6 +33,35 @@ export function skillExigeSpec(skill: string | undefined | null): boolean {
 }
 
 /**
+ * Campos obrigatorios da spec para a skill — MESMA fonte do gate reativo
+ * (camposSpec em exigencias-skill.ts). [] para skill sem exigencia. Nao duplica a
+ * lista em lugar nenhum: e o unico ponto onde o fix le "quais campos".
+ */
+export function camposObrigatoriosSpec(skill: string | undefined | null): string[] {
+  return exigenciasParaSkill(skill)?.camposSpec ?? [];
+}
+
+/**
+ * Instrucao EXPLICITA para a materializacao proativa (Task->livro-editor que fecha o
+ * capitulo N): enumera os campos que a spec do PROXIMO capitulo DEVE conter PREENCHIDOS
+ * com conteudo real — nao so o cabecalho vazio. Producao (caps 34/35 do Indice) mostrou o
+ * editor materializando a spec faltando 2/3 campos ("Fio de POV", "Decisao/Acao") quando o
+ * orquestrador so REFERENCIAVA o formato "SPEC COMPLETA" em abstrato; enumerar os campos
+ * aqui vira um checklist duro. Reusa camposSpec (a lista vive so em exigencias-skill.ts); o
+ * FORMATO de cada campo segue no bloco SPEC-COMPLETA do system prompt do editor (nao repete
+ * aqui). "" para skill sem exigencia (no-op, como todo o mecanismo).
+ */
+export function instrucaoCamposProativa(skill: string | undefined | null): string {
+  const campos = camposObrigatoriosSpec(skill);
+  if (!campos.length) return "";
+  return (
+    "A spec DEVE conter, CADA UM PREENCHIDO com conteudo real (nao apenas o cabecalho): " +
+    campos.join("; ") +
+    " — no formato do bloco \"SPEC COMPLETA\" do seu system prompt."
+  );
+}
+
+/**
  * Decide o capitulo-ALVO da materializacao proativa ao FECHAR `capituloFechado`
  * (aceitar a revisao dele, fim do micro-loop). null = nao cabe pedir: skill sem
  * exigencia (no-op, como todo o resto do mecanismo), ou nao ha proximo capitulo
@@ -66,7 +95,27 @@ export function gateSpecExistenciaSimulado(
   const DIACRITICOS = new RegExp("[" + String.fromCharCode(0x0300) + "-" + String.fromCharCode(0x036f) + "]", "g");
   const norm = (s: string) => s.normalize("NFKD").replace(DIACRITICOS, "").toLowerCase();
   const alvo = norm(specTexto);
-  const faltam = camposExigidos.filter((c) => !alvo.includes(norm(c)));
+  const faltam = camposExigidos.filter((c) => !campoPresenteNorm(alvo, norm(c)));
   if (faltam.length) return `spec sem campo(s): ${faltam.join(", ")}`;
   return null;
+}
+
+// Presenca robusta de um campo na spec: casa como HEADING ('## Campo …') OU como LABEL
+// ('- **Campo…:** …'), cobrindo o formato MISTO das specs reais (o livro-editor escreve
+// ora '## Fio de POV', ora '- **Decisao/Acao:** valor'). NUNCA casa o nome do campo solto
+// no meio da prosa — sem isso um campo de nome curto/comum como "Modo" casaria "de modo
+// que" e o gate reprovaria specs saudaveis (o anti-padrao que o projeto proibe). Espelhado
+// em livro_runner.py::_campo_presente. Recebe texto e campo JA normalizados (min., sem acento).
+function campoPresenteNorm(specNorm: string, campoNorm: string): boolean {
+  for (const raw of specNorm.split("\n")) {
+    const heading = /^\s*#{1,6}\s+/.test(raw);
+    // conteudo apos marcador de heading (#) e/ou de lista/negrito (-, *, **)
+    const corpo = raw.replace(/^\s*#{1,6}\s+/, "").replace(/^\s*[-*]?\s*\*{0,2}\s*/, "");
+    if (!corpo.startsWith(campoNorm)) continue;
+    const resto = corpo.slice(campoNorm.length);
+    if (/^[a-z0-9]/.test(resto)) continue; // limite de palavra: "modos"/"modelo" != "modo"
+    if (heading) return true;              // '## Campo …'
+    if (resto.split("\n")[0].includes(":")) return true; // 'Campo…: …' (label)
+  }
+  return false;
 }

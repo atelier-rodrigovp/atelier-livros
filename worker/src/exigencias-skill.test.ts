@@ -149,3 +149,29 @@ describe("SPEC-RM1/RM2 — romantasy (POV duplo + custo-escala + slow burn)", ()
     expect(contar(um, MARCADOR_CUSTO_ESCALA)).toBe(1);
   });
 });
+
+// FASE 2 (qualidade/deteccao): a camada editorial estava CEGA para o dan-brown — Modo/Novidade
+// eram DESCRITOS no system prompt do editor mas AUSENTES do camposSpec, entao o gate nao os
+// cobrava, o editor os omitia e Source Reveal Streak / Novelty / Set-Piece ficavam inertes.
+describe("FASE 2 — Modo/Novidade agora no camposSpec de toda skill gated (cegueira fechada)", () => {
+  it("as 3 skills gated incluem 'Modo' e 'Novidade' no camposSpec", () => {
+    for (const skill of ["skill-dan-brown", "hoover-mcfadden", "skill-romantasy"]) {
+      const campos = exigenciasParaSkill(skill)!.camposSpec;
+      expect(campos).toContain("Modo");
+      expect(campos).toContain("Novidade");
+    }
+  });
+
+  it("skill sem exigencia (jk-rowling): continua sem camposSpec (no-op preservado)", () => {
+    expect(exigenciasParaSkill("skill-jk-rowling")).toBeNull();
+  });
+
+  it("o bloco SPEC COMPLETA injetado no editor descreve Modo e Novidade (dado que o gate cobra)", () => {
+    const r = garantirSpecCompletaNoEditor("# livro-editor\n", "skill-dan-brown");
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toContain("**Modo:**");
+    expect(r.texto).toContain("**Novidade:**");
+    // idempotente
+    expect(garantirSpecCompletaNoEditor(r.texto, "skill-dan-brown").mudou).toBe(false);
+  });
+});

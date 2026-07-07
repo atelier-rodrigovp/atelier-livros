@@ -112,7 +112,13 @@ const DAN_BROWN: ExigenciasSkill = {
   maxCapsMesmoFioAbsoluto: 5,                         // confirmado
   janelaDiversidade: { tamanho: 10, ratioMax: 0.65 }, // 0.65: o defeito real foi 0.7–0.8; 0.7 ficava na borda
   setPieceIntervalo: 7,                               // ⚠️ intervalo a confirmar com o Rodrigo
-  camposSpec: ["Fio de POV", "Dia/Hora", "Decisão/Ação"],
+  // "Modo"/"Novidade": campos editoriais que ALIMENTAM os gates Source Reveal Streak
+  // (Modo) e Novelty (Novidade) + Set-Piece (Modo). Estavam DESCRITOS no system prompt do
+  // editor (CAMPOS_EDITORIAIS_SPEC) mas AUSENTES do camposSpec — o gate nao os cobrava, o
+  // editor os omitia e os gates ficavam inertes (cap 34 do Indice passou limpo). Agora
+  // enforçados (cegueira editorial fechada). Nome curto "Modo" e seguro: o gate casa
+  // heading/label, nao substring solto (ver _campo_presente / campoPresenteNorm).
+  camposSpec: ["Fio de POV", "Dia/Hora", "Decisão/Ação", "Modo", "Novidade"],
   dossie: true,
   marcadorNotas: MARCADOR_ROTACAO,
   promptFundacao:
@@ -160,7 +166,11 @@ const DAN_BROWN: ExigenciasSkill = {
 const HOOVER: ExigenciasSkill = {
   fios: { min: 1, max: 2 },
   maxCapsMesmoFio: 6,
-  camposSpec: ["Dia/Hora", "Relógios", "Pistas", "Gancho", "Narradora", "Decisão/Ação"],
+  // "Modo"/"Novidade": mesma lacuna do dan-brown — Source Reveal Streak (Modo) e Novelty
+  // (Novidade) rodam para TODA skill gated em _editorial_pos_aceite, mas hoover nao os
+  // cobrava. Set-Piece nao se aplica a hoover (sem set_piece_intervalo), mas Modo ainda
+  // alimenta a streak de exposicao — relevante ao thriller de narradora nao-confiavel.
+  camposSpec: ["Dia/Hora", "Relógios", "Pistas", "Gancho", "Narradora", "Decisão/Ação", "Modo", "Novidade"],
   dossie: false,
   marcadorNotas: MARCADOR_RELOGIOS_NARRADORA,
   promptFundacao:
@@ -216,7 +226,9 @@ const ROMANTASY: ExigenciasSkill = {
   maxCapsMesmoFioAbsoluto: 3,                       // ⚠️ nº a confirmar (POV duplo é mais apertado)
   janelaDiversidade: { tamanho: 6, ratioMax: 0.6 },
   setPieceIntervalo: 7,                             // ⚠️ intervalo a confirmar
-  camposSpec: ["Ponto de vista", "Degrau slow burn", "Custo de magia", "Decisão/Ação"],
+  // "Modo"/"Novidade": mesma lacuna — romantasy tem set_piece_intervalo (Set-Piece ativo,
+  // precisa de Modo) e a Novelty roda para toda skill gated (precisa de Novidade).
+  camposSpec: ["Ponto de vista", "Degrau slow burn", "Custo de magia", "Decisão/Ação", "Modo", "Novidade"],
   dossie: false,
   marcadorNotas: MARCADOR_ROTACAO_POV,
   promptFundacao:
@@ -293,7 +305,9 @@ export function garantirRotacaoNaEstrutura(conteudo: string, skill?: string | nu
 // livro-editor.md gerado: injeta o formato de SPEC COMPLETA (o arquiteto instalava
 // um formato que dropava Montagem/Dia-Hora/Forma/factual). Idempotente.
 // Campos editoriais UNIVERSAIS (camada editorial) — injetados na SPEC COMPLETA de toda
-// skill gated. Fase 2: Decisão/Ação. (Fases 3/4 acrescentam Novidade/Modo aqui.)
+// skill gated. Decisão/Ação + Novidade + Modo + Beat central. Todos agora também no
+// camposSpec de cada skill (o gate os cobra), fechando a cegueira em que o editor os
+// omitia e Source Reveal Streak / Novelty / Set-Piece ficavam inertes.
 export const CAMPOS_EDITORIAIS_SPEC =
   "- **Decisão/Ação:** quem DECIDIU, qual AÇÃO mudou a situação, qual o CUSTO, e qual " +
   "CONSEQUÊNCIA abre o próximo capítulo — cena de escolha/ação/erro/risco, não " +

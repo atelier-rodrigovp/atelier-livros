@@ -546,16 +546,23 @@ def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
     # completa e valida -> nao pede de novo; retry da revisao de N tambem nao duplica).
     alvo_spec = int(n) + 1
     motivo_spec_proativo = None
-    if total and 1 <= alvo_spec <= int(total) and EXIGE_SPEC_POR_SKILL.get(_skill_projeto(projeto)):
+    _exig_alvo = EXIGE_SPEC_POR_SKILL.get(_skill_projeto(projeto))
+    if total and 1 <= alvo_spec <= int(total) and _exig_alvo:
         motivo_spec_proativo = gate_spec_capitulo(projeto, alvo_spec)
+    # Enumera EXPLICITAMENTE os campos obrigatorios (mesma fonte do gate: EXIGE_SPEC_POR_SKILL).
+    # Producao (caps 34/35 do Indice) mostrou o editor materializando a spec faltando 2/3 campos
+    # quando o passo so REFERENCIAVA o formato "SPEC COMPLETA" em abstrato; o checklist explicito
+    # forca o preenchimento. Nao duplica o FORMATO (esse segue no system prompt do editor).
+    _campos_alvo = "; ".join((_exig_alvo or {}).get("campos", []))
     bloco_spec_proativa = (
         "3) Task -> `livro-editor`: TAMBEM materialize/corrija specs/Spec-Capitulo-{alvo:02d}.md "
         "(motivo: {motivo}), seguindo o formato 'SPEC COMPLETA' que ja esta no SEU proprio "
-        "system prompt (bloco marcado SPEC-COMPLETA) — nao invente outro formato. Use a LINHA "
-        "do Capitulo {alvo} na Estrutura-do-Livro.md, a MATRIZ DE FIOS/POV e o estado/"
-        "estado-narrativo.md (JA atualizado no passo 2) como fontes. Isto e ADIANTAR o "
+        "system prompt (bloco marcado SPEC-COMPLETA) — nao invente outro formato. A spec DEVE "
+        "conter, CADA UM PREENCHIDO com conteudo real (nao apenas o cabecalho vazio): {campos}. "
+        "Use a LINHA do Capitulo {alvo} na Estrutura-do-Livro.md, a MATRIZ DE FIOS/POV e o "
+        "estado/estado-narrativo.md (JA atualizado no passo 2) como fontes. Isto e ADIANTAR o "
         "pre-requisito do PROXIMO capitulo agora; o runner so vai escreve-lo depois.\n   "
-    ).format(alvo=alvo_spec, motivo=motivo_spec_proativo) if motivo_spec_proativo else ""
+    ).format(alvo=alvo_spec, motivo=motivo_spec_proativo, campos=_campos_alvo) if motivo_spec_proativo else ""
     n_passo_final = 4 if bloco_spec_proativa else 3
     maxed = int(getattr(args, "max_edicoes_por_cap", 6))
     # Cota da Regra 4 (ritmo) COM AS CONTAGENS REAIS deste capitulo, para o revisor
@@ -1420,12 +1427,16 @@ EXIGE_SPEC_POR_SKILL = {
     # AUDITORIA-DAN-BROWN-V2 gap 2: max_absoluto (teto que Justificativa NAO derruba)
     # + janela (diversidade nos ultimos N). So skills com rotacao real (dan-brown/romantasy).
     # editorial Fase 2: "Decisao/Acao" universal em toda skill gated (matching accent-insensitive).
-    "skill-dan-brown": dict(campos=["Fio de POV", "Dia/Hora", "Decisao/Acao"], max_mesmo_fio=3,
+    # "Modo"/"Novidade": campos que ALIMENTAM Source Reveal Streak (Modo), Novelty (Novidade) e
+    # Set-Piece (Modo). Estavam descritos no system prompt do editor mas AUSENTES do gate — o
+    # editor os omitia e os gates ficavam inertes (cap 34 do Indice passou limpo). Agora
+    # cobrados (matching heading/label via _campo_presente — "Modo" curto NAO casa "de modo que").
+    "skill-dan-brown": dict(campos=["Fio de POV", "Dia/Hora", "Decisao/Acao", "Modo", "Novidade"], max_mesmo_fio=3,
                             max_absoluto=5, janela=dict(tamanho=10, ratio_max=0.65), set_piece_intervalo=7),
     # SPEC-HM2: hoover e POV unico (Helena) — sem rotacao; NAO recebe max_absoluto/janela/set_piece.
-    "hoover-mcfadden": dict(campos=["Dia/Hora", "Relogios", "Pistas", "Gancho", "Narradora", "Decisao/Acao"], max_mesmo_fio=6),
+    "hoover-mcfadden": dict(campos=["Dia/Hora", "Relogios", "Pistas", "Gancho", "Narradora", "Decisao/Acao", "Modo", "Novidade"], max_mesmo_fio=6),
     # SPEC-RM2: romantasy = POV duplo; guard de rotacao via "Ponto de vista".
-    "skill-romantasy": dict(campos=["Ponto de vista", "Degrau slow burn", "Custo de magia", "Decisao/Acao"], max_mesmo_fio=2,
+    "skill-romantasy": dict(campos=["Ponto de vista", "Degrau slow burn", "Custo de magia", "Decisao/Acao", "Modo", "Novidade"], max_mesmo_fio=2,
                             max_absoluto=3, janela=dict(tamanho=6, ratio_max=0.6), set_piece_intervalo=7),
 }
 
@@ -1442,6 +1453,30 @@ def _sem_acento(s):
     """Normaliza acentos p/ matching robusto: o LLM escreve 'Relogios'/'Relógios'
     indistintamente; o gate nao pode reprovar por causa de um acento."""
     return unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode("ascii").lower()
+
+
+def _campo_presente(txt, campo_norm):
+    """Presenca robusta de um campo na spec: casa como HEADING ('## Campo …') OU como
+    LABEL ('- **Campo…:** …'), cobrindo o formato MISTO das specs reais (o livro-editor
+    escreve ora '## Fio de POV', ora '- **Decisao/Acao:** valor'). NUNCA casa o nome do
+    campo solto na prosa — sem isso um campo curto/comum como 'Modo' casaria 'de modo que'
+    e o gate reprovaria specs saudaveis (o anti-padrao que o projeto proibe). Espelha
+    spec-proativa.ts::campoPresenteNorm. `campo_norm` ja vem de _sem_acento(campo)."""
+    for raw in (txt or "").split("\n"):
+        low = _sem_acento(raw)
+        heading = bool(re.match(r"\s*#{1,6}\s+", low))
+        corpo = re.sub(r"^\s*#{1,6}\s+", "", low)
+        corpo = re.sub(r"^\s*[-*]?\s*\*{0,2}\s*", "", corpo)
+        if not corpo.startswith(campo_norm):
+            continue
+        resto = corpo[len(campo_norm):]
+        if resto[:1].isalnum():   # limite de palavra: 'modos'/'modelo' != 'modo'
+            continue
+        if heading:
+            return True           # '## Campo …'
+        if ":" in resto.split("\n")[0]:
+            return True           # 'Campo…: …' (label)
+    return False
 
 
 def _fio_da_spec(texto):
@@ -1463,8 +1498,7 @@ def gate_spec_capitulo(projeto, n):
             txt = fh.read()
     except OSError:
         return "spec ausente (specs/Spec-Capitulo-{:02d}.md)".format(int(n))
-    txt_norm = _sem_acento(txt)
-    faltam = [c for c in exig["campos"] if _sem_acento(c) not in txt_norm]
+    faltam = [c for c in exig["campos"] if not _campo_presente(txt, _sem_acento(c))]
     if faltam:
         return "spec sem campo(s): {}".format(", ".join(faltam))
     # rotacao: se os N anteriores tem o MESMO fio e este repete, exige justificativa.

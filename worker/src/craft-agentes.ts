@@ -66,6 +66,36 @@ Se sim, é **ECO REDUNDANTE**: REPROVE e devolva edição que faça a ideia EVOL
 custo, ou consequência), não reafirme o que o leitor já sabe. Classifique a função do beat:
 introdução / reforço / virada / pagamento / eco-redundante.`;
 
+// REDUNDÂNCIA CONCEITUAL entre capítulos (defesa em profundidade — independe dos gates
+// determinísticos). Diferente do eco de BEAT (ADENDO_MOTIF): aqui um PERSONAGEM reexplica,
+// no capítulo seguinte, um argumento/decisão/lógica que a interioridade do capítulo anterior
+// já ESGOTOU — mesma lógica, palavras diferentes. Padrão que os gates de repetição
+// (n-grama/semantic-repetition) NÃO pegam, porque não há frase repetida, só a IDEIA. O
+// padrão é descrito de forma GENÉRICA (o caso que o calibrou não é hardcoded).
+export const ADENDO_REDUNDANCIA_CONCEITUAL = `### REDUNDÂNCIA CONCEITUAL entre capítulos (mesma lógica, roupagem nova)
+Um PERSONAGEM (ou a narração no fio dele) reexplica um argumento, uma justificativa moral, uma
+decisão ou uma "lógica de plano" que a interioridade de um capítulo ANTERIOR já esgotou? Ex.:
+o antagonista medita "por que faço isto e como o plano funciona" no cap N (câmera interna), e no
+cap N+1 verbaliza/re-narra a MESMA lógica com outras palavras — o leitor não ganha ângulo, custo
+nem consequência novos, só ouve de novo. Isso NÃO é pego pelas contagens de repetição (não há
+frase repetida, só a ideia). Se acontecer: **REPROVE a metade redundante** e devolva edição que a
+COMPRIMA (referência curta ao já sabido) e gaste o espaço em material novo (reação do outro lado,
+prova, virada). Preserve o que for genuinamente novo no capítulo.`;
+
+// CLÁUSULA CAUSAL-GNÔMICA (tique novo — mecanismo CONSULTIVO, não gate). Medição contra
+// corpus real (caps 30–36 do Índice): um detector determinístico teria ~44–45% de
+// falso-positivo (não separa aforismo de causal concreto legítimo sem semântica) — gerar
+// regen a essa taxa é pior que não ter gate. Por isso mora AQUI (revisor), não na cota
+// Regra 4. O contador informativo (maneirismo.ts::contarCausalGnomico) só SINALIZA densidade.
+export const ADENDO_CAUSAL_GNOMICO = `### CLÁUSULA CAUSAL-GNÔMICA repetida (tique de aforismo)
+Molde: uma cláusula (em geral iniciada por "porque", ou uma cópula) que RESOLVE a frase numa
+abstração quase-aforística — "…porque esperar era uma maneira de mentir para si mesma", "…é só
+medo com aparência de método", "…estava tudo errado do jeito certo", "…porque nunca houve o que
+tocar". Cada uma isolada pode estar BOA; o tique é a REPETIÇÃO — se o mesmo capítulo fecha frases
+em aforismo causal/paradoxal **mais de 2 vezes**, é maneirismo, ainda que nenhuma frase sozinha
+seja defeito. Ao notar (o prompt pode trazer uma contagem-sinal): peça VARIAÇÃO — deixe 1–2 fechos
+gnômicos por capítulo e resolva os demais em imagem concreta, ação ou consequência, não em máxima.`;
+
 export const BLOCO_PROPULSAO = `
 ${MARCADOR_PROPULSAO}
 
@@ -86,6 +116,10 @@ corte no pico, encadeie a caça às pistas) — não só cortam tique. Preserve 
 ${ADENDO_PARIDADE}
 
 ${ADENDO_MOTIF}
+
+${ADENDO_REDUNDANCIA_CONCEITUAL}
+
+${ADENDO_CAUSAL_GNOMICO}
 
 <!-- /PROPULSAO -->`;
 
@@ -121,6 +155,16 @@ export function garantirPropulsaoRevisor(conteudo: string): { texto: string; mud
     // upgrade FASE 8: bloco sem o adendo de motif/eco-redundante ganha in-place.
     if (!texto.includes("BEAT CENTRAL — eco redundante")) {
       texto = texto.replace("<!-- /PROPULSAO -->", `${ADENDO_MOTIF}\n\n<!-- /PROPULSAO -->`);
+      mudou = true;
+    }
+    // upgrade: redundância conceitual entre capítulos (defesa em profundidade da cegueira editorial).
+    if (!texto.includes("REDUNDÂNCIA CONCEITUAL entre capítulos")) {
+      texto = texto.replace("<!-- /PROPULSAO -->", `${ADENDO_REDUNDANCIA_CONCEITUAL}\n\n<!-- /PROPULSAO -->`);
+      mudou = true;
+    }
+    // upgrade: cláusula causal-gnômica (tique consultivo).
+    if (!texto.includes("CLÁUSULA CAUSAL-GNÔMICA repetida")) {
+      texto = texto.replace("<!-- /PROPULSAO -->", `${ADENDO_CAUSAL_GNOMICO}\n\n<!-- /PROPULSAO -->`);
       mudou = true;
     }
     return { texto, mudou };

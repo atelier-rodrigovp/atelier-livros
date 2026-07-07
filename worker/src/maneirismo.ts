@@ -369,6 +369,39 @@ export function cadenciaAcima(texto: string, orc: OrcamentoCadencia = ORC_CADENC
   return diagnosticarCadencia(texto, orc).tiques.filter((q) => q.acima);
 }
 
+// CLÁUSULA CAUSAL-GNÔMICA (tique novo — SINAL CONSULTIVO, NÃO entra na cota Regra 4 nem
+// gera regen). Um "porque" (última cláusula da frase) que resolve numa abstração quase-
+// aforística: "…porque esperar era uma maneira de mentir para si mesma", "…é só medo com
+// aparência de método", "…estava tudo errado do jeito certo", "…porque nunca houve o que
+// tocar". Medição contra corpus real (caps 30–36 do Índice): um GATE determinístico teria
+// ~44–45% de falso-positivo (não separa aforismo de causal concreto legítimo sem semântica)
+// — regen a essa taxa é pior que não ter gate (regra do projeto). Por isso este contador só
+// SINALIZA a densidade por capítulo; o julgamento fica no revisor (categoria nomeada no
+// PROPULSAO). Heurística deliberadamente inclusiva (pega os 4 casos do cap 35); a precisão
+// vem do humano, não do número. Regra prática: n>2 no mesmo capítulo = tique provável.
+const _RE_COP_GNOMICA = /\b(é|era|foi|seria|são|eram|está|estava|estavam|houve|havia|vira|virava|significa|significava)\b/i;
+const _RE_NOME_PROPRIO = /\b[A-ZÁÉÍÓÚÂÊÔÃÕ][a-záéíóúâêôãõ]{2,}/;
+export interface CausalGnomicoSinal { n: number; exemplos: string[]; limiar: number; acima: boolean }
+export const LIMIAR_CAUSAL_GNOMICO = 2; // >2 no mesmo capítulo = tique provável (só sinaliza)
+export function contarCausalGnomico(texto: string): CausalGnomicoSinal {
+  const t = semHeadings(texto ?? "");
+  const exemplos: string[] = [];
+  for (const sent of t.split(/(?<=[.!?])\s+/)) {
+    const s = sent.replace(/\s+/g, " ").trim();
+    if (/^[—-]/.test(s)) continue; // diálogo: fala não é narração aforística
+    const idx = s.toLowerCase().lastIndexOf("porque");
+    if (idx < 0) continue;
+    const cl = s.slice(idx + "porque".length).replace(/^[\s,]+/, "").replace(/[\s.,;:—-]+$/, "");
+    const nw = cl.split(/\s+/).filter(Boolean).length;
+    if (nw === 0 || nw > 14) continue;   // curta: aforismo fecha rápido
+    if (!_RE_COP_GNOMICA.test(cl)) continue; // cópula/existencial: "é/era/estava/houve…"
+    if (_RE_NOME_PROPRIO.test(cl)) continue; // referente concreto/nome próprio ⇒ causal legítimo
+    if (/\d/.test(cl)) continue;             // dígito ⇒ fato concreto
+    exemplos.push(("porque " + cl).slice(0, 90));
+  }
+  return { n: exemplos.length, exemplos: exemplos.slice(0, 5), limiar: LIMIAR_CAUSAL_GNOMICO, acima: exemplos.length > LIMIAR_CAUSAL_GNOMICO };
+}
+
 // INTERIORIDADE SEM EVENTO (heurística — SINALIZA, não bloqueia): capítulo
 // majoritariamente cópula/percepção (ser/estar/parecer/haver/sentir/lembrar) e quase
 // sem diálogo → prosa "bem escrita e chata", sensação sobre sensação sem que nada

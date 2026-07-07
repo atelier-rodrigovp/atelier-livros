@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { skillExigeSpec, proximaSpecAlvo, gateSpecExistenciaSimulado } from "./spec-proativa.js";
+import {
+  skillExigeSpec, proximaSpecAlvo, gateSpecExistenciaSimulado,
+  camposObrigatoriosSpec, instrucaoCamposProativa,
+} from "./spec-proativa.js";
 import { EXIGENCIAS_ESTRUTURAIS_POR_SKILL } from "./exigencias-skill.js";
 
 const CAMPOS_DAN_BROWN = EXIGENCIAS_ESTRUTURAIS_POR_SKILL["skill-dan-brown"].camposSpec;
@@ -82,6 +85,59 @@ describe("DoD (b) — materializacao proativa FALHA: o gate ainda pega e dispara
     const specIncompleta = specCompleta(campos);
     const motivo = gateSpecExistenciaSimulado(specIncompleta, CAMPOS_DAN_BROWN);
     expect(motivo).toBe("spec sem campo(s): Dia/Hora");
+  });
+});
+
+// FASE 1 (escala/TOKEN): a materializacao proativa emitia spec faltando 2/3 campos porque
+// o passo so REFERENCIAVA o formato "SPEC COMPLETA". Agora enumera os campos obrigatorios.
+describe("FASE 1 — instrucao proativa enumera os campos obrigatorios (checklist explicito)", () => {
+  it("dan-brown: a instrucao lista TODOS os campos do gate, preenchidos", () => {
+    const campos = camposObrigatoriosSpec("skill-dan-brown");
+    expect(campos).toEqual(EXIGENCIAS_ESTRUTURAIS_POR_SKILL["skill-dan-brown"].camposSpec);
+    const instr = instrucaoCamposProativa("skill-dan-brown");
+    for (const c of campos) expect(instr).toContain(c);              // cada campo nomeado
+    expect(instr.toUpperCase()).toContain("PREENCHIDO");             // exige conteudo, nao so header
+    // reforca os 2 campos que a producao omitiu (caps 34/35 do Indice)
+    expect(instr).toContain("Fio de POV");
+    expect(instr).toContain("Decisão/Ação");
+  });
+
+  it("hoover e romantasy: a instrucao usa os campos PROPRIOS de cada skill (sem duplicar lista)", () => {
+    for (const skill of ["hoover-mcfadden", "skill-romantasy"] as const) {
+      const instr = instrucaoCamposProativa(skill);
+      for (const c of EXIGENCIAS_ESTRUTURAIS_POR_SKILL[skill].camposSpec) expect(instr).toContain(c);
+    }
+  });
+
+  it("skill sem exigencia: instrucao vazia (no-op)", () => {
+    expect(instrucaoCamposProativa("skill-jk-rowling")).toBe("");
+    expect(instrucaoCamposProativa(undefined)).toBe("");
+  });
+});
+
+// FASE 1/2 (enabler): presenca por HEADING-ou-LABEL. As specs reais usam formato MISTO
+// ('## Fio de POV' vs '- **Decisao/Acao:** valor'); a checagem antiga (substring) casava o
+// nome do campo solto na prosa — perigoso para "Modo" ("de modo que"). O gate agora exige
+// que o campo apareca como cabecalho OU rotulo.
+describe("FASE 1/2 — gate reconhece campo em HEADING e em LABEL; nao casa prosa", () => {
+  const campos = ["Fio de POV", "Modo"];
+  it("campo como HEADING (## Fio de POV) conta como presente", () => {
+    const spec = "## Fio de POV\n### H+R (Helena + Reyland)\n- **Modo:** dramático\n";
+    expect(gateSpecExistenciaSimulado(spec, campos)).toBeNull();
+  });
+  it("campo como LABEL (- **Modo:** dramático) conta como presente", () => {
+    const spec = "- **Fio de POV:** Helena\n- **Modo:** confronto\n";
+    expect(gateSpecExistenciaSimulado(spec, campos)).toBeNull();
+  });
+  it("'de modo que' na PROSA nao satisfaz o campo 'Modo' (sem falso-positivo)", () => {
+    const spec = "- **Fio de POV:** Helena\n- Beat: ela agiu de modo que a verdade viesse.\n";
+    expect(gateSpecExistenciaSimulado(spec, campos)).toBe("spec sem campo(s): Modo");
+  });
+  it("campo PRESENTE-mas-so-header sem valor ainda conta como presente (heading e presenca legitima)", () => {
+    // heading e uma forma valida de declarar o campo (as specs reais usam); o conteudo abaixo
+    // do heading e responsabilidade do editor/revisor, nao do gate de existencia.
+    const spec = "## Fio de POV\n## Modo\n";
+    expect(gateSpecExistenciaSimulado(spec, campos)).toBeNull();
   });
 });
 

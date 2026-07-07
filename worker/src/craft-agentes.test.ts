@@ -88,3 +88,28 @@ describe("garantirPropulsaoRevisor", () => {
     expect(garantirPropulsaoRevisor(r.texto).mudou).toBe(false); // idempotente após upgrade
   });
 });
+
+describe("FASE 2/3 — defesa em profundidade no revisor (redundância conceitual + causal-gnômica)", () => {
+  it("injeção nova carrega as duas categorias nomeadas novas", () => {
+    const t = garantirPropulsaoRevisor("# rev\n").texto;
+    expect(t).toMatch(/REDUNDÂNCIA CONCEITUAL entre capítulos/);   // FASE 2 step 4
+    expect(t).toMatch(/reexplica/);
+    expect(t).toMatch(/CLÁUSULA CAUSAL-GNÔMICA repetida/);          // FASE 3 (consultivo)
+    expect(t).toMatch(/mais de 2 vezes/);
+  });
+  it("UPGRADE: bloco antigo (sem as categorias novas) as ganha sem duplicar o marcador", () => {
+    // simula bloco já injetado ANTES desta mudança (com motif, sem os 2 adendos novos)
+    const antigo = garantirPropulsaoRevisor("# rev\n").texto
+      .replace(/### REDUNDÂNCIA CONCEITUAL entre capítulos[\s\S]*?(?=\n\n### CLÁUSULA)/, "")
+      .replace(/### CLÁUSULA CAUSAL-GNÔMICA repetida[\s\S]*?(?=\n\n<!-- \/PROPULSAO -->)/, "")
+      .replace(/\n{3,}/g, "\n\n");
+    expect(antigo).not.toMatch(/REDUNDÂNCIA CONCEITUAL entre capítulos/);
+    expect(antigo).not.toMatch(/CLÁUSULA CAUSAL-GNÔMICA repetida/);
+    const r = garantirPropulsaoRevisor(antigo);
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toMatch(/REDUNDÂNCIA CONCEITUAL entre capítulos/);
+    expect(r.texto).toMatch(/CLÁUSULA CAUSAL-GNÔMICA repetida/);
+    expect(contar(r.texto, MARCADOR_PROPULSAO)).toBe(1);
+    expect(garantirPropulsaoRevisor(r.texto).mudou).toBe(false); // idempotente após upgrade
+  });
+});
