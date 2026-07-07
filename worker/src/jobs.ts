@@ -1,7 +1,7 @@
 // Executores por tipo de job. Cada um ORQUESTRA uma skill do Claude Code (ou um
 // script determinístico da skill) — NÃO reimplementa a lógica das skills.
 // Verdade do disco: o worker confere arquivos reais antes de gravar status.
-import { mkdir, writeFile, rm, cp, readdir } from "node:fs/promises";
+import { mkdir, writeFile, rm, cp, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sb, OWNER } from "./supabase.js";
@@ -25,7 +25,7 @@ import {
 } from "./lib.js";
 import { normalizarModelosAgentes } from "./modelos-agentes.js";
 import { normalizarVozRegra4 } from "./voz-regra4.js";
-import { normalizarCraftSkill } from "./craft-skill.js";
+import { normalizarCraftSkill, sinalConsistenciaVoz } from "./craft-skill.js";
 import { normalizarCraftNosAgentes } from "./craft-agentes.js";
 import { exigenciasParaSkill, normalizarExigenciasSkill } from "./exigencias-skill.js";
 import { normalizarLexicoPtbr } from "./lexico-ptbr.js";
@@ -495,6 +495,13 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
     if (c.mudou) console.log(`[craft] resumo da skill '${c.skill}' injetado no perfil-de-voz.md`);
     else if (!c.reconhecida && proj.skill_escrita) console.warn(`[craft] skill '${proj.skill_escrita}' sem bloco de craft — perfil segue sem resumo`);
   }
+  // Consistência de voz (genérico p/ QUALQUER skill_escrita): sinaliza — não bloqueia — se a
+  // Bíblia não registrou o veredito de alinhamento/divergência vs o registro da skill.
+  {
+    const bib = await readFile(path.join(dir, "Biblia-da-Obra.md"), "utf8").catch(() => "");
+    const s = sinalConsistenciaVoz(bib, proj.skill_escrita);
+    if (s.precisaRegistrar) console.warn(`[voz-consistencia] AVISO: ${s.aviso}`);
+  }
   // Conserta os AGENTES gerados: escritor lê a craft (não o digest p/ voz) + revisor
   // reprova "competente e chato" (veredito de propulsão). Idempotente.
   {
@@ -734,6 +741,12 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   {
     const c = await normalizarCraftSkill(dir, proj.skill_escrita);
     if (c.mudou) console.log(`[craft] resumo da skill '${c.skill}' injetado no perfil-de-voz.md`);
+  }
+  // Consistência de voz (genérico p/ QUALQUER skill_escrita) — sinaliza, não bloqueia.
+  {
+    const bib = await readFile(path.join(dir, "Biblia-da-Obra.md"), "utf8").catch(() => "");
+    const s = sinalConsistenciaVoz(bib, proj.skill_escrita);
+    if (s.precisaRegistrar) console.warn(`[voz-consistencia] AVISO: ${s.aviso}`);
   }
   // Conserta os agentes gerados (escritor lê craft / revisor cobra propulsão) antes de
   // escrever — projetos vivos passam a escrever da craft do próximo capítulo em diante.

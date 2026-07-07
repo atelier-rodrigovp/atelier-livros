@@ -76,6 +76,98 @@ export const CRAFT_POR_SKILL: Record<string, string> = {
 - **Fidelidade à spec do capítulo** (PdV, beat, marco) antes de qualquer floreio.`,
 };
 
+// ----------------------------------------------------------------------------
+// GATE DE CONSISTÊNCIA DE VOZ (genérico — vale para QUALQUER skill_escrita).
+//
+// A auditoria achou a causa raiz de "não parece com a skill escolhida": nada cruzava
+// o perfil-de-voz.md do projeto (escrito pelo autor/arquiteto) contra o REGISTRO que a
+// skill_escrita declara. Este mecanismo é skill-AGNÓSTICO: uma tabela de dados (um registro
+// por skill, mesmo padrão de CRAFT_POR_SKILL) + funções puras. Adicionar uma skill nova =
+// UMA linha de dado, zero código condicional. NÃO bloqueia (espelha o gate de ambição):
+// força a decisão consciente registrada na Bíblia. Nada aqui condiciona por skill específica.
+// ----------------------------------------------------------------------------
+
+// O registro de voz que CADA skill declara (curado do DNA em CRAFT_POR_SKILL / references).
+// Uma linha por skill — o mesmo padrão data-driven. Skill fora do mapa = sem registro (no-op).
+export const REGISTRO_VOZ_POR_SKILL: Record<string, string> = {
+  "skill-dan-brown":
+    "thriller de enigma/conspiração — prosa FUNCIONAL e propulsiva, exposição dramatizada, " +
+    "interioridade COM CUSTO ancorada em ação, montagem paralela e relógio comprimido; NÃO lírica-contemplativa.",
+  "skill-jk-rowling":
+    "prosa imersiva e CALOROSA — 3ª pessoa próxima, ternura e humor no narrador, detalhe " +
+    "concreto e encantado, cadência fluida; NÃO fria/clínica.",
+  "hoover-mcfadden":
+    "thriller-romance INTIMISTA — 1ª pessoa PRESENTE, emoção crua, narradora não-confiável " +
+    "com fair-play, relógios nomeados apertando a cada capítulo.",
+  "skill-romantasy":
+    "fantasia romântica página-vira — POV DUPLO dos amantes, slow burn por mérito, magia de " +
+    "custo crescente, frase-soco (voz BookTok), gancho cruel por capítulo.",
+  "vesper-escritor-de-capitulos":
+    "trilogia spec-driven — voz e léxico CANÔNICOS estáveis, revelação progressiva em degraus, " +
+    "continuidade dura com o estado-narrativo.",
+};
+
+export const MARCADOR_VOZ_CONSISTENCIA = "<!-- VOZ-CONSISTENCIA v1 -->";
+
+/** O registro de voz declarado pela skill (null se a skill não está no mapa — no-op). */
+export function registroVozDaSkill(skill: string | null | undefined): string | null {
+  return (skill && REGISTRO_VOZ_POR_SKILL[skill]) || null;
+}
+
+/** true se a Bíblia já registrou um veredito de consistência de voz (alinhado OU divergência). */
+export function vozConsistenciaRegistrada(bibliaTexto: string | null | undefined): boolean {
+  return (bibliaTexto ?? "").includes(MARCADOR_VOZ_CONSISTENCIA);
+}
+
+export interface GateConsistenciaVoz {
+  registroSkill: string;      // o que a skill_escrita declara
+  pergunta: string;           // a comparação a apresentar ao autor (mesma p/ toda skill)
+  marcador: string;           // marcador a gravar no Diagnóstico de Fundação
+}
+
+/**
+ * Monta a comparação genérica "a skill declara X; seu perfil declara Y; alinhado ou
+ * divergência consciente?". `resumoPerfil` = 1 linha do que o perfil-de-voz.md do projeto
+ * declara (o arquiteto extrai na entrevista). null se a skill não tem registro (no-op).
+ * O texto da pergunta é o MESMO para toda skill — só o registro injetado muda (data-driven).
+ */
+export function montarGateConsistenciaVoz(
+  skill: string | null | undefined,
+  resumoPerfil?: string | null,
+): GateConsistenciaVoz | null {
+  const registroSkill = registroVozDaSkill(skill);
+  if (!registroSkill) return null;
+  const perfilLinha = (resumoPerfil ?? "").trim() || "<resumo do perfil-de-voz.md deste projeto>";
+  const pergunta =
+    `A skill de escrita \`${skill}\` declara este registro de voz:\n` +
+    `  • ${registroSkill}\n` +
+    `O \`perfil-de-voz.md\` que você definiu declara este outro:\n` +
+    `  • ${perfilLinha}\n` +
+    `Eles estão ALINHADOS, ou você está escolhendo DIVERGIR de propósito? ` +
+    `Registre a escolha (não bloqueia a geração; força a decisão consciente).`;
+  return { registroSkill, pergunta, marcador: MARCADOR_VOZ_CONSISTENCIA };
+}
+
+export interface SinalVozConsistencia { precisaRegistrar: boolean; aviso?: string }
+
+/**
+ * Sinal NÃO-bloqueante para a engine: se a skill tem registro de voz E a Bíblia ainda não
+ * gravou o veredito, avisa que a decisão de consistência precisa ser registrada. Espelha o
+ * padrão de sinalização de docsFundacao (nunca gera/decide — só sinaliza). Genérico.
+ */
+export function sinalConsistenciaVoz(
+  bibliaTexto: string | null | undefined,
+  skill: string | null | undefined,
+): SinalVozConsistencia {
+  if (!registroVozDaSkill(skill)) return { precisaRegistrar: false }; // skill sem registro: no-op
+  if (vozConsistenciaRegistrada(bibliaTexto)) return { precisaRegistrar: false };
+  return {
+    precisaRegistrar: true,
+    aviso: `consistência de voz vs skill \`${skill}\` NÃO registrada no Diagnóstico de Fundação ` +
+      `(grave "${MARCADOR_VOZ_CONSISTENCIA} alinhado" ou "…divergência consciente: <o quê/por quê>")`,
+  };
+}
+
 // Detecta se o perfil já tem o bloco de craft (marcador v1 ou v2). Idempotente.
 export function temCraft(conteudo: string): boolean {
   const t = conteudo ?? "";

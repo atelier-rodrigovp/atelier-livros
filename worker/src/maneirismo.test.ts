@@ -304,3 +304,39 @@ describe("FASE 3 — contarCausalGnomico (sinal, não cota)", () => {
     expect(contarCausalGnomico(dialogo).n).toBe(0);
   });
 });
+
+// FASE 2 — interioridade-sem-evento é SKILL-AGNÓSTICA: o MESMO código (sem parâmetro de
+// skill) pega capítulos "bem escritos e chatos" de vozes DIFERENTES, e deixa passar a
+// interioridade REAL ancorada em decisão/ação. Prova de genericidade com 2 estilos distintos.
+describe("FASE 2 — interioridadeSemEvento pega 2 vozes diferentes, sem condicional por skill", () => {
+  // Estilo A (dan-brown-like): 3ª pessoa institucional, fria, cópula/percepção, zero diálogo/evento.
+  const INTROSPECCAO_A =
+    "Reyland era um homem paciente. A sala estava imóvel no escuro. Havia caixas de arquivo nas paredes. " +
+    "Ele sentia o peso dos anos. Parecia que o tempo tinha parado ali dentro. A memória era uma espiral. " +
+    "Ele lembrava de outras noites assim. O silêncio existia como um objeto. Tudo tinha o seu lugar. " +
+    "O passado pareciam páginas. A verdade era suscetível. Nada nele imaginava fuga.";
+  // Estilo B (hoover-like): 1ª pessoa, memória-reverie intimista/afetiva — voz DIFERENTE, mesmo defeito.
+  const INTROSPECCAO_B =
+    "Eu era outra pessoa antes daquele verão. A casa da minha mãe tinha um cheiro de cera. " +
+    "Havia sempre um rádio ligado. Eu sentia o medo mesmo criança. Tudo parecia maior naquele tempo. " +
+    "A luz da cozinha era amarela. Minha memória lembrava o corredor escuro. O quintal existia como um mundo. " +
+    "Eu imaginava monstros atrás da porta. Nada ali tinha explicação. O silêncio da noite era denso. " +
+    "Eu pensava que nunca sairia dali.";
+
+  it("estilo A (dan-brown-like) e estilo B (hoover-like) — AMBOS pegos pela MESMA função", () => {
+    expect(interioridadeSemEvento(INTROSPECCAO_A).acima).toBe(true);
+    expect(interioridadeSemEvento(INTROSPECCAO_B).acima).toBe(true);
+  });
+
+  it("interioridade REAL ancorada em decisão/ação (com diálogo) PASSA nas duas vozes (sem falso-positivo)", () => {
+    const COM_EVENTO_A =
+      "— Abre a porta — disse ele, e empurrou a mesa. Ela girou a chave duas vezes. O trinco cedeu. " +
+      "Lá fora, um carro acelerou. Ela correu até a janela e gritou o nome dele. Ninguém respondeu. " +
+      "Então desceu a escada de três em três e arrancou o envelope da caixa.";
+    const COM_EVENTO_B =
+      "— Vou embora agora — eu digo, e pego a mala do chão. Abro a porta. Ele me segura o braço. " +
+      "Puxo com força e saio para o corredor. Desço correndo. O elevador não vem, então tomo a escada.";
+    expect(interioridadeSemEvento(COM_EVENTO_A).acima).toBe(false);
+    expect(interioridadeSemEvento(COM_EVENTO_B).acima).toBe(false);
+  });
+});

@@ -96,6 +96,25 @@ em aforismo causal/paradoxal **mais de 2 vezes**, é maneirismo, ainda que nenhu
 seja defeito. Ao notar (o prompt pode trazer uma contagem-sinal): peça VARIAÇÃO — deixe 1–2 fechos
 gnômicos por capítulo e resolva os demais em imagem concreta, ação ou consequência, não em máxima.`;
 
+// INTERIORIDADE-SEM-EVENTO como GATILHO DE REPROVAÇÃO (skill-agnóstico — vale para
+// QUALQUER skill_escrita: o `livro-revisor` de todo projeto herda este bloco). A auditoria
+// achou capítulos "bem escritos e chatos": majoritariamente cópula/percepção, quase sem
+// diálogo, nenhum evento/decisão-com-consequência. O detector determinístico
+// (maneirismo.ts::interioridadeSemEvento — também sem parâmetro de skill) SINALIZA; aqui o
+// veredito PESA: introspecção decorativa sem evento é REPROVAÇÃO, não "abertura legítima".
+// Genérico de propósito — nada aqui condiciona por skill.
+export const ADENDO_INTERIORIDADE = `### INTERIORIDADE-SEM-EVENTO — reprova, não é "abertura contemplativa"
+Um capítulo pode estar tecnicamente bem escrito e mesmo assim MORTO: majoritariamente
+cópula/percepção (ser/estar/parecer/sentir/lembrar/pensar), quase sem diálogo, e **nada
+ACONTECE** — nenhuma decisão com consequência, virada, pista ou ação; só sensação sobre
+sensação. O prompt de revisão pode trazer um SINAL determinístico (interioridade-sem-evento:
+% de estática alta + diálogo quase nulo). Se o capítulo é isso: **REPROVE** e devolva revisão
+dirigida que ANCORE a interioridade num evento (uma escolha que custa, uma ação que muda a
+cena, uma pista decifrada sob pressão) — a interioridade fica, mas pendurada num
+acontecimento. NÃO confunda com interioridade REAL ancorada em decisão/ação (essa passa):
+o teste é "algo mudou na cena por causa disto?". Vale para toda voz — a intimista/lírica
+também precisa de evento; densidade de sentimento não substitui acontecimento.`;
+
 export const BLOCO_PROPULSAO = `
 ${MARCADOR_PROPULSAO}
 
@@ -120,6 +139,8 @@ ${ADENDO_MOTIF}
 ${ADENDO_REDUNDANCIA_CONCEITUAL}
 
 ${ADENDO_CAUSAL_GNOMICO}
+
+${ADENDO_INTERIORIDADE}
 
 <!-- /PROPULSAO -->`;
 
@@ -165,6 +186,11 @@ export function garantirPropulsaoRevisor(conteudo: string): { texto: string; mud
     // upgrade: cláusula causal-gnômica (tique consultivo).
     if (!texto.includes("CLÁUSULA CAUSAL-GNÔMICA repetida")) {
       texto = texto.replace("<!-- /PROPULSAO -->", `${ADENDO_CAUSAL_GNOMICO}\n\n<!-- /PROPULSAO -->`);
+      mudou = true;
+    }
+    // upgrade: interioridade-sem-evento como gatilho de reprovação (skill-agnóstico).
+    if (!texto.includes("INTERIORIDADE-SEM-EVENTO — reprova")) {
+      texto = texto.replace("<!-- /PROPULSAO -->", `${ADENDO_INTERIORIDADE}\n\n<!-- /PROPULSAO -->`);
       mudou = true;
     }
     return { texto, mudou };

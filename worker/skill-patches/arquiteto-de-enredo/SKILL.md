@@ -174,6 +174,28 @@ Quando os 8 blocos fecharem, antes de gerar:
      viabilidade): ele força a **escolha consciente** — fortalecer agora, ou
      assumir o teto por escrito. Assim a meta 9.0 do projeto se conecta à fundação.
 
+5-bis. **GATE DE CONSISTÊNCIA DE VOZ (genérico — vale para QUALQUER `skill_escrita`).**
+   A dimensão **e) Voz** acima pontua se a voz é *distinta/não-genérica* — **não** se ela
+   é **consistente com a `skill_escrita` escolhida**. Este gate fecha esse buraco, e é
+   **skill-agnóstico** (mesmo procedimento para toda skill, presente ou futura):
+   - Depois de `perfil-de-voz.md` redigido e `skill_escrita` escolhida (Bloco 6), leia o
+     **registro de voz que a skill declara** nas próprias referências
+     (`~/.claude/skills/<skill_escrita>/references/voz-e-oficio.md` ou equivalente) e
+     compare, **em botões** (mesmo padrão da entrevista), com o que o `perfil-de-voz.md`
+     deste projeto declara:
+     > "A skill `<skill_escrita>` declara este registro: **<resumo da voz da skill>**. O seu
+     > `perfil-de-voz.md` declara: **<resumo do perfil>**. Estão **alinhados**, ou você
+     > **diverge de propósito**?"
+   - **Registre a resposta** no **Diagnóstico de Fundação** (topo da Bíblia), com o marcador
+     `<!-- VOZ-CONSISTENCIA v1 -->`, em uma de duas formas:
+     - `<!-- VOZ-CONSISTENCIA v1 --> alinhado — o perfil segue o registro da skill.`
+     - `<!-- VOZ-CONSISTENCIA v1 --> divergência consciente: <o quê diverge e por quê o autor quer isso>.`
+   - **NÃO bloqueia a geração** (mesmo padrão do gate de ambição): força a **decisão
+     registrada**, nunca decide sozinho. Uma divergência consciente é legítima (o autor pode
+     querer "motor da skill + pele própria") — o que não pode é a divergência ser **acidental
+     e não vista**, que foi a causa raiz de "não parece com a skill escolhida". O runtime
+     (worker) SINALIZA se este veredito faltar na Bíblia — não é opcional esquecer.
+
 6. **O autor manda:** se insistir abaixo do **piso de viabilidade**, registre
    pendência crítica no topo da Bíblia e prossiga.
 

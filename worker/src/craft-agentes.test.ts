@@ -113,3 +113,25 @@ describe("FASE 2/3 — defesa em profundidade no revisor (redundância conceitua
     expect(garantirPropulsaoRevisor(r.texto).mudou).toBe(false); // idempotente após upgrade
   });
 });
+
+describe("FASE 2 — interioridade-sem-evento como reprovação (skill-agnóstico, herdado por todo projeto)", () => {
+  it("injeção nova carrega o gatilho de reprovação genérico", () => {
+    const t = garantirPropulsaoRevisor("# rev\n").texto;
+    expect(t).toMatch(/INTERIORIDADE-SEM-EVENTO — reprova/);
+    expect(t).toMatch(/bem escrito e mesmo assim MORTO/);
+    expect(t).toMatch(/Vale para toda voz/);       // explicitamente skill-agnóstico
+    // nenhuma menção a uma skill específica no bloco (genérico de verdade)
+    expect(t).not.toMatch(/dan-brown|hoover|romantasy|rowling|vesper/);
+  });
+  it("UPGRADE: bloco antigo (sem o adendo) o ganha sem duplicar o marcador", () => {
+    const antigo = garantirPropulsaoRevisor("# rev\n").texto
+      .replace(/### INTERIORIDADE-SEM-EVENTO — reprova[\s\S]*?(?=\n\n<!-- \/PROPULSAO -->)/, "")
+      .replace(/\n{3,}/g, "\n\n");
+    expect(antigo).not.toMatch(/INTERIORIDADE-SEM-EVENTO — reprova/);
+    const r = garantirPropulsaoRevisor(antigo);
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toMatch(/INTERIORIDADE-SEM-EVENTO — reprova/);
+    expect(contar(r.texto, MARCADOR_PROPULSAO)).toBe(1);
+    expect(garantirPropulsaoRevisor(r.texto).mudou).toBe(false);
+  });
+});
