@@ -1529,6 +1529,7 @@ def gate_spec_capitulo(projeto, n):
     # rotacao: se os N anteriores tem o MESMO fio e este repete, exige justificativa.
     # Aceita "Justificativa de fio" (dan-brown) OU "de POV"/"de ponto de vista" (romantasy).
     fio = _fio_da_spec(txt)
+    txt_norm = _sem_acento(txt)
     if fio:
         anteriores = []
         for k in range(int(n) - exig["max_mesmo_fio"], int(n)):
