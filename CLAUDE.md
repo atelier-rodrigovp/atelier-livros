@@ -24,12 +24,12 @@ cd worker && npx vitest run src/jobs.test.ts
 
 **Three-tier design:**
 
-1. **Web** (React + Vite + TypeScript) — Netlify-hosted painel de controle. Reads/writes only via Supabase (never calls Claude directly).
+1. **Web** (React + Vite + TypeScript) — GitHub Pages. Reads/writes only via Supabase (never calls Claude directly).
 2. **Supabase** (Postgres + Auth + Storage + Realtime + RLS) — Single source of truth for projects, jobs queue, chapters, editions, user data.
 3. **Agent-Worker** (Node/TS, local) — Runs only where Claude Code (MAX plan) is logged in. Polls `jobs` table → executes skills (`skill-dan-brown`, `hoover-mcfadden`, `skill-jk-rowling`, `vesper-escritor-de-capitulos`, `skill-romantasy`) → syncs outputs to Storage + database.
 
 ```
-WEB (Netlify)  ──HTTPS──►  SUPABASE (Postgres/Auth/Storage/Realtime)
+WEB (GitHub Pages) ──HTTPS──► SUPABASE (Postgres/Auth/Storage/Realtime)
    painel/catálogo           tabelas + fila `jobs`              ▲  │
                                                     pega job   │  ▼  status/artefatos
                                         AGENT-WORKER (PC, Claude MAX logado)
@@ -52,7 +52,7 @@ WEB (Netlify)  ──HTTPS──►  SUPABASE (Postgres/Auth/Storage/Realtime)
 
 ## Normalization Pipeline (Worker Fixtures)
 
-Before executing `escrever_livro`, the worker applies deterministic fixes to project foundation and agents. **All idempotent** (marked with `<!-- ... v1 -->` comments; re-running is safe).
+Before executing `escrever_livro`, the worker applies deterministic normalizers. Idempotence is a required contract and must be demonstrated per normalizer; comments alone are not proof.
 
 ### Entry Points
 
@@ -230,11 +230,11 @@ npx vitest run src/maneirismo.test.ts       # single module
 npx vitest run src/craft-agentes.test.ts    # tests for CRAFT-LEITURA / PROPULSAO blocks
 ```
 
-**Coverage targets:** typescript strict, 138 tests, gates functional in Python.
+**Coverage contract:** TypeScript strict, full Vitest collection, Python behavioral regressions and shared TS/Python fixtures. Do not document a fixed test count; report the current command output.
 
 ## Production Control
 
-- **Web deploy:** Netlify auto-deploys on `git push master` (GitHub App integration, no token expiry)
+- **Web deploy:** GitHub Actions publishes `dist` to `gh-pages` on relevant pushes to `master`.
 - **Worker:** runs 24/7 on user's PC (Windows Task Scheduler or PM2) with backoff+retry on network errors
 - **Database pauses:** toggle `worker_control.enabled` (Realtime → all jobs waits; no claim)
 - **Max parallelism:** set in UI (Configurações tab) or SQL `jobs` row `tipo='config_producao'`, `payload.max_paralelo`
@@ -283,7 +283,7 @@ npx vitest run src/craft-agentes.test.ts    # tests for CRAFT-LEITURA / PROPULSA
 ## Production Deployment Checklist
 
 - [ ] Supabase project live, schema + storage + auth configured
-- [ ] Netlify connected to GitHub, env vars set (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`)
+- [ ] GitHub Pages enabled for `gh-pages`; repository secrets set (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`)
 - [ ] Worker PC: Node 20+, Python 3.12+, Pillow, Claude Code MAX logado
 - [ ] Skills installed in `~/.claude/skills/`: arquiteto-de-enredo, livro-do-zero-ao-epub, edicao-kindle, tradução-editorial, book-bestseller-review, canvas-design + author skills (dan-brown, hoover, jk-rowling, vesper, romantasy)
 - [ ] Patches applied: `pwsh worker/skill-patches/instalar-skills.ps1`

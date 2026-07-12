@@ -1,7 +1,18 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+
+// A hidratação aceita IO injetável. O teste não pode exigir credenciais reais só
+// porque o módulo também exporta o adapter de produção.
+vi.mock("./supabase.js", () => ({ sb: {}, OWNER: "owner-test" }));
+vi.mock("./lib.js", () => ({
+  projDir: (projectId: string) => path.join(os.tmpdir(), "atelier-test", projectId),
+  exists: async (p: string) => {
+    try { await readFile(p); return true; } catch { return false; }
+  },
+}));
+
 import { hidratarWorkDir, sintetizarEstado, destinoCapitulo, temFundacaoCompleta, type HidratarIO } from "./hidratar.js";
 
 function fakeIO(tmp: string): HidratarIO {

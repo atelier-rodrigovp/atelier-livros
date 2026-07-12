@@ -52,7 +52,7 @@ Duas travas determinísticas (espelham `worker/src/maneirismo.ts`):
 1. **Por capítulo (ESCRITA):** após cada capítulo, conta os moldes e, se algum
    passar do orçamento por-capítulo (≤1 cada), dispara **uma** reescrita-alvo
    (bounded; não bloqueia o avanço). Reduz a carga na origem.
-2. **Book-wide (fase `DESMANEIRISMO`, garantia dura):** quando a REVIEW passa
+2. **Book-wide (fase `DESMANEIRISMO`, bloqueante):** quando a REVIEW passa
    (`nota ≥ meta`) — e também ao concluir por teto — antes de EPUB/CONCLUIR, conta
    no manuscrito INTEIRO os moldes nomeados + fecho epigramático isolado + um
    **detector GENÉRICO de n-gramas 3–5 palavras sobre-representados** (pega tiques
@@ -60,7 +60,8 @@ Duas travas determinísticas (espelham `worker/src/maneirismo.ts`):
    fecho ≤¼ dos caps), dispara uma passada dirigida por contagem (delega ao
    `livro-revisor`/`livro-escritor` em opus com os moldes+contagens), reconsolida o
    MESTRE, **re-conta e itera até abaixo do orçamento** ou `--max-desmaneirismo`
-   (default 3). Determinístico (verificado por recontagem), reentrante (lê do disco,
+   (default 3). Se o teto for atingido com pendências, grava `blocked_quality` e não
+   segue para EPUB. Determinístico (verificado por recontagem), reentrante (lê do disco,
    sobrevive à auto-retomada do Max), preserva piso/voz e passa pelo sanitizador.
 
 **Confiabilidade da escrita longa (Max):** o runner distingue **throttle do Max**

@@ -22,6 +22,7 @@ import {
   MODEL_ORQUESTRADOR,
   CLAUDE_BIN,
   WORK_DIR,
+  CLAUDE_PERMISSION_MODE,
 } from "./lib.js";
 import { normalizarModelosAgentes } from "./modelos-agentes.js";
 import { normalizarVozRegra4 } from "./voz-regra4.js";
@@ -37,6 +38,12 @@ import { LimiteMaxError, limiteMaxRetryAt, pareceLimiteMax } from "./limite-max.
 import { comRetrySb } from "./retry.js";
 import { contarManeirismos, resumoManeirismo, diagnosticarRepeticao } from "./maneirismo.js";
 import { existsSync } from "node:fs";
+import { InfrastructureRetryError, QualityBlockedError } from "./job-errors.js";
+import { decidePublication } from "./publication-gate.js";
+import { applyQualityException, decideQualityState, type QualityState } from "./quality-state.js";
+import { executePublicationTransaction, type PublicationFile } from "./publication-transaction.js";
+import { advanceEditionStatus, type EditionStatus } from "./state-machine.js";
+import { classifyRunnerOutcome } from "./runner-outcome.js";
 
 export interface Job {
   id: string;
@@ -144,13 +151,16 @@ async function must<T extends { error: unknown }>(p: PromiseLike<T> | (() => Pro
   if (err) throw new Error("erro de escrita no banco: " + (err.message ?? String(err)));
   return r;
 }
+async function upsertArtifact(row: Record<string, unknown>) {
+  return must(() => sb.from("artifacts").upsert(row, { onConflict: "edition_id,tipo,storage_path" }));
+}
 async function getProject(id: string) {
-  const { data, error } = await sb.from("projects").select("*").eq("id", id).single();
+  const { data, error } = await sb.from("projects").select("*").eq("owner", OWNER).eq("id", id).single();
   if (error) throw new Error("projeto não encontrado: " + error.message);
   return data;
 }
 async function getEdition(id: string) {
-  const { data, error } = await sb.from("editions").select("*").eq("id", id).single();
+  const { data, error } = await sb.from("editions").select("*").eq("owner", OWNER).eq("id", id).single();
   if (error) throw new Error("edição não encontrada: " + error.message);
   return data;
 }
@@ -191,6 +201,7 @@ function resumoProgresso(p: Record<string, any>): string | undefined {
     case "PACOTE": return "Pacote comercial pronto";
     case "VENDAS": return `Planilha de vendas${p.linhas != null ? ` · ${p.linhas} linhas` : ""}`;
     case "POST": return p.etapa === "pronto" ? `Posts gerados${p.variacoes != null ? ` · ${p.variacoes}` : ""}` : `Post${p.etapa ? ` · ${p.etapa}` : ""}`;
+    case "QUALITY_EXCEPTION": return `Exceção humana registrada${p.cap_atual ? ` · cap ${p.cap_atual}` : ""}`;
     default: return undefined;
   }
 }
@@ -200,7 +211,7 @@ async function setProgress(jobId: string, progresso: Record<string, unknown>) {
   // Update idempotente com retry curto; ao esgotar, LOGA e segue (progresso é
   // cosmético — o poller de 20s corrige no tick seguinte; antes era perda muda).
   const { error } = await comRetrySb(
-    () => sb.from("jobs").update({ progresso: comResumo, locked_at: new Date().toISOString() }).eq("id", jobId),
+    () => sb.from("jobs").update({ progresso: comResumo, locked_at: new Date().toISOString() }).eq("owner", OWNER).eq("id", jobId),
     { tentativas: 3, baseMs: 500 }
   );
   if (error) console.warn(`[progresso ${jobId}] não gravado: ${String(error.message ?? error).slice(0, 200)}`);
@@ -221,7 +232,7 @@ async function gravarTelemetriaProjeto(projectId: string): Promise<void> {
     const { data: ex } = await sb.from("jobs").select("id").eq("owner", OWNER)
       .eq("project_id", projectId).eq("tipo", "telemetria").limit(1);
     if (ex?.length) {
-      await sb.from("jobs").update({ payload: tel }).eq("id", (ex[0] as any).id);
+      await sb.from("jobs").update({ payload: tel }).eq("owner", OWNER).eq("id", (ex[0] as any).id);
     } else {
       await sb.from("jobs").insert({ owner: OWNER, project_id: projectId, tipo: "telemetria", status: "paused", payload: tel });
     }
@@ -230,6 +241,21 @@ async function gravarTelemetriaProjeto(projectId: string): Promise<void> {
   }
 }
 async function ensureEdition(projectId: string, idioma: string, isOrigem: boolean, status = "pendente") {
+  const { data: existing, error: existingError } = await sb.from("editions").select("*")
+    .eq("owner", OWNER).eq("project_id", projectId).eq("idioma", idioma).maybeSingle();
+  if (existingError) throw new Error("erro ao localizar edição: " + existingError.message);
+  if (existing) {
+    // Nunca rebaixa uma edição pronta e nunca a promove por mero efeito colateral.
+    const atual = String((existing as any).status ?? "pendente") as EditionStatus;
+    const next = advanceEditionStatus(atual, status as EditionStatus);
+    if (next !== atual || Boolean((existing as any).is_origem) !== isOrigem) {
+      const { data, error } = await sb.from("editions").update({ status: next, is_origem: isOrigem })
+        .eq("owner", OWNER).eq("id", (existing as any).id).select().single();
+      if (error) throw new Error("erro ao atualizar edição: " + error.message);
+      return data;
+    }
+    return existing;
+  }
   const { data } = await must(() =>
     sb
       .from("editions")
@@ -416,7 +442,7 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
         meta_nota: b.meta_nota ?? proj.meta_nota ?? 9.0,
         skill_escrita: b.skill_escrita ?? proj.skill_escrita ?? null,
         idioma_origem: b.idioma ?? proj.idioma_origem ?? "pt-BR",
-      }).eq("id", job.project_id!)
+      }).eq("owner", OWNER).eq("id", job.project_id!)
     );
     // entrevista validada -> dispara a fundação automaticamente
     await must(sb.from("jobs").insert({ owner: OWNER, tipo: "criar_fundacao", project_id: job.project_id }));
@@ -424,7 +450,7 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
   } else {
     const perguntas = Array.isArray(out.perguntas) ? out.perguntas : [];
     const merged = { ...briefing, idea, qa, _interview: { completo: false, pending: perguntas } };
-    await must(sb.from("projects").update({ briefing: merged }).eq("id", job.project_id!));
+    await must(sb.from("projects").update({ briefing: merged }).eq("owner", OWNER).eq("id", job.project_id!));
     await setProgress(job.id, { fase: "ENTREVISTA", perguntas: perguntas.length });
   }
 }
@@ -534,6 +560,7 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
         total_capitulos: total,
         paginas_alvo: state?.paginas_alvo ?? proj.paginas_alvo,
       })
+      .eq("owner", OWNER)
       .eq("id", job.project_id!)
   );
   await setProgress(job.id, { fase: "ESTRUTURA", total_capitulos: total, concluido: true });
@@ -576,7 +603,7 @@ async function refinarFundacao(job: Job, hb?: Heartbeat) {
       await uploadFile("manuscritos", storageKey(job.project_id!, "fundacao", f), path.join(dir, f));
     }
   }
-  if (total > 0) await must(sb.from("projects").update({ total_capitulos: total }).eq("id", job.project_id!));
+  if (total > 0) await must(sb.from("projects").update({ total_capitulos: total }).eq("owner", OWNER).eq("id", job.project_id!));
   await setProgress(job.id, { fase: "REFINO", concluido: true, total_capitulos: total });
 }
 
@@ -662,7 +689,7 @@ async function criarVolumes(job: Job, hb?: Heartbeat) {
       if (await exists(path.join(dstDir, f))) await uploadFile("manuscritos", storageKey(novoId, "fundacao", f), path.join(dstDir, f));
     }
     await ensureEdition(novoId, proj.idioma_origem || "pt-BR", true, "pendente");
-    await must(sb.from("projects").update({ status: okE ? "fundacao" : "rascunho", total_capitulos: tot || proj.total_capitulos }).eq("id", novoId));
+    await must(sb.from("projects").update({ status: okE ? "fundacao" : "rascunho", total_capitulos: tot || proj.total_capitulos }).eq("owner", OWNER).eq("id", novoId));
     // falha-alto: não esconder que a IA não gerou a estrutura (ex.: saldo Claude esgotado)
     if (!okE) {
       const err = String(ultimo?.err || ultimo?.out || "");
@@ -770,7 +797,7 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // meta; com a auto-retomada do Max, não custam tempo. Configurável por projeto
   // (payload.max_reescritas) ou env (MAX_REESCRITAS), default 6.
   const maxReescritas = Math.max(1, Math.min(12, Number(job.payload?.max_reescritas ?? process.env.MAX_REESCRITAS ?? 6)));
-  await sb.from("projects").update({ status: "escrevendo" }).eq("id", job.project_id!);
+  await sb.from("projects").update({ status: "escrevendo" }).eq("owner", OWNER).eq("id", job.project_id!);
   // baseline para detectar progresso (escrita longa é retomável do disco)
   const capsAntes = (await chaptersOnDisk(path.join(dir, "manuscrito"), piso)).length;
   // Revisão do micro-loop TAMBÉM é progresso (grava review/_revcap-NN.done), mas não
@@ -815,6 +842,7 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     "--model", MODEL_ORQUESTRADOR,
     "--model-pesado", MODEL,
     "--claude-bin", CLAUDE_BIN,
+    "--permission-mode", CLAUDE_PERMISSION_MODE,
   ];
   // Micro-loop escritor→revisor→editor por capítulo é o PADRÃO (camada central de
   // qualidade). Escape hatch para baratear: env REVISAO_POR_CAPITULO=0 ou
@@ -845,10 +873,21 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
 
   // Verdade do disco
   const state = await readState(dir);
+  if ((state as any)?.quality_status === "blocked_quality") {
+    throw new QualityBlockedError(
+      String((state as any)?.quality_stage ?? "runner"),
+      Array.isArray((state as any)?.quality_blockers) ? (state as any).quality_blockers.map(String) : [],
+      String((state as any)?.quality_reason ?? "Runner bloqueou a progressão por pós-condição de qualidade reprovada.")
+    );
+  }
   const total = Number(state?.total_capitulos_previstos ?? proj.total_capitulos ?? 0);
   const caps = await chaptersOnDisk(path.join(dir, "manuscrito"), piso);
   const revDepois = await contarRevMarkers();
   const completo = total > 0 && caps.length >= total;
+  const runnerOutcome = classifyRunnerOutcome(r);
+  if (runnerOutcome.kind !== "ok") {
+    throw new InfrastructureRetryError(`runner-${runnerOutcome.kind}`, runnerOutcome.message);
+  }
 
   // Edição de origem + sync dos capítulos JÁ existentes (mesmo parcial: a UI mostra progresso real)
   const edicao = await ensureEdition(job.project_id!, proj.idioma_origem || "pt-BR", true, completo ? "revisao" : "escrevendo");
@@ -910,11 +949,10 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     // limite REAL, acima, é o único que reporta throttle). Um limite genuíno já teria
     // sido pego antes (retry_at parseado); aqui é só interrupção.
     if (caps.length > 0) {
-      throw new LimiteMaxError(
+      throw new InfrastructureRetryError(
+        "runner",
         `Run interrompido sem progresso em ${caps.length}/${total} (livro íntegro); ` +
-          `re-tentando (retomável do disco).`,
-        new Date(Date.now() + 2 * 60_000).toISOString(),
-        { motivo: "run interrompido sem progresso — re-tentando", aguardandoReset: false }
+          `retomável do disco, sujeito à política de circuit breaker.`
       );
     }
     const log = logTail.slice(-300);
@@ -938,26 +976,64 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     return;
   }
 
-  if (await exists(mestre)) {
-    const key = storageKey(job.project_id!, "origem", "MANUSCRITO-MESTRE.md");
-    await uploadFile("manuscritos", key, mestre);
-    await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "manuscrito", storage_path: key }));
+  // Gate único de promoção: aprovação pertence aos hashes dos arquivos atuais.
+  const qualityStates = new Map<number, QualityState | null>();
+  for (const c of caps) {
+    const qPath = path.join(dir, "quality", `capitulo-${String(c.numero).padStart(2, "0")}.json`);
+    try { qualityStates.set(c.numero, JSON.parse(await readFile(qPath, "utf8")) as QualityState); }
+    catch { qualityStates.set(c.numero, null); }
   }
-  // EPUB (se o runner gerou)
+  const mestreText = await readText(mestre);
   const epubRel = state?.epub_caminho;
-  if (epubRel && (await exists(path.join(dir, epubRel)))) {
-    const key = storageKey(job.project_id!, "origem", path.basename(epubRel));
-    await uploadFile("epubs", key, path.join(dir, epubRel));
-    const url = await signedUrl("epubs", key);
-    await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "epub", storage_path: key, url_publica: url }));
+  const epubPath = epubRel ? path.join(dir, epubRel) : "";
+  const decision = decidePublication({
+    chaptersExpected: total,
+    chapters: await Promise.all(caps.map(async (c) => ({ numero: c.numero, text: await readText(c.file), quality: qualityStates.get(c.numero) ?? null }))),
+    manuscriptText: mestreText,
+    manuscriptMatchesChapters: (await Promise.all(caps.map(async (c) => mestreText.includes((await readText(c.file)).trim())))).every(Boolean),
+    epubPresent: Boolean(epubPath && await exists(epubPath)),
+    epubMatchesManifest: Boolean(state?.epub_gerado && epubPath && await exists(epubPath)),
+    metaTextFree: true,
+    continuityValid: [...qualityStates.values()].every((q) => q?.status === "approved" || q?.status === "approved_with_exception"),
+    skillManifestValid: true, // o processo só inicia após preflight de hashes em index.ts
+  });
+  if (decision.decision !== "approved") {
+    throw new QualityBlockedError("PUBLICATION_GATE", decision.blockers.map((b) => `${b.code}: ${b.message}`), "Gate final de publicação reprovado.");
   }
+
+  const publicationFiles: PublicationFile[] = [];
+  for (const c of caps) {
+    const txt = await readText(c.file);
+    publicationFiles.push({
+      kind: "chapter", bucket: "manuscritos", localPath: c.file,
+      filename: `capitulo-${String(c.numero).padStart(2, "0")}.md`, numero: c.numero,
+      titulo: txt.split("\n").find((l) => l.startsWith("#"))?.replace(/^#+\s*/, "").trim() ?? null,
+      palavras: countWords(txt),
+    });
+  }
+  publicationFiles.push({ kind: "manuscript", bucket: "manuscritos", localPath: mestre, filename: "MANUSCRITO-MESTRE.md" });
+  publicationFiles.push({ kind: "epub", bucket: "epubs", localPath: epubPath, filename: path.basename(epubPath) });
+  await executePublicationTransaction({ owner: OWNER, projectId: job.project_id!, editionId: edicao.id, files: publicationFiles }, {
+    read: (p) => readFile(p),
+    upload: (bucket, key, localPath) => uploadFile(bucket, key, localPath),
+    writeManifest: async (manifest) => {
+      await mkdir(path.join(dir, "quality"), { recursive: true });
+      await writeFile(path.join(dir, "quality", "publication-manifest.json"), JSON.stringify(manifest, null, 2) + "\n", "utf8");
+    },
+    promote: async ({ owner, projectId, editionId, manifest, chapters, artifacts }) => {
+      const { error } = await sb.rpc("promote_publication", {
+        p_owner: owner, p_project_id: projectId, p_edition_id: editionId,
+        p_manifest: manifest, p_chapters: chapters, p_artifacts: artifacts,
+      });
+      if (error) throw new InfrastructureRetryError("supabase-promote-publication", `Promoção transacional falhou: ${error.message}`);
+    },
+  });
 
   const nota = state?.ultima_nota != null ? Number(state.ultima_nota) : null;
   // nota_review = AVALIAÇÃO independente (jobs avaliar/revisar). A auto-nota da
   // escrita (state.ultima_nota) NÃO sobrescreve a nota oficial — fica só no
   // progresso do job, rotulada como provisória na UI.
-  await must(() => sb.from("editions").update({ status: "pronto" }).eq("id", edicao.id));
-  await must(() => sb.from("projects").update({ status: "pronto" }).eq("id", job.project_id!));
+  // statuses foram promovidos na mesma transação dos capítulos/artefatos.
   await setProgress(job.id, { fase: "CONCLUIDO", cap_atual: caps.length, total, nota, palavras: state?.palavras_totais ?? 0 });
 }
 
@@ -994,6 +1070,7 @@ async function gerarEpub(job: Job) {
   const { count } = await sb
     .from("artifacts")
     .select("id", { count: "exact", head: true })
+    .eq("owner", OWNER)
     .eq("edition_id", edicao.id)
     .eq("tipo", "epub");
   const versao = (count ?? 0) + 1;
@@ -1034,17 +1111,43 @@ async function gerarEpub(job: Job) {
   // Validação (não bloqueante se epubcheck ausente)
   const v = await run(PY_BIN, [edicaoKindleScript("validate_epub.py"), out], { cwd: dir });
 
-  const key = storageKey(edicao.project_id, edicao.idioma, path.basename(out));
-  await uploadFile("epubs", key, out);
-  const url = await signedUrl("epubs", key);
-  await must(sb.from("artifacts").insert({
-    owner: OWNER,
-    edition_id: edicao.id,
-    tipo: "epub",
-    storage_path: key,
-    url_publica: url,
-    meta: { versao, idioma: edicao.idioma, com_capa: true, validado: v.code === 0, validacao: v.out.slice(-1200) },
+  const caps = await chaptersOnDisk(sub, 1);
+  const editionQualityDir = path.join(dir, "quality", edicao.id);
+  const legacyQualityDir = path.join(dir, "quality");
+  const qualityStates = new Map<number, QualityState | null>();
+  for (const c of caps) {
+    const name = `capitulo-${String(c.numero).padStart(2, "0")}.json`;
+    let q: QualityState | null = null;
+    for (const qPath of [path.join(editionQualityDir, name), path.join(legacyQualityDir, name)]) {
+      try { q = JSON.parse(await readFile(qPath, "utf8")) as QualityState; break; } catch {}
+    }
+    qualityStates.set(c.numero, q);
+  }
+  const mestreText = await readText(manuscrito);
+  const decision = decidePublication({
+    chaptersExpected: Number(proj.total_capitulos ?? caps.length),
+    chapters: await Promise.all(caps.map(async (c) => ({ numero: c.numero, text: await readText(c.file), quality: qualityStates.get(c.numero) ?? null }))),
+    manuscriptText: mestreText,
+    manuscriptMatchesChapters: (await Promise.all(caps.map(async (c) => mestreText.includes((await readText(c.file)).trim())))).every(Boolean),
+    epubPresent: true, epubMatchesManifest: true, metaTextFree: true,
+    continuityValid: [...qualityStates.values()].every((q) => q?.status === "approved" || q?.status === "approved_with_exception"),
+    skillManifestValid: true,
+  });
+  if (decision.decision !== "approved") throw new QualityBlockedError("EPUB_PUBLICATION_GATE", decision.blockers.map((b) => `${b.code}: ${b.message}`));
+  const publicationFiles: PublicationFile[] = await Promise.all(caps.map(async (c) => {
+    const txt = await readText(c.file);
+    return { kind: "chapter" as const, bucket: "manuscritos" as const, localPath: c.file, filename: `capitulo-${String(c.numero).padStart(2, "0")}.md`, numero: c.numero, titulo: txt.split("\n").find((l) => l.startsWith("#"))?.replace(/^#+\s*/, "").trim() ?? null, palavras: countWords(txt) };
   }));
+  publicationFiles.push({ kind: "manuscript", bucket: "manuscritos", localPath: manuscrito, filename: "MANUSCRITO-MESTRE.md" });
+  publicationFiles.push({ kind: "epub", bucket: "epubs", localPath: out, filename: path.basename(out) });
+  await executePublicationTransaction({ owner: OWNER, projectId: edicao.project_id, editionId: edicao.id, files: publicationFiles }, {
+    read: (p) => readFile(p), upload: (bucket, key, localPath) => uploadFile(bucket, key, localPath),
+    writeManifest: async (manifest) => { await mkdir(editionQualityDir, { recursive: true }); await writeFile(path.join(editionQualityDir, "publication-manifest.json"), JSON.stringify(manifest, null, 2) + "\n", "utf8"); },
+    promote: async ({ owner, projectId, editionId, manifest, chapters, artifacts }) => {
+      const { error } = await sb.rpc("promote_publication", { p_owner: owner, p_project_id: projectId, p_edition_id: editionId, p_manifest: manifest, p_chapters: chapters, p_artifacts: artifacts });
+      if (error) throw new InfrastructureRetryError("supabase-promote-publication", `Promoção transacional falhou: ${error.message}`);
+    },
+  });
   await setProgress(job.id, { fase: "EPUB", concluido: true, versao, validado: v.code === 0 });
 }
 
@@ -1110,7 +1213,8 @@ async function traduzir(job: Job, hb?: Heartbeat) {
       await gateManuscrito(destino);
       await uploadFile("manuscritos", storageKey(job.project_id!, idioma, "MANUSCRITO-MESTRE.md"), mestre);
     }
-    await must(sb.from("editions").update({ status: "pronto" }).eq("id", ed.id));
+    // Tradução completa ainda precisa da revisão/gates; não é publicação pronta.
+    await must(sb.from("editions").update({ status: "revisao" }).eq("owner", OWNER).eq("id", ed.id));
   }
   await setProgress(job.id, { fase: "TRADUCAO", concluido: true, idiomas });
 }
@@ -1193,9 +1297,9 @@ async function avaliarEdicao(projectId: string, edicao: any, jobId?: string): Pr
   // upload do relatório (com a seção de alcançabilidade) como artifact "review"
   const relKey = storageKey(projectId, edicao.idioma, `REVIEW-${edicao.idioma}.md`);
   await uploadFile("manuscritos", relKey, relPath);
-  await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: edicao.id, tipo: "review", storage_path: relKey }));
+  await upsertArtifact({ owner: OWNER, edition_id: edicao.id, tipo: "review", storage_path: relKey });
 
-  await must(sb.from("editions").update({ nota_review: nota }).eq("id", edicao.id));
+  await must(sb.from("editions").update({ nota_review: nota }).eq("owner", OWNER).eq("id", edicao.id));
   if (jobId) await setProgress(jobId, { fase: "AVALIACAO", idioma: edicao.idioma, nota, concluido: true });
   return nota;
 }
@@ -1278,6 +1382,39 @@ async function passeProsaCountDriven(job: Job, dir: string, sub: string, subRel:
     const r = await runClaude(prompt, dir);
     lancarSeLimiteMax(`${r.err}\n${r.out}`, `revisão de ${idioma} (prosa iter ${it})`);
   }
+  const capsFinais = await chaptersOnDisk(sub, 1);
+  const textosFinais = await Promise.all(capsFinais.map((c) => readText(c.file)));
+  const final = diagnosticarRepeticao(textosFinais.join("\n\n"), textosFinais);
+  if (final.algumAcima) {
+    const blockers = [
+      ...final.muletas.map((m) => `MULETA ${m.termo}: ${m.n}x > ${m.alvo}`),
+      ...final.moldes.map((m) => `${m.nome}: ${m.n}x > ${m.alvo}`),
+      ...(final.fecho.acima ? [`fecho epigramático: ${final.fecho.n}/${final.fecho.total}`] : []),
+      ...final.ngramas.map((n) => `repetição ${n.gram}: ${n.n}x`),
+      ...final.cadencia.map((c) => `cadência cap ${c.capitulo}`),
+    ];
+    throw new QualityBlockedError("REVISAO_PROSA", blockers, "Teto da revisão de prosa atingido com blockers residuais.");
+  }
+}
+
+async function persistirQualityStatesEdicao(dir: string, edicaoId: string, caps: Awaited<ReturnType<typeof chaptersOnDisk>>, stage: string) {
+  const qDir = path.join(dir, "quality", edicaoId);
+  await mkdir(qDir, { recursive: true });
+  for (const c of caps) {
+    const text = await readText(c.file);
+    const qPath = path.join(qDir, `capitulo-${String(c.numero).padStart(2, "0")}.json`);
+    let previous: QualityState | null = null;
+    try { previous = JSON.parse(await readFile(qPath, "utf8")) as QualityState; } catch {}
+    const metricsAfter = { words: countWords(text), residualBlockers: 0 };
+    const state = decideQualityState({
+      text, detectorVersion: "maneirismo-ts-v1", skillVersion: "edition-review-v1", stage,
+      decisionBy: "worker/revisar", attempts: (previous?.attempts ?? 0) + 1,
+      maxAttempts: MAX_PROSA_ITERS,
+      metricsBefore: previous?.metricsAfter ?? { firstEvaluation: true },
+      metricsAfter, targets: { residualBlockers: 0 }, blockers: [],
+    });
+    await writeFile(qPath, JSON.stringify(state, null, 2) + "\n", "utf8");
+  }
 }
 
 async function revisar(job: Job, _hb?: Heartbeat) {
@@ -1292,7 +1429,7 @@ async function revisar(job: Job, _hb?: Heartbeat) {
   const skill = edicao.is_origem ? proj.skill_escrita || "edicao-kindle" : "traducao-editorial";
   const subRel = edicaoDir("", edicao).replace(/^[\\/]/, "");
 
-  await must(sb.from("editions").update({ status: "revisao" }).eq("id", edicao.id));
+  await must(sb.from("editions").update({ status: "revisao" }).eq("owner", OWNER).eq("id", edicao.id));
 
   // Fila de passadas por dimensão (+ uma final para as instruções do autor).
   const fila = [...PASSES_REVISAO];
@@ -1348,7 +1485,22 @@ async function revisar(job: Job, _hb?: Heartbeat) {
   // re-avalia para atualizar a nota e o relatório
   await setProgress(job.id, { fase: "REVISAO", idioma: edicao.idioma, etapa: "reavaliando" });
   const nota = await avaliarEdicao(projectId, edicao, job.id);
-  await must(sb.from("editions").update({ status: "pronto" }).eq("id", edicao.id));
+  const meta = Number(proj.meta_nota ?? 9);
+  if (nota == null || nota < meta) {
+    throw new QualityBlockedError("REAVALIACAO_FINAL", [`nota ${nota ?? "ausente"} abaixo da meta ${meta}`], "Reavaliação final não comprovou a meta editorial.");
+  }
+  // Passes posteriores à prosa também podem reintroduzir tiques: reconta tudo no fim.
+  const textosFinais = await Promise.all(caps.map((c) => readText(c.file)));
+  const diagFinal = diagnosticarRepeticao(textosFinais.join("\n\n"), textosFinais);
+  if (diagFinal.algumAcima) throw new QualityBlockedError("REVISAO_FINAL", [
+    ...diagFinal.muletas.map((m) => `MULETA ${m.termo}: ${m.n}x > ${m.alvo}`),
+    ...diagFinal.moldes.map((m) => `${m.nome}: ${m.n}x > ${m.alvo}`),
+    ...diagFinal.ngramas.map((n) => `repetição ${n.gram}: ${n.n}x`),
+    ...diagFinal.cadencia.map((c) => `cadência cap ${c.capitulo}`),
+  ], "Passes posteriores reintroduziram blockers determinísticos.");
+  await persistirQualityStatesEdicao(dir, edicao.id, caps, "REVISAO_FINAL");
+  // Permanece em revisão até gerar_epub comprovar hashes e promover a publicação.
+  await must(sb.from("editions").update({ status: "revisao" }).eq("owner", OWNER).eq("id", edicao.id));
   // limpa os marcadores de passada deste job (sucesso) — não acumular no projeto.
   for (const pass of fila) { try { await rm(path.join(markerDir, `_revpass-${job.id}-${pass.key}.done`)); } catch {} }
   await setProgress(job.id, { fase: "REVISAO", idioma: edicao.idioma, nota, concluido: true });
@@ -1397,7 +1549,7 @@ async function direcaoDeArte(proj: any, brief: string, premissa: string, cwd: st
     'Termine SEMPRE com: "no text, no letters, no title, no typography, no watermark, no logo, no frame. Avoid an AI look."\n' +
     "Responda APENAS com o prompt (texto corrido, sem aspas, sem rótulos, sem explicação).";
   try {
-    const r = await run(CLAUDE_BIN, ["-p", meta, "--permission-mode", "bypassPermissions", "--model", POST_MODEL], { cwd, timeoutMs: 120000 });
+    const r = await run(CLAUDE_BIN, ["-p", meta, "--permission-mode", CLAUDE_PERMISSION_MODE, "--model", POST_MODEL], { cwd, timeoutMs: 120000 });
     const out = (r.out || "").trim().replace(/^["']+|["']+$/g, "");
     return out.length > 60 ? out : "";
   } catch {
@@ -1464,7 +1616,7 @@ async function comporCapasDeMaster(
     const rc = await run(PY_BIN, [COMPOSER, "--config", cfgFile], { cwd: dir });
     if (!(await exists(outPng))) throw new Error(`composição da capa ${idioma} falhou. ${(rc.err || rc.out).slice(-300)}`);
 
-    const ed = await ensureEdition(projectId, idioma, idioma === origem, idioma === origem ? "pronto" : "pendente");
+    const ed = await ensureEdition(projectId, idioma, idioma === origem, "pendente");
     const keyPng = storageKey(projectId, idioma, "capa.png");
     await uploadFile("capas", keyPng, outPng);
     const url = await signedUrl("capas", keyPng);
@@ -1474,8 +1626,8 @@ async function comporCapasDeMaster(
       await uploadFile("capas", keyPdf, outPdf);
       meta.pdf = keyPdf;
     }
-    await sb.from("artifacts").delete().eq("edition_id", ed.id).eq("tipo", "capa");
-    await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: ed.id, tipo: "capa", storage_path: keyPng, url_publica: url, meta }));
+    await sb.from("artifacts").delete().eq("owner", OWNER).eq("edition_id", ed.id).eq("tipo", "capa");
+    await upsertArtifact({ owner: OWNER, edition_id: ed.id, tipo: "capa", storage_path: keyPng, url_publica: url, meta });
   }
   if (jobId) await setProgress(jobId, { fase: "CAPA", concluido: true, idiomas });
 }
@@ -1556,9 +1708,9 @@ async function gerarCapasOpcoes(job: Job, hb?: Heartbeat) {
 
   // edição de origem ancora as opções; limpa as opções antigas (db + storage best-effort)
   const ed = await ensureEdition(projectId, origem, true, "pendente");
-  const { data: antigas } = await sb.from("artifacts").select("storage_path").eq("edition_id", ed.id).eq("tipo", "capa_opcao");
+  const { data: antigas } = await sb.from("artifacts").select("storage_path").eq("owner", OWNER).eq("edition_id", ed.id).eq("tipo", "capa_opcao");
   for (const a of antigas ?? []) { try { await sb.storage.from("capas").remove([(a as any).storage_path]); } catch {} }
-  await sb.from("artifacts").delete().eq("edition_id", ed.id).eq("tipo", "capa_opcao");
+  await sb.from("artifacts").delete().eq("owner", OWNER).eq("edition_id", ed.id).eq("tipo", "capa_opcao");
 
   // Diretor de arte: UM prompt-base rico pro livro; cada opção varia a composição.
   await hb?.({ fase: "CAPA", etapa: "direção de arte", provedor: provPref });
@@ -1581,7 +1733,7 @@ async function gerarCapasOpcoes(job: Job, hb?: Heartbeat) {
     const key = storageKey(projectId, "opcoes", `opcao-${i}.png`);
     await uploadFile("capas", key, localPng);
     const url = await signedUrl("capas", key);
-    await must(sb.from("artifacts").insert({ owner: OWNER, edition_id: ed.id, tipo: "capa_opcao", storage_path: key, url_publica: url, meta: { idx: i, seed, provider: r.provider } }));
+    await upsertArtifact({ owner: OWNER, edition_id: ed.id, tipo: "capa_opcao", storage_path: key, url_publica: url, meta: { idx: i, seed, provider: r.provider } });
     geradas++;
   }
   if (!geradas) throw new Error("nenhuma opção de capa gerada (cadeia de imagem falhou). Verifique tokens em worker/.env ou tente de novo.");
@@ -1614,8 +1766,8 @@ async function comporCapas(job: Job, hb?: Heartbeat) {
   if (de || !blob) throw new Error("não baixei a opção escolhida: " + (de?.message ?? ""));
   await writeFile(masterPng, Buffer.from(await blob.arrayBuffer()));
   await uploadFile("capas", storageKey(projectId, "master.png"), masterPng);
-  const edOrigem = await ensureEdition(projectId, origem, true, "pronto");
-  await sb.from("artifacts").delete().eq("edition_id", edOrigem.id).eq("tipo", "capa_master");
+  const edOrigem = await ensureEdition(projectId, origem, true, "pendente");
+  await sb.from("artifacts").delete().eq("owner", OWNER).eq("edition_id", edOrigem.id).eq("tipo", "capa_master");
   await sb.from("artifacts").insert({ owner: OWNER, edition_id: edOrigem.id, tipo: "capa_master", storage_path: storageKey(projectId, "master.png"), meta: { from: opcaoPath } });
 
   const subOrig = job.payload?.subtitulo || proj.briefing?.subtitulo || "";
@@ -1761,17 +1913,17 @@ async function gerarPostSocial(job: Job, hb?: Heartbeat): Promise<void> {
   const p = job.payload || {};
   if (!p.author_id || !p.rede) throw new Error("payload incompleto (author_id, rede)");
   const { data: autor, error: ea } = await sb
-    .from("authors").select("nome,estilo,genero,bio,personalidade,referencias").eq("id", p.author_id).single();
+    .from("authors").select("nome,estilo,genero,bio,personalidade,referencias").eq("owner", OWNER).eq("id", p.author_id).single();
   if (ea || !autor) throw new Error("autor não encontrado: " + (ea?.message ?? ""));
 
   // contexto da obra (opcional)
   let obraCtx = "";
   if (p.project_id) {
-    const { data: proj } = await sb.from("projects").select("titulo,genero,serie,volume").eq("id", p.project_id).single();
+    const { data: proj } = await sb.from("projects").select("titulo,genero,serie,volume").eq("owner", OWNER).eq("id", p.project_id).single();
     let sinopse = "";
-    const { data: eds } = await sb.from("editions").select("id").eq("project_id", p.project_id).eq("is_origem", true).limit(1);
+    const { data: eds } = await sb.from("editions").select("id").eq("owner", OWNER).eq("project_id", p.project_id).eq("is_origem", true).limit(1);
     if (eds?.[0]) {
-      const { data: pkg } = await sb.from("publishing_packages").select("sinopse").eq("edition_id", eds[0].id).limit(1);
+      const { data: pkg } = await sb.from("publishing_packages").select("sinopse").eq("owner", OWNER).eq("edition_id", eds[0].id).limit(1);
       sinopse = pkg?.[0]?.sinopse ?? "";
     }
     if (proj) obraCtx = `\nOBRA ANCORADA: "${proj.titulo}"${proj.serie ? ` (${proj.serie}, vol. ${proj.volume})` : ""}${proj.genero ? ` — ${proj.genero}` : ""}.${sinopse ? ` Sinopse: ${sinopse}` : ""}`;
@@ -1804,7 +1956,7 @@ async function gerarPostSocial(job: Job, hb?: Heartbeat): Promise<void> {
   ].filter(Boolean).join("\n");
 
   await mkdir(WORK_DIR, { recursive: true });
-  const r = await run(CLAUDE_BIN, ["-p", prompt, "--permission-mode", "bypassPermissions", "--model", POST_MODEL], { cwd: WORK_DIR });
+  const r = await run(CLAUDE_BIN, ["-p", prompt, "--permission-mode", CLAUDE_PERMISSION_MODE, "--model", POST_MODEL], { cwd: WORK_DIR });
 
   if (/credit balance is too low|insufficient/i.test(r.out + r.err))
     throw new Error("Saldo/limite da conta de IA esgotado — tente novamente após o reset.");
@@ -1826,6 +1978,38 @@ async function gerarPostSocial(job: Job, hb?: Heartbeat): Promise<void> {
   await setProgress(job.id, { fase: "POST", etapa: "pronto", variacoes: variantes.length });
 }
 
+async function aceitarExcecaoQualidade(job: Job): Promise<void> {
+  if (!job.project_id) throw new Error("exceção de qualidade exige project_id");
+  const numero = Number(job.payload?.capitulo);
+  const reason = String(job.payload?.motivo ?? "").trim();
+  const blockerCodes = Array.isArray(job.payload?.blocker_codes) ? job.payload.blocker_codes.map(String) : [];
+  if (!Number.isInteger(numero) || numero < 1 || !reason || !blockerCodes.length) {
+    throw new Error("exceção exige capitulo, motivo e blocker_codes explícitos");
+  }
+  const dir = projDir(job.project_id);
+  let qDir = path.join(dir, "quality");
+  let chapterDir = path.join(dir, "manuscrito");
+  if (job.edition_id) {
+    const ed = await getEdition(job.edition_id);
+    if (ed.project_id !== job.project_id) throw new Error("edição fora do projeto da exceção");
+    qDir = path.join(dir, "quality", ed.id);
+    chapterDir = ed.is_origem ? path.join(dir, "manuscrito") : path.join(dir, "traducoes", ed.idioma);
+  }
+  const name = `capitulo-${String(numero).padStart(2, "0")}`;
+  const qPath = path.join(qDir, `${name}.json`);
+  const textPath = path.join(chapterDir, `${name}.md`);
+  const state = JSON.parse(await readFile(qPath, "utf8")) as QualityState;
+  const text = await readFile(textPath, "utf8");
+  const accepted = applyQualityException(state, text, {
+    acceptedBy: OWNER,
+    acceptedAt: new Date().toISOString(),
+    reason,
+    blockerCodes,
+  });
+  await writeFile(qPath, JSON.stringify(accepted, null, 2) + "\n", "utf8");
+  await setProgress(job.id, { fase: "QUALITY_EXCEPTION", cap_atual: numero, resumo: `Exceção humana registrada no capítulo ${numero}` });
+}
+
 export async function executarJob(job: Job, hb?: Heartbeat): Promise<void> {
   switch (job.tipo) {
     case "ping": return ping(job);
@@ -1845,6 +2029,7 @@ export async function executarJob(job: Job, hb?: Heartbeat): Promise<void> {
     case "gerar_pacote": return gerarPacote(job, hb);
     case "importar_vendas": return importarVendas(job);
     case "gerar_post_social": return gerarPostSocial(job, hb);
+    case "aceitar_excecao_qualidade": return aceitarExcecaoQualidade(job);
     default: throw new Error("tipo de job desconhecido: " + job.tipo);
   }
 }

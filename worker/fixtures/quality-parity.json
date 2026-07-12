@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "muletas": [
+    { "name": "coisa", "text": "coisa coisa coisa", "termContains": "coisa", "expectedCount": 3 },
+    { "name": "de-repente", "text": "de repente, de repente, de repente", "termContains": "de repente", "expectedCount": 3 },
+    { "name": "na-verdade", "text": "na verdade; na verdade; na verdade", "termContains": "na verdade", "expectedCount": 3 }
+  ]
+}

@@ -5,6 +5,7 @@ import { createReadStream } from "node:fs";
 import path from "node:path";
 import { sb, OWNER } from "./supabase.js";
 import { comRetrySb } from "./retry.js";
+import { assertSafeSegment, safeResolveWithin } from "./path-safety.js";
 
 export const WORK_DIR = process.env.WORK_DIR || "./atelier-work";
 export const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
@@ -15,15 +16,16 @@ export const MODEL = process.env.MODEL || "opus"; // PESADO: escritor (subagente
 // (opus, via frontmatter). Sonnet aqui economiza Max sem rebaixar a prosa. As fases
 // inline pesadas (ESTRUTURA/REVIEW/REESCRITA) o runner sobe para MODEL via --model-pesado.
 export const MODEL_ORQUESTRADOR = process.env.MODEL_ORQUESTRADOR || "sonnet";
+export const CLAUDE_PERMISSION_MODE = process.env.CLAUDE_PERMISSION_MODE || "acceptEdits";
 
 // Pasta de trabalho de um projeto (verdade do disco).
 export function projDir(projectId: string) {
-  return path.join(WORK_DIR, projectId);
+  return safeResolveWithin(WORK_DIR, projectId);
 }
 
 // Caminho no Storage: sempre prefixado pelo owner (casa com as RLS de storage.sql).
 export function storageKey(...parts: string[]) {
-  return [OWNER, ...parts].join("/");
+  return [assertSafeSegment(OWNER, "owner"), ...parts.map((p) => assertSafeSegment(p, "storage key"))].join("/");
 }
 
 export interface RunResult {
@@ -82,7 +84,7 @@ export async function runClaude(
 ): Promise<RunResult> {
   return run(
     CLAUDE_BIN,
-    ["-p", prompt, "--permission-mode", "bypassPermissions", "--model", MODEL],
+    ["-p", prompt, "--permission-mode", CLAUDE_PERMISSION_MODE, "--model", MODEL],
     { cwd, onLine }
   );
 }

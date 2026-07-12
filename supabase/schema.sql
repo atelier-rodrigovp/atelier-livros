@@ -29,7 +29,7 @@ create table if not exists editions (
   owner uuid not null default auth.uid(),
   project_id uuid not null references projects(id) on delete cascade,
   idioma text not null,                    -- pt-BR|en-US|en-GB|es-ES|it-IT|de-DE|fr-FR
-  status text not null default 'pendente', -- pendente|traduzindo|revisao|pronto
+  status text not null default 'pendente', -- pendente|escrevendo|traduzindo|revisao|pronto
   is_origem boolean default false,
   nota_review numeric,
   created_at timestamptz default now(),

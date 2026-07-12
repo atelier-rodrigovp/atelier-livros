@@ -61,16 +61,16 @@ export interface HidratarIO {
 export function ioReal(): HidratarIO {
   return {
     async listarChapters(projectId) {
-      const { data: eds } = await sb.from("editions").select("id,is_origem").eq("project_id", projectId);
+      const { data: eds } = await sb.from("editions").select("id,is_origem").eq("owner", OWNER).eq("project_id", projectId);
       const orig = (eds ?? []).find((e: any) => e.is_origem) ?? (eds ?? [])[0];
       if (!orig) return [];
-      const { data } = await sb.from("chapters").select("numero,storage_path").eq("edition_id", (orig as any).id).order("numero");
+      const { data } = await sb.from("chapters").select("numero,storage_path").eq("owner", OWNER).eq("edition_id", (orig as any).id).order("numero");
       return (data ?? [])
         .filter((c: any) => c.storage_path && c.numero != null)
         .map((c: any) => ({ numero: Number(c.numero), storage_path: String(c.storage_path) }));
     },
     async getProjeto(projectId) {
-      const { data } = await sb.from("projects").select("titulo,total_capitulos,skill_escrita,meta_nota,piso_palavras").eq("id", projectId).maybeSingle();
+      const { data } = await sb.from("projects").select("titulo,total_capitulos,skill_escrita,meta_nota,piso_palavras").eq("owner", OWNER).eq("id", projectId).maybeSingle();
       return (data as any) ?? null;
     },
     async listarFundacao(projectId) {

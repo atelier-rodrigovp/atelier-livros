@@ -8,6 +8,14 @@ import { escolherProximo, normalizarMaxParalelo, type ProjInfo } from "./fila.js
 import { aguardarConexao } from "./espera-conexao.js";
 import { comRetrySb, ehErroDeRede } from "./retry.js";
 import { instalarTimestampsISO } from "./log-iso.js";
+import { InfrastructureBlockedError, InfrastructureRetryError, QualityBlockedError } from "./job-errors.js";
+import { decideInfrastructureRetry, type InfrastructureRetryState } from "./retry-policy.js";
+import { verifySkillManifest, type SkillManifest } from "./skill-manifest.js";
+import manifest from "../skill-patches/manifest.json";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { RUNNER_PATH } from "./lib.js";
+import { claimJobAtomic } from "./claim.js";
 
 // SPEC-12: todo console.log/warn/error do worker ganha [ISO] (o log não tinha
 // relógio próprio — instalar ANTES de qualquer log).
@@ -102,6 +110,7 @@ async function recuperarLimiteMax() {
     const { error: upErr } = await sb
       .from("jobs")
       .update({ status: "queued", erro: null, attempts: 0, progresso, locked_by: null, locked_at: null })
+      .eq("owner", OWNER)
       .eq("id", (j as any).id)
       .eq("status", "error");
     if (!upErr) {
@@ -182,10 +191,7 @@ async function pegarProximoPesado(excluir: string[], projetosRodando: Set<string
   }
   const escolhido = escolherProximo(cand as any[], proj, projetosRodando);
   if (!escolhido) return null;
-  const { data: claimed } = await sb.from("jobs")
-    .update({ status: "running", locked_by: WORKER_ID, locked_at: new Date().toISOString() })
-    .eq("id", escolhido.id).eq("status", "queued").select();
-  return claimed && claimed.length ? (claimed[0] as Job) : null;
+  return claimJobAtomic(sb as any, escolhido.id, OWNER, WORKER_ID);
 }
 
 // Lock: pega 1 job queued (filtrável por tipo) e marca running atomicamente.
@@ -203,17 +209,7 @@ async function pegarProximo(opts: { incluir?: string[]; excluir?: string[] } = {
   });
   if (!job) return null;
   // claim condicional: só vence quem ainda vê status='queued'
-  const { data: claimed } = await sb
-    .from("jobs")
-    .update({
-      status: "running",
-      locked_by: WORKER_ID,
-      locked_at: new Date().toISOString(),
-    })
-    .eq("id", job.id)
-    .eq("status", "queued")
-    .select();
-  return claimed && claimed.length ? (claimed[0] as Job) : null;
+  return claimJobAtomic(sb as any, job.id, OWNER, WORKER_ID);
 }
 
 // Gravação do status final (done/queued/error) — update idempotente, com retry:
@@ -221,7 +217,7 @@ async function pegarProximo(opts: { incluir?: string[]; excluir?: string[] } = {
 // até o recuperarOrfaos (que segue como rede de segurança ao esgotar).
 async function finalizar(jobId: string, patch: Record<string, unknown>) {
   const { error } = await comRetrySb(
-    () => sb.from("jobs").update(patch).eq("id", jobId),
+    () => sb.from("jobs").update(patch).eq("owner", OWNER).eq("id", jobId).eq("locked_by", WORKER_ID),
     { tentativas: 5, rotulo: `finalizar ${jobId}` }
   );
   if (error) console.error(`[job ${jobId}] falha ao gravar status final: ${error.message}`);
@@ -263,7 +259,7 @@ async function processarJob(job: Job) {
   console.log(`[job ${job.id}] ${job.tipo} — iniciando`);
   await heartbeat({ estado: "busy", job: job.id, tipo: job.tipo });
   const keepalive = setInterval(() => {
-    sb.from("jobs").update({ locked_at: new Date().toISOString() }).eq("id", job.id).then(() => {});
+    sb.from("jobs").update({ locked_at: new Date().toISOString() }).eq("owner", OWNER).eq("id", job.id).eq("locked_by", WORKER_ID).then(() => {});
   }, 60_000);
   keepalive.unref?.();
   try {
@@ -271,12 +267,44 @@ async function processarJob(job: Job) {
     await finalizar(job.id, { status: "done", erro: null, locked_by: null, locked_at: null });
     console.log(`[job ${job.id}] done`);
   } catch (e: any) {
+    if (e instanceof QualityBlockedError || e?.name === "QualityBlockedError") {
+      const err = e as QualityBlockedError;
+      await finalizar(job.id, {
+        status: "paused",
+        erro: err.message,
+        progresso: {
+          quality_status: "blocked_quality",
+          quality_stage: err.stage,
+          quality_blockers: err.blockers,
+          resumo: "Bloqueado por qualidade",
+        },
+        locked_by: null,
+        locked_at: null,
+      });
+      console.error(`[job ${job.id}] bloqueado por qualidade em ${err.stage}: ${err.blockers.join("; ")}`);
+      return;
+    }
+    if (e instanceof InfrastructureBlockedError || e?.name === "InfrastructureBlockedError") {
+      const err = e as InfrastructureBlockedError;
+      await finalizar(job.id, {
+        status: "paused",
+        erro: err.message,
+        progresso: {
+          quality_status: "blocked_infrastructure",
+          dependency: err.dependency,
+          resumo: "Bloqueado por infraestrutura",
+        },
+        locked_by: null,
+        locked_at: null,
+      });
+      return;
+    }
     // Limite do plano Max = throttle temporário, NÃO erro: pausa o job (mantém
     // 'queued' com retry_at no progresso) e NÃO consome max_attempts. O picker o
     // re-dispara sozinho quando retry_at passar (retoma do disco).
     if (e instanceof LimiteMaxError || e?.name === "LimiteMaxError") {
       const err = e as LimiteMaxError;
-      const { data: cur } = await sb.from("jobs").select("progresso").eq("id", job.id).single();
+      const { data: cur } = await sb.from("jobs").select("progresso").eq("owner", OWNER).eq("id", job.id).single();
       const progresso = { ...((cur?.progresso as Record<string, unknown>) ?? {}), aguardando_reset: err.aguardandoReset, retry_at: err.retryAt, motivo: err.motivo };
       await finalizar(job.id, { status: "queued", erro: null, progresso, locked_by: null, locked_at: null });
       console.log(`[job ${job.id}] ${err.motivo} — retoma ${err.retryAt} (não conta tentativa)`);
@@ -285,20 +313,43 @@ async function processarJob(job: Job) {
     // Rede caiu além dos retries: o trabalho no disco está íntegro; re-tenta em
     // ~2min SEM queimar tentativa e com rótulo honesto (não é limite do Max nem
     // bug — antes isso consumia attempts e 3 blips matavam o job como 'error').
-    if (ehErroDeRede(e)) {
-      const { data: cur } = await sb.from("jobs").select("progresso").eq("id", job.id).single();
+    if (e instanceof InfrastructureRetryError || e?.name === "InfrastructureRetryError" || ehErroDeRede(e)) {
+      const dependency = e instanceof InfrastructureRetryError || e?.name === "InfrastructureRetryError"
+        ? String((e as InfrastructureRetryError).dependency)
+        : "supabase-network";
+      const { data: cur } = await sb.from("jobs").select("progresso").eq("owner", OWNER).eq("id", job.id).single();
+      const anterior = ((cur?.progresso as Record<string, unknown>)?.infrastructure_retry ?? null) as InfrastructureRetryState | null;
+      const decisao = decideInfrastructureRetry(anterior, dependency);
+      if (decisao.action === "blocked") {
+        await finalizar(job.id, {
+          status: "paused",
+          erro: decisao.reason,
+          progresso: {
+            ...((cur?.progresso as Record<string, unknown>) ?? {}),
+            quality_status: "blocked_infrastructure",
+            infrastructure_retry: decisao.state,
+            motivo: decisao.reason,
+            resumo: "Bloqueado por infraestrutura",
+          },
+          locked_by: null,
+          locked_at: null,
+        });
+        console.error(`[job ${job.id}] ${decisao.reason}`);
+        return;
+      }
       const progresso = {
         ...((cur?.progresso as Record<string, unknown>) ?? {}),
         aguardando_reset: false,
-        retry_at: new Date(Date.now() + 2 * 60_000).toISOString(),
-        motivo: "rede indisponível — re-tentando",
+        retry_at: decisao.retryAt,
+        infrastructure_retry: decisao.state,
+        motivo: `${dependency} indisponível — tentativa ${decisao.state.count}, backoff ${Math.round(decisao.delayMs / 1000)}s`,
       };
       await finalizar(job.id, { status: "queued", erro: null, progresso, locked_by: null, locked_at: null });
-      console.log(`[job ${job.id}] rede indisponível — re-tenta em ~2min (não conta tentativa)`);
+      console.log(`[job ${job.id}] ${dependency} indisponível — retry ${decisao.state.count} em ${Math.round(decisao.delayMs / 1000)}s`);
       return;
     }
     const msg = String(e?.message ?? e).slice(0, 2000);
-    const { data } = await sb.from("jobs").select("attempts,max_attempts").eq("id", job.id).single();
+    const { data } = await sb.from("jobs").select("attempts,max_attempts").eq("owner", OWNER).eq("id", job.id).single();
     const attempts = (data?.attempts ?? 0) + 1;
     const reenfileira = attempts < (data?.max_attempts ?? 3);
     await finalizar(job.id, {
@@ -383,7 +434,19 @@ async function loopInterativo() {
   }
 }
 
-loop().catch((e) => {
+async function preflightSkills() {
+  if (!RUNNER_PATH) throw new Error("RUNNER_PATH ausente: impossível verificar a versão da skill em produção.");
+  const sourceRoot = fileURLToPath(new URL("../skill-patches/", import.meta.url));
+  const installedRoot = path.dirname(path.dirname(path.dirname(RUNNER_PATH)));
+  const result = await verifySkillManifest(manifest as SkillManifest, sourceRoot, installedRoot);
+  if (!result.ok) {
+    const resumo = result.differences.map((d) => `${d.reason}:${d.path}`).join(", ");
+    throw new Error(`SKILL_DRIFT manifest ${result.manifestVersion}: ${resumo}. Produção bloqueada; compare e aplique patches explicitamente.`);
+  }
+  console.log(`[preflight] skills conferem com manifest ${result.manifestVersion} (${result.checked} arquivos).`);
+}
+
+preflightSkills().then(() => loop()).catch((e) => {
   console.error(e);
   process.exit(1);
 });

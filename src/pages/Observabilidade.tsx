@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle, Coins, Gauge, PauseCircle, RotateCcw, Timer, Zap } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
+import { useWorkerStatus } from "@/hooks/useWorkerStatus";
+import { deriveWritingStatus } from "@/lib/operationalStatus";
 
 // Espelha worker/src/telemetria.ts (payload da linha jobs tipo='telemetria').
 type Usage = { input: number; cache_creation: number; cache_read: number; output: number; msgs: number };
@@ -27,10 +29,12 @@ type Row = { projectId: string; titulo: string; tel: Telemetria };
 type Progresso = {
   fase?: string; cap_atual?: number; total?: number; nota?: number | null; palavras?: number;
   retry_at?: string | null; aguardando_reset?: boolean; motivo?: string; continua?: boolean;
+  quality_status?: "blocked_quality" | "blocked_infrastructure"; quality_stage?: string;
+  quality_blockers?: string[];
 };
 type JobAtivo = { project_id: string; status: string; progresso: Progresso | null; created_at: string };
 // Projeto EM PRODUÇÃO agora: escrevendo/revisão OU com job escrever_livro ativo.
-type Vivo = { projectId: string; titulo: string; projStatus: string; job?: JobAtivo; tel?: Telemetria };
+type Vivo = { projectId: string; titulo: string; projStatus: string; workerOnline: boolean; job?: JobAtivo; tel?: Telemetria };
 
 const fmtTok = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}k` : String(n));
 const rotuloPapel = (p: string) =>
@@ -52,17 +56,9 @@ function Kpi({ label, valor, sub, Icon, tone }: { label: string; valor: string; 
 
 // Estado derivado do job ativo: rodando / na fila / pausado (limite do Max).
 function statusVivo(v: Vivo): { label: string; dot: string; detail?: string } {
-  const j = v.job;
-  const pg = j?.progresso ?? {};
-  const retry = pg.retry_at ? Date.parse(pg.retry_at) : NaN;
-  const pausado = j?.status === "queued" && (pg.aguardando_reset || (!Number.isNaN(retry) && retry > Date.now()));
-  if (pausado) {
-    const hh = !Number.isNaN(retry) ? new Date(retry).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : null;
-    return { label: "Pausado", dot: "bg-amber-500", detail: `${pg.motivo ?? "aguardando reset do Max"}${hh ? ` · retoma ~${hh}` : ""}` };
-  }
-  if (j?.status === "running") return { label: "Escrevendo", dot: "bg-emerald-500 animate-pulse" };
-  if (j?.status === "queued") return { label: "Na fila", dot: "bg-sky-500" };
-  return { label: "Aguardando", dot: "bg-muted-foreground/40" };
+  const s = deriveWritingStatus(v.job, v.workerOnline);
+  const dot = s.tone === "danger" ? "bg-red-500" : s.tone === "warning" ? "bg-amber-500" : s.tone === "success" ? "bg-emerald-500 animate-pulse" : s.tone === "queued" ? "bg-sky-500" : "bg-muted-foreground/40";
+  return { label: s.label, dot, detail: s.detail };
 }
 
 // Seção "Em produção agora": comportamento de consumo AO VIVO dos projetos escrevendo.
@@ -70,7 +66,7 @@ function ProducaoAgora({ vivos }: { vivos: Vivo[] }) {
   return (
     <div className="space-y-3">
       <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-        <Activity className="h-4 w-4 text-emerald-500" /> Em produção agora
+        <Activity className="h-4 w-4 text-emerald-500" /> Estado operacional da escrita
         <span className="text-sm font-normal text-muted-foreground">({vivos.length})</span>
       </h2>
       {vivos.length === 0 ? (
@@ -147,6 +143,7 @@ function ProducaoAgora({ vivos }: { vivos: Vivo[] }) {
 }
 
 export default function Observabilidade() {
+  const { online } = useWorkerStatus();
   const [rows, setRows] = useState<Row[]>([]);
   const [vivos, setVivos] = useState<Vivo[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -156,7 +153,7 @@ export default function Observabilidade() {
       supabase.from("jobs").select("project_id,payload").eq("tipo", "telemetria"),
       supabase.from("projects").select("id,titulo,status"),
       supabase.from("jobs").select("project_id,status,progresso,created_at")
-        .eq("tipo", "escrever_livro").in("status", ["running", "queued"]).order("created_at", { ascending: false }),
+        .eq("tipo", "escrever_livro").in("status", ["running", "queued", "paused"]).order("created_at", { ascending: false }),
     ]);
     const titulo: Record<string, string> = {};
     const projStatus: Record<string, string> = {};
@@ -174,20 +171,18 @@ export default function Observabilidade() {
     // Job ativo por projeto (running vence queued; o mais recente).
     const jobOf: Record<string, JobAtivo> = {};
     for (const j of (ativos as JobAtivo[]) ?? []) {
+      if (j.status === "paused" && !j.progresso?.quality_status) continue;
       const cur = jobOf[j.project_id];
       if (!cur || (j.status === "running" && cur.status !== "running")) jobOf[j.project_id] = j;
     }
-    const idsVivos = new Set<string>([
-      ...Object.keys(jobOf),
-      ...Object.entries(projStatus).filter(([, s]) => s === "escrevendo" || s === "revisao").map(([id]) => id),
-    ]);
+    const idsVivos = new Set<string>(Object.keys(jobOf));
     const rank = (v: Vivo) => (v.job?.status === "running" ? 0 : v.job?.status === "queued" ? 1 : 2);
     const vv: Vivo[] = [...idsVivos].map((id) => ({
-      projectId: id, titulo: titulo[id] ?? "—", projStatus: projStatus[id] ?? "—", job: jobOf[id], tel: telOf[id],
+      projectId: id, titulo: titulo[id] ?? "—", projStatus: projStatus[id] ?? "—", workerOnline: online, job: jobOf[id], tel: telOf[id],
     })).sort((a, b) => rank(a) - rank(b));
     setVivos(vv);
     setCarregando(false);
-  }, []);
+  }, [online]);
 
   useEffect(() => {
     carregar();

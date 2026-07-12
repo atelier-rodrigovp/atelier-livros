@@ -4,14 +4,14 @@ Plataforma pessoal que orquestra os agentes de IA do Claude Code (plano MAX) par
 **produzir, traduzir, capear, empacotar e acompanhar livros** de ponta a ponta.
 Fonte de verdade do produto: `PROMPT-PLATAFORMA-LIVROS.md`.
 
-- **Web (Netlify):** React + Vite + TypeScript + Tailwind + shadcn/ui — painel de controle.
+- **Web (GitHub Pages):** React + Vite + TypeScript + Tailwind + shadcn/ui — painel de controle.
 - **Supabase:** Postgres (dados + fila de jobs), Auth (single-user), Storage, Realtime, RLS.
 - **Agent-worker (local):** Node/TS que pega jobs na fila e executa a IA (Claude Code
   headless + `livro_runner.py` + skills). **A web nunca chama o Claude direto.**
 
 ## Arquitetura
 ```
-WEB (Netlify)  ──HTTPS──►  SUPABASE (Postgres/Auth/Storage/Realtime/RLS)
+WEB (GitHub Pages) ──HTTPS──► SUPABASE (Postgres/Auth/Storage/Realtime/RLS)
    painel/catálogo            tabelas + fila `jobs`            ▲  │
                                                     pega job   │  ▼  status/artefatos
                                             AGENT-WORKER (PC, Claude MAX logado)
@@ -41,14 +41,14 @@ Segredos: o front só conhece `anon key`; a `service_role` e o login do Claude f
 3. **Auth:** crie seu usuário e **desative signups** (uso próprio). Login por
    e-mail+senha ou **magic link**.
 
-### 2) Front (Netlify)
+### 2) Front (GitHub Pages)
 ```
 cp .env.example .env        # VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY (públicas)
 npm install
 npm run dev                 # local (http://localhost:5173)
-npm run build               # produção (Netlify: build `npm run build`, publish `dist`)
+npm run build               # build local; o workflow publica com GHPAGES=1
 ```
-Deploy: conecte o repo no Netlify e configure as duas variáveis `VITE_*`.
+Deploy: configure os secrets `VITE_*` no GitHub; o workflow publica o branch `gh-pages`.
 
 ### 3) Worker (na sua máquina, com Claude Code MAX logado)
 Pré-requisitos: **Node 20+**, **Python 3.12+** (com **Pillow**: `pip install pillow`,
@@ -66,17 +66,10 @@ npm run start
 > nomes do PATH. Aponte `CLAUDE_BIN` e `PY_BIN` para os **.exe reais** (ver
 > `worker/.env.example`).
 
-### Deploy contínuo (Netlify ↔ GitHub, integração nativa)
-O site usa a **integração nativa do Netlify com o GitHub** (GitHub App): a cada
-`git push` no `master`, o Netlify builda (`npm run build`, via `netlify.toml`) e
-publica em produção automaticamente. **Sem token que expira.** Site no ar:
-**https://atelier-livros-vp.netlify.app**.
-
-As chaves públicas do front ficam como **env vars no Netlify** (Site config →
-Environment variables): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Para trocar,
-atualize lá (ou `netlify env:set NAME valor`) e refaça um deploy.
-
-Deploy manual (se precisar): `npm run build && netlify deploy --prod --dir=dist`.
+### Deploy contínuo (GitHub Pages)
+Todo push em `master` que afete o front aciona `.github/workflows/deploy.yml`, gera
+`dist` com base `/atelier-livros/` e publica em `gh-pages`. Site no ar:
+**https://atelier-rodrigovp.github.io/atelier-livros/**.
 
 ### Rodar o worker 24/7
 - **Windows (Agendador de Tarefas):** crie uma tarefa "Ao iniciar o sistema" que roda

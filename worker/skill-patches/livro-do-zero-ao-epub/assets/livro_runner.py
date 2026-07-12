@@ -52,13 +52,11 @@ Uso:
 
 import argparse
 import datetime
-import glob
 import hashlib
 import json
 import os
 import re
 import subprocess
-import sys
 import unicodedata
 
 # ----------------------------------------------------------------------------
@@ -223,6 +221,54 @@ def _marcador_revtry(projeto, n):
     # Fix C: bound da re-revisao dirigida. Existir = ja houve 1 passada em que a guarda
     # deterministica reprovou (piso/tiques); a 2a passada aceita para nao travar o livro.
     return os.path.join(projeto, DIR_REVIEW, "_revcap-{:02d}.try".format(int(n)))
+
+
+def _quality_cap_path(projeto, n):
+    return os.path.join(projeto, "quality", "capitulo-{:02d}.json".format(int(n)))
+
+
+def _gravar_quality_cap(projeto, n, status="approved", blockers=None, stage="chapter"):
+    """Vincula a decisao ao hash EXATO do capitulo atualmente no disco."""
+    txt = ler_arquivo(projeto, nome_cap(n))
+    os.makedirs(os.path.join(projeto, "quality"), exist_ok=True)
+    q_path = _quality_cap_path(projeto, n)
+    previous = {}
+    try:
+        with open(q_path, "r", encoding="utf-8") as prev_fh:
+            previous = json.load(prev_fh)
+    except (OSError, ValueError, TypeError):
+        previous = {}
+    metrics_after = {
+        "words": len(txt.split()),
+        "maneirismExcess": len(maneirismos_acima(txt)),
+        "muletaExcess": len(muletas_acima_cap(txt)),
+        "cadenceExcess": len(cadencia_acima(txt, _skill_projeto(projeto))),
+        "residualBlockers": len(blockers or []),
+    }
+    payload = {
+        "status": status,
+        "stateVersion": "1.0.0",
+        "detectorVersion": "livro-runner-quality-v1",
+        "skillVersion": _skill_projeto(projeto) or "unknown",
+        "textHash": hashlib.sha256(txt.encode("utf-8")).hexdigest(),
+        "evaluatedAt": agora(),
+        "stage": stage,
+        "decisionBy": "livro_runner.py",
+        "attempts": int(previous.get("attempts", 0) or 0) + 1,
+        "maxAttempts": 2,
+        "metricsBefore": previous.get("metricsAfter", {"firstEvaluation": True}),
+        "metricsAfter": metrics_after,
+        "targets": {"residualBlockers": 0},
+        "blockers": blockers or [],
+        "warnings": [],
+        "reason": ("Todas as pos-condicoes foram comprovadas no texto atual."
+                   if status == "approved" else "Ha blockers residuais."),
+        "requiredAction": None if status == "approved" else "Reescrever e reavaliar.",
+        "exception": None,
+    }
+    with open(q_path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
 
 
 def primeiro_cap_nao_revisado(projeto, total, piso):
@@ -398,12 +444,10 @@ def done_condition(projeto, fase, s, iter_before, piso):
     if fase == "REESCRITA":
         return _i(s.get("ultima_reescrita_iteracao")) >= _i(s.get("iteracoes_review"))
     if fase == "DESMANEIRISMO":
-        # pronto = nenhum molde acima do orcamento global OU teto de iteracoes.
+        # O teto encerra chamadas automaticas, nunca transforma pendencia em aprovacao.
         total = _i(s.get("total_capitulos_previstos"))
         acima, _ = diagnostico_book_wide(projeto, total)
-        if not acima:
-            return True
-        return _i(s.get("desmaneirismo_iters")) >= _i(s.get("max_desmaneirismo"))
+        return not acima
     if fase == "EPUB":
         return bool(s.get("epub_gerado"))
     return False
@@ -830,7 +874,7 @@ def modelo_da_fase(fase, args):
 
 
 def run_claude(projeto, prompt, args, modelo=None):
-    cmd = [args.claude_bin, "-p", prompt, "--permission-mode", "bypassPermissions"]
+    cmd = [args.claude_bin, "-p", prompt, "--permission-mode", args.permission_mode]
     modelo = modelo or getattr(args, "model", None)
     if modelo:
         cmd += ["--model", modelo]
@@ -1717,9 +1761,22 @@ def gate_maneirismo_capitulo(projeto, n, args):
             "Itens acima do orcamento: {lista}\n"
         ).format(arq=arq, lista=lista)
         run_claude(projeto, prompt, args)
-    # Atualiza o ledger cross-capitulo com os slots deste capitulo (apos aceitar/
-    # reescrever). Idempotente por capitulo. Roda mesmo quando o capitulo passou limpo.
+        # A chamada do agente nao prova correcao: rele o arquivo e reconta tudo.
+        txt = ler_arquivo(projeto, nome_cap(n))
+        offs = maneirismos_acima(txt)
+        muls = muletas_acima_cap(txt)
+        cads = cadencia_acima(txt, _skill_projeto(projeto))
+        reps = detectar_repeticao_cross(txt, anteriores)
+    restantes = (["molde {} {}x".format(nome, cnt) for nome, cnt in offs] +
+                  ["muleta {} {}x".format(nome, cnt) for nome, cnt, _b in muls] +
+                  ["cadencia {} {}x".format(nome, cnt) for nome, cnt, _alvo in cads] +
+                  ["repeticao cross-cap {}".format(r["cap"]) for r in reps])
+    if restantes:
+        log(projeto, "GATE CAP {}: REPROVADO apos recontagem: {}".format(n, "; ".join(restantes)))
+        return restantes
+    # O ledger so recebe texto cuja pos-condicao foi comprovada.
     _atualizar_ledger_com_cap(projeto, n)
+    return []
 
 
 # ----------------------------------------------------------------------------
@@ -1878,6 +1935,22 @@ def executar(projeto, args):
         save_state(projeto, state)
         fase = state["fase_atual"]
 
+        # Ao esgotar o teto, preserve o texto e exponha blockers. Nao avance para
+        # EPUB/CONCLUIDO enquanto a pos-condicao book-wide continuar reprovada.
+        if fase == "DESMANEIRISMO":
+            acima_teto, _rel_teto = diagnostico_book_wide(
+                projeto, _i(state.get("total_capitulos_previstos")))
+            if (acima_teto and _i(state.get("desmaneirismo_iters")) >=
+                    _i(state.get("max_desmaneirismo"))):
+                state["quality_status"] = "blocked_quality"
+                state["quality_stage"] = "DESMANEIRISMO"
+                state["quality_blockers"] = acima_teto
+                state["quality_reason"] = "teto automatico atingido com blockers residuais"
+                save_state(projeto, state)
+                log(projeto, "QUALITY_BLOCKED DESMANEIRISMO: {} blocker(s) apos o teto.".format(len(acima_teto)))
+                print("QUALITY_BLOCKED stage=DESMANEIRISMO blockers={}".format(len(acima_teto)), flush=True)
+                return 3
+
         if fase == "CONCLUIDO":
             tot = _i(state.get("total_capitulos_previstos"))
             validos = len(capitulos_validos(projeto, tot, piso)) if tot else 0
@@ -1941,8 +2014,14 @@ def executar(projeto, args):
                         log(projeto, "GATE SPEC cap {}: {} -> pedindo SPEC COMPLETA ao livro-editor (bounded).".format(alvo, motivo_spec))
                         prompt = prompt_gerar_spec(alvo, motivo_spec)
                     else:
-                        log(projeto, "AVISO ALTO: spec do cap {} segue reprovada ({}) apos 1 re-geracao — escrevendo assim mesmo (bounded, nao bloqueia).".format(alvo, motivo_spec))
-                        prompt = prompt_escrita_capitulo(alvo, piso)
+                        state["quality_status"] = "blocked_quality"
+                        state["quality_stage"] = "SPEC_CAPITULO"
+                        state["quality_blockers"] = [motivo_spec]
+                        state["quality_reason"] = "spec segue reprovada apos o teto automatico"
+                        save_state(projeto, state)
+                        log(projeto, "QUALITY_BLOCKED spec cap {}: {}".format(alvo, motivo_spec))
+                        print("QUALITY_BLOCKED stage=SPEC_CAPITULO cap={}".format(alvo), flush=True)
+                        return 3
                 else:
                     prompt = prompt_escrita_capitulo(alvo, piso)
         elif fase == "REVIEW":
@@ -2001,7 +2080,17 @@ def executar(projeto, args):
         # Portao de maneirismo na ORIGEM: se o capitulo recem-escrito estourou o
         # orcamento de tiques/muletas, dispara UMA reescrita-alvo (bounded; nao bloqueia).
         if fase == "ESCRITA" and alvo is not None:
-            gate_maneirismo_capitulo(projeto, alvo, args)
+            restantes_cap = gate_maneirismo_capitulo(projeto, alvo, args)
+            if restantes_cap:
+                state = ensure_fields(load_state(projeto), args)
+                state["quality_status"] = "blocked_quality"
+                state["quality_stage"] = "GATE_CAPITULO"
+                state["quality_blockers"] = restantes_cap
+                state["quality_reason"] = "correcao executada, mas a recontagem continuou reprovada"
+                save_state(projeto, state)
+                print("QUALITY_BLOCKED stage=GATE_CAPITULO cap={} blockers={}".format(
+                    alvo, len(restantes_cap)), flush=True)
+                return 3
 
         # Micro-loop: terminou a REVISAO do capitulo. GUARDA DETERMINISTICA (Fix C): o
         # runner (nao o LLM) confirma que o arquivo tem piso E que os tiques de cadencia
@@ -2026,8 +2115,7 @@ def executar(projeto, args):
             try_path = _marcador_revtry(projeto, revisando_cap)
             ja_tentou = os.path.exists(try_path)
             # 1a passada: exige piso + ledger + tiques + agencia + streak (estrito).
-            # 2a passada (ja_tentou): aceita com piso p/ nao travar, AVISA ALTO o que ficou off.
-            if piso_ok and (ja_tentou or (ledger_ok and tiques_ok and agencia_ok and streak_ok)):
+            if piso_ok and ledger_ok and tiques_ok and agencia_ok and streak_ok:
                 try:
                     os.makedirs(os.path.join(projeto, DIR_REVIEW), exist_ok=True)
                     with open(_marcador_revcap(projeto, revisando_cap), "w", encoding="utf-8") as fh:
@@ -2048,7 +2136,25 @@ def executar(projeto, args):
                 log(projeto, "Capitulo {} revisado (delegado) -> aceito{}. cadencia excesso {}->{}; piso {}; ledger {}.".format(
                     revisando_cap, aviso, exc_antes, exc_depois, "ok" if piso_ok else "BAIXO", "ok" if ledger_ok else "NAO-GRAVADO"))
                 _editorial_pos_aceite(projeto, revisando_cap)  # FASES 3-4 (Novelty loops + streak)
+                _gravar_quality_cap(projeto, revisando_cap, stage="REVISAO_CAPITULO")
                 continue
+            if ja_tentou:
+                pend = []
+                if not piso_ok: pend.append("piso de palavras reprovado")
+                if not tiques_ok: pend.append("tiques nao baixaram")
+                if not ledger_ok: pend.append("continuidade nao gravada")
+                if not agencia_ok: pend.append(agencia_motivo)
+                if not streak_ok: pend.append(streak_motivo)
+                state["quality_status"] = "blocked_quality"
+                state["quality_stage"] = "REVISAO_CAPITULO"
+                state["quality_blockers"] = pend
+                state["quality_reason"] = "re-revisao esgotada sem comprovar pos-condicoes"
+                save_state(projeto, state)
+                log(projeto, "QUALITY_BLOCKED revisao cap {}: {}".format(
+                    revisando_cap, "; ".join(pend)))
+                print("QUALITY_BLOCKED stage=REVISAO_CAPITULO cap={} blockers={}".format(
+                    revisando_cap, len(pend)), flush=True)
+                return 3
             # Guarda REPROVOU: re-revisa o MESMO cap no proximo loop (dirigido, bounded 1x).
             try:
                 os.makedirs(os.path.join(projeto, DIR_REVIEW), exist_ok=True)
@@ -2074,6 +2180,17 @@ def executar(projeto, args):
             acima, _rel = diagnostico_book_wide(projeto, _i(state.get("total_capitulos_previstos")))
             log(projeto, "DESMANEIRISMO iter {}/{}: {} item(s) ainda acima do orcamento.".format(
                 state["desmaneirismo_iters"], _i(state.get("max_desmaneirismo")), len(acima)))
+            if not acima:
+                # A passada book-wide pode alterar qualquer capitulo; renova as
+                # aprovacoes somente depois da recontagem global limpa.
+                for cap_n in capitulos_validos(
+                        projeto, _i(state.get("total_capitulos_previstos")), piso):
+                    _gravar_quality_cap(projeto, cap_n, stage="DESMANEIRISMO")
+                state["quality_status"] = "approved"
+                state["quality_stage"] = "DESMANEIRISMO"
+                state["quality_blockers"] = []
+                state["quality_reason"] = "recontagem book-wide limpa"
+                save_state(projeto, state)
 
         # REVIEW: só aceita com ARTEFATO real no disco; nota vem do arquivo.
         if fase == "REVIEW":
@@ -2152,6 +2269,7 @@ def build_argparser():
                    help="Piso de palavras por capitulo (default {}).".format(PISO_PALAVRAS_DEFAULT))
     p.add_argument("--fase-timeout", type=int, default=0, help="Timeout por chamada (s; 0 = sem).")
     p.add_argument("--claude-bin", default="claude", help="Binario do Claude Code (default 'claude').")
+    p.add_argument("--permission-mode", default="acceptEdits", choices=["default", "acceptEdits", "bypassPermissions"], help="Permissao do Claude; acceptEdits e o padrao seguro. bypassPermissions exige override explicito.")
     p.add_argument("--model", default="opus", help="Modelo do ORQUESTRADOR/roteamento (default 'opus'; o worker passa 'sonnet'). Subagentes mantem o modelo do proprio frontmatter (escritor opus, revisor sonnet, editor haiku).")
     p.add_argument("--model-pesado", default="opus", help="Modelo das fases INLINE pesadas (ESTRUTURA/REVIEW/REESCRITA), que nao delegam a um subagente (default 'opus').")
     p.add_argument("--revisor-craft-opus", action="store_true", help="Eleva o VEREDITO DE PROPULSAO do revisor por capitulo a opus (custo Max). Default off: a critica de propulsao roda no revisor sonnet.")
