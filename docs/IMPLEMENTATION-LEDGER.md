@@ -72,3 +72,21 @@ editoriais em garantias verificáveis. Ele não substitui testes nem ADRs.
   scanners de owner e testes de path permanecem verdes.
 - Pendência externa remanescente: executar as funções SQL num Postgres efêmero/isolado,
   aplicar a migração e patches somente após revisão/autorização e validar o front após deploy.
+
+## Ciclo operacional autorizado — 2026-07-11
+
+- Skill instalada com backup em `~/.claude/skill-backups/20260711231759`; os cinco
+  arquivos conferem com o manifest 1.0.0 e o runner instalado concluiu `--dry-run` com rc=0.
+- Commit `4a74892` publicado em `master`; workflow GitHub Pages `29176576997` concluído
+  com sucesso.
+- A rota online de Observabilidade exibiu corretamente `Órfão / worker offline`,
+  `Retomada vencida` e `Na fila`; viewport 1280×720 sem overflow horizontal e sem erros
+  de console.
+- `supabase/reliability.sql` foi executado integralmente em Postgres efêmero (PGlite):
+  claim winner/loser e promoção atômica de capítulo, artefato, edição e projeto aprovados.
+- Auditoria read-only no Supabase encontrou duas identidades duplicadas, com cinco e
+  quatro linhas. Os campos funcionais eram idênticos; foram preservados os dois registros
+  mais recentes e removidas sete linhas redundantes. Resultado: 30 artefatos e zero
+  identidades duplicadas. Nenhum objeto do Storage foi removido.
+- Pendência única: autenticar no painel administrativo e aplicar a migração já validada;
+  os RPCs `claim_job` e `promote_publication` ainda não estão expostos pelo PostgREST.

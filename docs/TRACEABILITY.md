@@ -18,11 +18,11 @@
 | paths seguros | `path-safety.ts` | `path-safety.test.ts` |
 | skill drift | manifest + `skill-manifest.ts` | `skill-manifest.test.ts` |
 | paridade TS/Python | fixture JSON compartilhada | `quality-parity.test.ts` + `test_quality_parity.py` |
-| observabilidade honesta | `Observabilidade.tsx` | typecheck; validação visual pendente após deploy autorizado |
+| observabilidade honesta | `Observabilidade.tsx` | testes + verificação da rota publicada sem erros/overflow |
 
 ## Limitações deliberadas
 
-Não foram aplicadas migrações, patches instalados ou deploy. A semântica transacional foi
-testada por adapters falsos; a sintaxe/execução das funções PostgreSQL ainda precisa de
-um banco efêmero ou aplicação operacional autorizada. A validação visual da versão
-publicada também depende de deploy autorizado.
+O patch foi instalado com backup e conferência do manifest, e o front foi publicado e
+verificado. A migração foi exercitada com sucesso em Postgres efêmero, inclusive claim
+winner/loser e promoção atômica. A aplicação no Supabase ainda depende da autenticação
+administrativa; os dados já foram saneados para que o índice único não encontre duplicatas.
