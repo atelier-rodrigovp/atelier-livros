@@ -11,17 +11,17 @@ Data: 2026-07-11. Esta auditoria não considera “código escrito” como prova
 | Paridade TS/Python | parcial comprovado | fixtures comuns de muletas | ampliar fixtures para todas as regras duplicadas |
 | Fluxo escrever_livro | comprovado por harness | claim até estado do front | não executado contra serviços reais por segurança |
 | Retry/circuit breaker | comprovado localmente | política e classificação rc/timeout | observar outage simulada com worker completo |
-| Publicação transacional | comprovado em Postgres efêmero | falhas de upload/DB, retomada e promoção SQL real | aplicar a migração validada no Supabase |
-| Concorrência | comprovada em Postgres efêmero | winner/loser via `claim_job` e advisory lock | aplicar a migração validada no Supabase |
+| Publicação transacional | comprovada e implantada | falhas de upload/DB, retomada, promoção SQL e RPC real | nenhuma etapa do goal |
+| Concorrência | comprovada e implantada | winner/loser, advisory lock e RPC real | nenhuma etapa do goal |
 | Skill patches | instalado e comprovado | 5/5 hashes, backup e dry-run rc=0 | nenhuma etapa local |
 | Observabilidade | publicada e comprovada | deploy Pages, DOM real, layout 1280 px e console sem erros | nenhuma etapa local |
-| Segurança | comprovado localmente | owner scanner, paths, acceptEdits | revisão operacional pós-migração |
-| Documentação | comprovado | arquitetura, ADR, runbook, ledger e matriz | atualizar após evidência operacional |
+| Segurança | comprovada localmente e em produção | owner scanner, paths, acceptEdits e RPCs security invoker | acompanhamento contínuo |
+| Documentação | comprovada | arquitetura, ADR, runbook, ledger e matriz atualizados | acompanhamento contínuo |
 
 ## Critérios objetivos
 
 - Capítulo não é aprovado por teto: **sim, prova local**.
-- Edição não é pronta com blocker: **sim no código; promoção SQL ainda não executada**.
+- Edição não é pronta com blocker: **sim; promoção transacional implantada no Supabase**.
 - Correção seguida de recontagem: **sim**.
 - Mudança invalida hash: **sim**.
 - Teste integrado `escrever_livro`: **sim, sem serviços externos**.
@@ -35,9 +35,9 @@ Data: 2026-07-11. Esta auditoria não considera “código escrito” como prova
 
 ## Decisão de conclusão
 
-O goal **ainda não pode ser declarado concluído** porque a migração, embora aprovada em
-Postgres efêmero, ainda não foi aplicada no Supabase. O patch e o deploy já foram
-instalados e verificados. A auditoria de produção encontrou duas identidades de artefato
-duplicadas (nove linhas); sete linhas funcionalmente idênticas foram removidas, mantendo
-o registro mais recente de cada identidade. O banco ficou com 30 artefatos e zero
-identidades duplicadas, pronto para receber o índice único.
+O goal está **concluído**. A migração foi aplicada numa transação no Supabase e o catálogo
+real confirmou `claim_job = true`, `promote_publication = true`, índice único ativo e zero
+identidades duplicadas. O PostgREST expõe os dois RPCs e um claim de verificação contra ID
+inexistente retornou zero linhas, sem mutação. O patch e o deploy também foram instalados
+e verificados. A auditoria anterior removeu sete linhas funcionalmente idênticas,
+preservando o registro mais recente de cada identidade e todos os objetos do Storage.

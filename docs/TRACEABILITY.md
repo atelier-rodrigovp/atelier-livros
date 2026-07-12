@@ -23,6 +23,6 @@
 ## Limitações deliberadas
 
 O patch foi instalado com backup e conferência do manifest, e o front foi publicado e
-verificado. A migração foi exercitada com sucesso em Postgres efêmero, inclusive claim
-winner/loser e promoção atômica. A aplicação no Supabase ainda depende da autenticação
-administrativa; os dados já foram saneados para que o índice único não encontre duplicatas.
+verificado. A migração foi exercitada em Postgres efêmero e aplicada no Supabase dentro
+de uma transação. O catálogo real confirmou as duas funções e o índice; o PostgREST expõe
+2/2 RPCs e os artefatos permanecem com zero identidades duplicadas.

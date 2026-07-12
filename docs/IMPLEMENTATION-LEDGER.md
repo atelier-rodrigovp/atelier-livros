@@ -88,5 +88,10 @@ editoriais em garantias verificáveis. Ele não substitui testes nem ADRs.
   quatro linhas. Os campos funcionais eram idênticos; foram preservados os dois registros
   mais recentes e removidas sete linhas redundantes. Resultado: 30 artefatos e zero
   identidades duplicadas. Nenhum objeto do Storage foi removido.
-- Pendência única: autenticar no painel administrativo e aplicar a migração já validada;
-  os RPCs `claim_job` e `promote_publication` ainda não estão expostos pelo PostgREST.
+- Migração aplicada no Supabase dentro de `BEGIN`/`COMMIT`. A verificação do catálogo
+  retornou `true` para `claim_job`, `promote_publication` e `artifacts_identity_uidx`, com
+  zero identidades duplicadas.
+- O OpenAPI do PostgREST passou a expor 2/2 RPCs. Um `claim_job` com UUID inexistente
+  retornou zero linhas, comprovando disponibilidade sem alterar jobs reais.
+- Goal encerrado sem iniciar o worker nem consumir jobs reais. A partir deste ponto,
+  qualidade editorial deve ser acompanhada por execução normal e pelo runbook.
