@@ -25,4 +25,13 @@ for case in fixtures["muletas"]:
         failures.append("{}: esperado {}, obtido {}".format(case["name"], case["expectedCount"], actual))
     print("[{}] {} -> {}".format("ok" if actual == case["expectedCount"] else "FALHA", case["name"], actual))
 
+# Moldes (autopsia de convergencia 2026-07-13): contagem CRUA por regex de
+# _MOLDES_CAP — mesmos casos do teste TS (falso positivo nao conta).
+for case in fixtures.get("moldes", []):
+    rx = next((r for nome, r in m._MOLDES_CAP if case["moldeContains"] in nome), None)
+    actual = len(rx.findall(case["text"])) if rx else -1
+    if actual != case["expectedCount"]:
+        failures.append("molde {}: esperado {}, obtido {}".format(case["name"], case["expectedCount"], actual))
+    print("[{}] molde {} -> {}".format("ok" if actual == case["expectedCount"] else "FALHA", case["name"], actual))
+
 raise SystemExit("; ".join(failures) if failures else 0)

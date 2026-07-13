@@ -13,7 +13,11 @@ const MOLDES: Molde[] = [
   { nome: 'antítese "não era X. Era Y."', re: /\bn[ãa]o\s+(?:era|foi|fora|é|seria)\b[^.!?\n]{0,60}[.!?]\s+(?:era|foi|fora|é|seria)\b/gi, orc10k: 1.5 },
   { nome: 'aposto antitético ("não era pergunta; era…")', re: /\bn[ãa]o\s+(?:era|foi|é)\s+[^.,;:!?\n]{1,30}[;:,]\s*(?:era|foi|é|mas|e\s+sim)\b/gi, orc10k: 1.0 },
   { nome: 'antítese "não X, mas/e sim Y"', re: /\bn[ãa]o\s+\w[^.,;!?\n]{0,50}[,;]\s*(?:mas|e\s+sim|sen[ãa]o)\s+/gi, orc10k: 1.5 },
-  { nome: 'fragmento antitético curto ("Não X. Y.")', re: /(?:^|[.!?]\s)N[ãa]o\s+[^.!?\n]{1,45}[.!?]\s+[A-ZÀ-Ý]/g, orc10k: 1.5 },
+  // AUDITORIA-CONVERGENCIA 2026-07-13: a versão antiga casava QUALQUER frase
+  // curta iniciada por "Não" (4/5 marcações reais eram falso positivo — réplicas
+  // e confissões de narradora 1ª pessoa, sem antítese). Agora exige o 2º termo
+  // antitético na frase seguinte (Era/É/Este/Havia/Mas/…).
+  { nome: 'fragmento antitético curto ("Não X. Era/Este Y.")', re: /(?:^|[.!?]\s)N[ãa]o\s+[^.!?\n]{1,45}[.!?]\s+(?:Era|É|Foi|Fora|Seria|Este|Esta|Isto|Isso|Havia|Há|Mas|Agora|Hoje)(?=[\s,;:.!?—…]|$)/g, orc10k: 1.5 },
   // antítese com "haver" — escapava (o molde acima só casa não era/foi/é/seria):
   // "Não havia nada… Havia só o branco." / "não havia X, havia Y".
   { nome: 'antítese com "haver" ("Não havia X… Havia Y")', re: /\bn[ãa]o\s+h(?:avia|á|ouve)\b[^.!?\n]{0,80}[.!?…]+\s+(?:[^.!?\n]{0,30}\s)?h(?:avia|á)\b/gi, orc10k: 1.5 },

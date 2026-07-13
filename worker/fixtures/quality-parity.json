@@ -1,8 +1,61 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "muletas": [
-    { "name": "coisa", "text": "coisa coisa coisa", "termContains": "coisa", "expectedCount": 3 },
-    { "name": "de-repente", "text": "de repente, de repente, de repente", "termContains": "de repente", "expectedCount": 3 },
-    { "name": "na-verdade", "text": "na verdade; na verdade; na verdade", "termContains": "na verdade", "expectedCount": 3 }
+    {
+      "name": "coisa",
+      "text": "coisa coisa coisa",
+      "termContains": "coisa",
+      "expectedCount": 3
+    },
+    {
+      "name": "de-repente",
+      "text": "de repente, de repente, de repente",
+      "termContains": "de repente",
+      "expectedCount": 3
+    },
+    {
+      "name": "na-verdade",
+      "text": "na verdade; na verdade; na verdade",
+      "termContains": "na verdade",
+      "expectedCount": 3
+    }
+  ],
+  "moldes": [
+    {
+      "name": "real-antitese-era",
+      "text": "Ela parou na porta. Não era medo. Era fome que ela sentia.",
+      "moldeContains": "fragmento antit",
+      "expectedCount": 1
+    },
+    {
+      "name": "real-antitese-este (cap-02 L19)",
+      "text": "O sol bate de lado nele. Não é o velho de antes. Este é mais novo, alto.",
+      "moldeContains": "fragmento antit",
+      "expectedCount": 1
+    },
+    {
+      "name": "fp-nao-e-pergunta (cap-02 L21)",
+      "text": "— A signorina Giulia — diz ele. Não é pergunta. E aqui tenho o pensamento que não vou dizer.",
+      "moldeContains": "fragmento antit",
+      "expectedCount": 0
+    },
+    {
+      "name": "fp-nao-sei (cap-02 L81)",
+      "text": "Ela volta para o cesto. Não sei o que foi aquele instante. Guardo-o comigo.",
+      "moldeContains": "fragmento antit",
+      "expectedCount": 0
+    },
+    {
+      "name": "fp-nao-conheco (cap-01 L89)",
+      "text": "Teve pressa a vida toda. Não conheço esta letra. Nunca vi uma linha escrita por ela.",
+      "moldeContains": "fragmento antit",
+      "expectedCount": 0
+    },
+    {
+      "name": "fp-nao-ha-borrao (cap-01 L105)",
+      "text": "Ela desce a colina em paz. Não há borrão: trinta e um. Cinco anos depois, nada mudou.",
+      "moldeContains": "fragmento antit",
+      "expectedCount": 0
+    }
   ]
 }

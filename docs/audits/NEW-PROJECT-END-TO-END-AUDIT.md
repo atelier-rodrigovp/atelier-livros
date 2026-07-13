@@ -184,6 +184,30 @@ Anomalia investigada e explicada (não-bug): 2 jobs `queued` havia 14 dias eram
 efeito de `producao_pausada=true` nos volumes 2-3 da Biblioteca Afogada
 (verificado no banco) — recurso intencional, mas mascarado na UI (A14).
 
+### Achados da rodada 3 (diagnóstico de convergência, 2026-07-13)
+
+Autópsia do caso real `cae6a074` cap-02 (bloqueado com "molde fragmento
+antitetico 3x"). Tabela iteração×métrica no TEST-LEDGER ciclo 9.
+
+| # | Sev | Achado | Estado |
+|---|---|---|---|
+| A21 | P1 | **Contador com falso positivo dominante**: a regra "fragmento antitetico" (`Não <≤45 chars>. <Maiúscula>`) contava QUALQUER frase curta iniciada por "Não" sem exigir antítese — 4/5 marcações no estado real eram voz legítima de narradora 1ª pessoa (hoover-mcfadden): "Não é pergunta.", "Não sei o que foi aquele instante.", "Não conheço esta letra.", "Não há borrão: trinta e um."; a única antítese real ("Não é o velho de antes. Este é mais novo") estava DENTRO do budget 1. O escritor não era a causa: reduziu 8→3 e zerou 6 das 7 famílias em uma passada, julgando (corretamente) as restantes como legítimas | corrigido — regex exige 2º termo antitético (Era/É/Este/Havia/Mas/…), espelhada TS+Python; 6 fixtures da autópsia no contrato de paridade (`quality-parity.json` v1.1.0) |
+| A22 | P1 | **Instrução de correção genérica**: o prompt do gate listava só regra+contagem (docstring prometia "nomeia as linhas" mas não nomeava) — o corretor não sabia QUAIS frases a regex contava | corrigido — `_ocorrencias_exatas`: prompt ganha lista (linha, regra, "trecho") com ordem de editar SOMENTE esses trechos; o relatório de bloqueio (`restantes`/quality_blockers) agora nomeia as frases exatas para decisão autoral |
+| A23 | P1 | **Flag `quality_status=blocked_quality` nunca era limpo em run novo**: um run retomado que progredisse ainda seria re-bloqueado pelo worker ao reler o flag stale do ESTADO | corrigido — início do run limpa o flag (o run reavalia pela verdade do disco) |
+| A24 | — | **Premissa de vazamento REFUTADA**: "[correcao executada, mas a recontagem continuou reprovada]" NÃO está em nenhum manuscrito (auditar-vazamentos no acervo: "Nenhum vazamento encontrado ✓"; grep local+Storage: 0; o cap-02 bloqueado nem subiu ao Storage). A string existe só em `quality_reason` e aparece na UI como painel de status do job ao lado do conteúdo — informação operacional, não meta-texto no livro | sem correção necessária (lockdown intacto) |
+
+**Prova de outcome (FASE 4)**: com o contador corrigido, o cap-02 real
+(hash `7b24acd6…`, texto INALTERADO) passou o gate completo re-executado —
+moldes [], muletas [], cadência [], repetições 0 → **APROVADO**, ledger
+atualizado. Iterações: 8x → 3x (correção real do agente) → 1 real ≤ budget
+(recontagem honesta). Runner instalado ressincronizado (`bb5feccb…`).
+
+Escopo honesto: o outro livro bloqueado (`53abdade`) reprova por regras de
+CADÊNCIA (anáfora/fragmento de ênfase) — família diferente, não auditada
+nesta rodada; os fixes A22 (instrução cirúrgica p/ moldes/muletas) e A23
+(flag stale) também o beneficiam, mas seus contadores não foram classificados
+caso a caso.
+
 ### Achados da rodada 2 (E2E real da fundação, 2026-07-12)
 
 | # | Sev | Achado | Estado |

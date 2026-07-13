@@ -951,7 +951,10 @@ _MOLDES_CAP = [
     ("antitese 'nao era X. Era Y.'", re.compile(u"\\bn[ãa]o\\s+(?:era|foi|fora|é|seria)\\b[^.!?\\n]{0,60}[.!?]\\s+(?:era|foi|fora|é|seria)\\b", re.I | re.U)),
     ("aposto antitetico", re.compile(u"\\bn[ãa]o\\s+(?:era|foi|é)\\s+[^.,;:!?\\n]{1,30}[;:,]\\s*(?:era|foi|é|mas|e\\s+sim)\\b", re.I | re.U)),
     ("antitese 'nao X, mas Y'", re.compile(u"\\bn[ãa]o\\s+\\w[^.,;!?\\n]{0,50}[,;]\\s*(?:mas|e\\s+sim|sen[ãa]o)\\s+", re.I | re.U)),
-    ("fragmento antitetico", re.compile(u"(?:^|[.!?]\\s)N[ãa]o\\s+[^.!?\\n]{1,45}[.!?]\\s+[A-ZÀ-Ý]", re.U)),
+    # AUDITORIA-CONVERGENCIA 2026-07-13: exige o 2o termo antitetico na frase
+    # seguinte (a versao antiga casava qualquer frase curta iniciada por "Nao" —
+    # 4/5 marcacoes reais eram falso positivo de voz 1a pessoa). Espelha o TS.
+    ("fragmento antitetico", re.compile(u"(?:^|[.!?]\\s)N[ãa]o\\s+[^.!?\\n]{1,45}[.!?]\\s+(?:Era|É|Foi|Fora|Seria|Este|Esta|Isto|Isso|Havia|Há|Mas|Agora|Hoje)(?=[\\s,;:.!?—…]|$)", re.U)),
     ("'do jeito que/de'", re.compile(u"\\bdo\\s+jeito\\s+(?:que|de|como)\\b", re.I | re.U)),
     ("antitese com 'haver' (Nao havia X... Havia Y)", re.compile(u"\\bn[ãa]o\\s+h(?:avia|á|ouve)\\b[^.!?\\n]{0,80}[.!?…]+\\s+(?:[^.!?\\n]{0,30}\\s)?h(?:avia|á)\\b", re.I | re.U)),
     ("antitese com 'haver' (mesma frase)", re.compile(u"\\bn[ãa]o\\s+h(?:avia|á|ouve)\\b[^.,;:!?\\n]{1,50}[,;]\\s*(?:mas\\s+|e\\s+sim\\s+)?h(?:avia|á)\\b", re.I | re.U)),
@@ -1752,6 +1755,23 @@ def interioridade_sem_evento(texto, min_frases=10):
     return (len(fr) >= min_frases and ep > 0.6 and dp < 0.06, round(ep * 100), round(dp * 100))
 
 
+def _ocorrencias_exatas(txt, nomes_estourados):
+    """(linha, regra, trecho) de CADA ocorrencia dos moldes/muletas estourados —
+    a instrucao de correcao aponta as frases exatas, nao so contagens
+    (AUDITORIA-CONVERGENCIA: instrucao generica nao converge)."""
+    regras = [(nome, rx) for nome, rx in _MOLDES_CAP if nome in nomes_estourados]
+    regras += [(nome, rx) for nome, rx, _b, _o in _MULETAS if nome in nomes_estourados]
+    out = []
+    for nome, rx in regras:
+        for m in rx.finditer(txt or ""):
+            linha = (txt or "").count("\n", 0, m.start()) + 1
+            ini = max(0, m.start() - 20)
+            trecho = (txt or "")[ini:m.end() + 40].replace("\n", " ").strip()
+            out.append((linha, nome, trecho))
+    out.sort()
+    return out
+
+
 def gate_maneirismo_capitulo(projeto, n, args):
     """Depois de escrever o capitulo n: se algum molde/muleta/CADENCIA estourou o
     orcamento, dispara UMA reescrita-alvo (bounded: 0 ou 1 por escrita, nao bloqueia
@@ -1774,6 +1794,12 @@ def gate_maneirismo_capitulo(projeto, n, args):
                           [u"REPETICAO CROSS-CAP '{}' (= cap {})".format(r["trecho"], r["cap"]) for r in reps])
         arq = nome_cap(n).replace("\\", "/")
         log(projeto, "GATE CAP {}: acima do orcamento -> reescrevendo ({}).".format(n, lista))
+        # Instrucao CIRURGICA: as ocorrencias exatas (linha + trecho) do que o
+        # CONTADOR marca — o corretor edita SOMENTE esses pontos, nao adivinha.
+        nomes_estourados = set([nome for nome, _c in offs] + [nome for nome, _c, _b in muls])
+        ocorr = _ocorrencias_exatas(txt, nomes_estourados)
+        bloco_ocorr = "".join(
+            u"- L{}: [{}] \"{}\"\n".format(l, nm, tr[:160]) for l, nm, tr in ocorr[:40])
         prompt = (
             "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n"
             "REVISAO DE PROSA do {arq}: os itens abaixo estao SOBRE-REPRESENTADOS neste "
@@ -1789,6 +1815,11 @@ def gate_maneirismo_capitulo(projeto, n, args):
             "e voz; NAO reescreva a cena a toa. Regrave o MESMO arquivo {arq}.\n"
             "Itens acima do orcamento: {lista}\n"
         ).format(arq=arq, lista=lista)
+        if bloco_ocorr:
+            # concatenado APOS o .format: excertos podem conter chaves literais
+            prompt += ("OCORRENCIAS EXATAS de moldes/muletas (o contador marca EXATAMENTE "
+                       "estas — edite SOMENTE estes trechos; NAO altere os demais "
+                       "paragrafos):\n" + bloco_ocorr)
         run_claude(projeto, prompt, args)
         # A chamada do agente nao prova correcao: rele o arquivo e reconta tudo.
         txt = ler_arquivo(projeto, nome_cap(n))
@@ -1796,8 +1827,15 @@ def gate_maneirismo_capitulo(projeto, n, args):
         muls = muletas_acima_cap(txt)
         cads = cadencia_acima(txt, _skill_projeto(projeto))
         reps = detectar_repeticao_cross(txt, anteriores)
-    restantes = (["molde {} {}x".format(nome, cnt) for nome, cnt in offs] +
-                  ["muleta {} {}x".format(nome, cnt) for nome, cnt, _b in muls] +
+    # Relatorio LEGIVEL: cada molde/muleta restante nomeia as frases exatas
+    # (linha + trecho) para decisao autoral — nunca so um numero.
+    nomes_rest = set([nome for nome, _c in offs] + [nome for nome, _c, _b in muls])
+    ocorr_rest = _ocorrencias_exatas(txt, nomes_rest)
+    def _frases_de(nome):
+        ps = [u"L{}: \"{}\"".format(l, tr[:90]) for l, nm, tr in ocorr_rest if nm == nome]
+        return (u" — " + u" | ".join(ps[:6])) if ps else u""
+    restantes = (["molde {} {}x{}".format(nome, cnt, _frases_de(nome)) for nome, cnt in offs] +
+                  ["muleta {} {}x{}".format(nome, cnt, _frases_de(nome)) for nome, cnt, _b in muls] +
                   ["cadencia {} {}x".format(nome, cnt) for nome, cnt, _alvo in cads] +
                   ["repeticao cross-cap {}".format(r["cap"]) for r in reps])
     if restantes:
@@ -1956,6 +1994,16 @@ def executar(projeto, args):
             s0["_runner"].get("tentativas_sem_progresso")))
     s0["_runner"]["tentativas_sem_progresso"] = 0
     s0["aguardando_reset"] = False
+    # AUDITORIA-CONVERGENCIA 2026-07-13: quality_status=blocked_quality nunca era
+    # limpo em run novo — um run retomado que PROGREDISSE ainda seria re-bloqueado
+    # pelo worker ao ler o flag stale. O run reavalia tudo pela verdade do disco;
+    # o flag antigo nao e evidencia atual.
+    if s0.get("quality_status") == "blocked_quality":
+        log(projeto, "Inicio do run: limpando quality_status stale ({}) — o run reavalia do disco.".format(
+            "; ".join(s0.get("quality_blockers") or [])[:200]))
+        s0["quality_status"] = "pending"
+        s0["quality_blockers"] = []
+        s0["quality_reason"] = ""
     save_state(projeto, s0)
 
     while True:
