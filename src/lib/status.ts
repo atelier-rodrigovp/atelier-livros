@@ -51,10 +51,18 @@ export function aguardandoResetMax(
 
 // Badge de job ciente do progresso: mostra "Aguardando reset do Max — retoma
 // ~HH:MM" (âmbar) em vez de vermelho/erro. Reaproproveita jobStatusBadge.
-export function jobStatusBadgeEx(job: {
-  status: JobStatus;
-  progresso?: Record<string, unknown> | null;
-}): { label: string; variant: BadgeVariant } {
+// Se a produção DESTE projeto está pausada, essa é a causa real do job parado
+// na fila — dizê-la vence qualquer rótulo de reset (auditoria A14).
+export function jobStatusBadgeEx(
+  job: {
+    status: JobStatus;
+    progresso?: Record<string, unknown> | null;
+  },
+  opts?: { producaoPausada?: boolean }
+): { label: string; variant: BadgeVariant } {
+  if (opts?.producaoPausada && job.status === "queued") {
+    return { label: "Na fila — produção deste projeto pausada", variant: "outline" };
+  }
   const esp = aguardandoResetMax(job.status, job.progresso);
   if (esp) {
     const h = horaCurta(esp.retryAt);
@@ -90,8 +98,14 @@ export function displayProjectStatus(args: {
   projectStatus: ProjectStatus;
   hasActiveJob: boolean;
   workerOnline: boolean;
+  qualityBlocked?: boolean;
 }): { label: string; variant: BadgeVariant; pulse: boolean } {
-  const { projectStatus, hasActiveJob, workerOnline } = args;
+  const { projectStatus, hasActiveJob, workerOnline, qualityBlocked } = args;
+  // Bloqueio de qualidade vence o status do projeto: "Escrevendo" com job
+  // paused/blocked_quality é execução fantasma — o autor precisa decidir.
+  if (qualityBlocked && !hasActiveJob) {
+    return { label: "Bloqueado por qualidade", variant: "destructive", pulse: false };
+  }
   const emEscrita = hasActiveJob || projectStatus === "escrevendo";
   if (emEscrita && !workerOnline) {
     return { label: "Escrita pausada (worker offline)", variant: "warning", pulse: false };

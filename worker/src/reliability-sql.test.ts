@@ -17,6 +17,11 @@ describe("contrato da migração de confiabilidade", () => {
     expect(sql).toContain("set status = 'running', locked_by = p_worker, locked_at = now()");
   });
 
+  it("fecha a corrida de enqueue duplicado no banco (índice parcial)", () => {
+    expect(sql).toContain("create unique index if not exists jobs_one_queued_per_project_tipo_uidx");
+    expect(sql).toContain("where status = 'queued' and project_id is not null");
+  });
+
   it("mantém identidade idempotente dos artefatos de staging", () => {
     expect(sql).toContain("create unique index if not exists artifacts_identity_uidx");
     expect(sql).toContain("on public.artifacts (edition_id, tipo, storage_path)");
@@ -33,7 +38,18 @@ describe("contrato da migração de confiabilidade", () => {
   });
 
   it("usa os privilégios do chamador e fixa o search_path", () => {
-    expect(sql.match(/security invoker/g)).toHaveLength(2);
-    expect(sql.match(/set search_path = public/g)).toHaveLength(2);
+    expect(sql.match(/security invoker/g)).toHaveLength(3);
+    expect(sql.match(/set search_path = public/g)).toHaveLength(3);
+  });
+
+  it("guarda no banco: status='pronto' só pela promoção transacional", () => {
+    expect(sql).toContain("create or replace function public.guard_edition_pronto");
+    expect(sql).toContain("create trigger editions_guard_pronto");
+    expect(sql).toContain("current_setting('app.promotion_gate', true)");
+    // promote_publication marca a transação ANTES do update de status
+    const marca = sql.indexOf("perform set_config('app.promotion_gate', '1', true)");
+    const update = sql.indexOf("update public.editions set status = 'pronto'");
+    expect(marca).toBeGreaterThan(-1);
+    expect(update).toBeGreaterThan(marca);
   });
 });

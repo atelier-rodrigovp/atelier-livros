@@ -52,14 +52,16 @@ export default function Dashboard() {
   const [feitos, setFeitos] = useState<Record<string, number>>({});
   const [capas, setCapas] = useState<Record<string, string>>({});
   const [ativos, setAtivos] = useState<Set<string>>(new Set());
+  const [bloqueados, setBloqueados] = useState<Set<string>>(new Set());
 
   const carregar = useCallback(async () => {
-    const [{ data: projs }, { data: eds }, { data: chs }, { data: jobsAtivos }, { data: arts }] = await Promise.all([
+    const [{ data: projs }, { data: eds }, { data: chs }, { data: jobsAtivos }, { data: arts }, { data: jobsPausados }] = await Promise.all([
       supabase.from("projects").select("*").order("created_at", { ascending: false }),
       supabase.from("editions").select("id,project_id,is_origem"),
       supabase.from("chapters").select("edition_id"),
       supabase.from("jobs").select("project_id").in("status", ["queued", "running"]).neq("tipo", "controle_escrita"),
       supabase.from("artifacts").select("edition_id,storage_path,url_publica").eq("tipo", "capa"),
+      supabase.from("jobs").select("project_id,progresso").eq("status", "paused"),
     ]);
     setProjects((projs as Project[]) ?? []);
 
@@ -88,6 +90,14 @@ export default function Dashboard() {
     setCapas(Object.fromEntries(capaEntries.filter(([, u]) => u)) as Record<string, string>);
 
     setAtivos(new Set(((jobsAtivos as { project_id: string | null }[]) ?? []).map((j) => j.project_id).filter(Boolean) as string[]));
+    setBloqueados(
+      new Set(
+        (((jobsPausados as { project_id: string | null; progresso: any }[]) ?? [])
+          .filter((j) => j.progresso?.quality_status === "blocked_quality")
+          .map((j) => j.project_id)
+          .filter(Boolean)) as string[]
+      )
+    );
   }, []);
 
   useEffect(() => {
@@ -102,8 +112,14 @@ export default function Dashboard() {
   }, [carregar]);
 
   const statusDe = useCallback(
-    (p: Project): Derivado => displayProjectStatus({ projectStatus: p.status, hasActiveJob: ativos.has(p.id), workerOnline: online }),
-    [ativos, online]
+    (p: Project): Derivado =>
+      displayProjectStatus({
+        projectStatus: p.status,
+        hasActiveJob: ativos.has(p.id),
+        workerOnline: online,
+        qualityBlocked: bloqueados.has(p.id),
+      }),
+    [ativos, online, bloqueados]
   );
 
   async function excluir(p: Project) {

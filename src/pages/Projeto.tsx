@@ -41,9 +41,9 @@ function jobMaisRecente(jobs: Job[], tipo: string, editionId?: string) {
   return jobs.find((j) => j.tipo === tipo && (!editionId || j.edition_id === editionId));
 }
 
-function JobStatus({ job }: { job?: Job }) {
+function JobStatus({ job, producaoPausada }: { job?: Job; producaoPausada?: boolean }) {
   if (!job) return null;
-  const b = jobStatusBadgeEx(job);
+  const b = jobStatusBadgeEx(job, { producaoPausada });
   const p = job.progresso || {};
   return (
     <span className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -90,6 +90,17 @@ export default function Projeto() {
   // Time por capítulo (escritor→revisor→editor) é o PADRÃO; toggle para desligar.
   const [semRevisao, setSemRevisao] = useState(() => localStorage.getItem(`semrev-${id}`) === "1");
   function alternarRevisaoCap(off: boolean) {
+    // Redução de qualidade exige confirmação explícita e fica registrada com
+    // timestamp — nunca é o caminho padrão nem um clique acidental.
+    if (off) {
+      const ok = window.confirm(
+        "Desligar o time por capítulo REDUZ a qualidade: os capítulos não passam por " +
+          "revisor/editor antes de aceitos (só pela purga book-wide antes do EPUB). " +
+          "Confirmar a redução de qualidade para este livro?"
+      );
+      if (!ok) return;
+      localStorage.setItem(`semrev-conf-${id}`, new Date().toISOString());
+    }
     setSemRevisao(off);
     localStorage.setItem(`semrev-${id}`, off ? "1" : "0");
   }
@@ -585,6 +596,22 @@ export default function Projeto() {
                   );
                 }
                 if (!pronto) {
+                  // Entrevista incompleta ⇒ retomar a entrevista (gerar fundação a
+                  // partir de briefing parcial produz fundação genérica).
+                  const itv = (proj.briefing as any)?._interview;
+                  if (itv && !itv.completo) {
+                    return (
+                      <div className="space-y-3">
+                        <p className="text-muted-foreground">
+                          A entrevista de fundação está incompleta — retome-a para o
+                          arquiteto validar o briefing antes de gerar a fundação.
+                        </p>
+                        <Button size="sm" onClick={() => nav(`/novo-projeto?projeto=${proj.id}`)}>
+                          Retomar entrevista
+                        </Button>
+                      </div>
+                    );
+                  }
                   return (
                     <div className="space-y-3">
                       <p className="text-muted-foreground">A fundação ainda não foi gerada.</p>
@@ -701,7 +728,15 @@ export default function Projeto() {
                         <span className="text-xs text-muted-foreground">auto-avaliação {autoNota} (provisória)</span>
                       )}
                       <span className="text-muted-foreground">
-                        {escrevendo ? (p.fase ? String(p.fase) : "escrevendo…") : feitos > 0 ? "concluído" : "não iniciado"}
+                        {escrevendo
+                          ? (p.fase ? String(p.fase) : "escrevendo…")
+                          : total > 0 && feitos >= total
+                            ? "concluído"
+                            : j?.status === "paused"
+                              ? "pausado — decisão pendente"
+                              : feitos > 0
+                                ? "interrompido"
+                                : "não iniciado"}
                       </span>
                     </div>
                     {total > 0 && (
@@ -714,7 +749,7 @@ export default function Projeto() {
                         {escrevendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenLine className="h-4 w-4" />}
                         {rotulo}
                       </Button>
-                      <JobStatus job={j} />
+                      <JobStatus job={j} producaoPausada={(proj.briefing as any)?.producao_pausada === true} />
                     </div>
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-2.5">
                       <div className="space-y-0.5 pr-3">

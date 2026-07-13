@@ -46,6 +46,14 @@ comment on function public.claim_job(uuid, uuid, text) is
 create unique index if not exists artifacts_identity_uidx
   on public.artifacts (edition_id, tipo, storage_path);
 
+-- Dedupe de enqueue no BANCO (auditoria F-10): o worker faz check-then-insert
+-- (enfileirarEscritaSeNovo) e a web insere direto — dois cliques quase
+-- simultâneos podiam duplicar o job queued do mesmo projeto+tipo. O índice
+-- parcial fecha a corrida; o segundo insert falha visivelmente.
+create unique index if not exists jobs_one_queued_per_project_tipo_uidx
+  on public.jobs (owner, project_id, tipo)
+  where status = 'queued' and project_id is not null;
+
 create or replace function public.promote_publication(
   p_owner uuid,
   p_project_id uuid,
@@ -83,6 +91,9 @@ begin
     on conflict (edition_id, tipo, storage_path) do update set meta = excluded.meta;
   end loop;
 
+  -- Marca a transação para o trigger editions_guard_pronto: só a promoção
+  -- transacional pode gravar status='pronto'.
+  perform set_config('app.promotion_gate', '1', true);
   update public.editions set status = 'pronto', updated_at = now()
   where id = p_edition_id and owner = p_owner;
   update public.projects set status = 'pronto', updated_at = now()
@@ -93,3 +104,29 @@ $$;
 
 comment on function public.promote_publication(uuid, uuid, uuid, jsonb, jsonb, jsonb) is
   'Promove capitulos, artefatos e status numa unica transacao apos staging no Storage.';
+
+-- ---------------------------------------------------------------------------
+-- Guarda no BANCO (auditoria Novo Projeto, F-11): nenhum cliente — nem o app
+-- web com sessão do owner — pode gravar editions.status='pronto' diretamente.
+-- A única porta é promote_publication, que marca a transação corrente via
+-- set_config('app.promotion_gate','1',true) antes dos updates de status.
+-- PENDENTE DE APLICAÇÃO MANUAL (como o restante deste arquivo).
+-- ---------------------------------------------------------------------------
+create or replace function public.guard_edition_pronto() returns trigger
+language plpgsql
+security invoker
+set search_path = public
+as $$
+begin
+  if new.status = 'pronto' and coalesce(old.status, '') <> 'pronto'
+     and coalesce(current_setting('app.promotion_gate', true), '') <> '1' then
+    raise exception 'editions.status=pronto so pode ser gravado pela promocao transacional (promote_publication)';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists editions_guard_pronto on public.editions;
+create trigger editions_guard_pronto
+  before insert or update of status on public.editions
+  for each row execute function public.guard_edition_pronto();

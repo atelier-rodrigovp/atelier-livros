@@ -30,6 +30,16 @@ describe("aguardandoResetMax / jobStatusBadgeEx", () => {
     expect(jobStatusBadgeEx({ status: "error" }).variant).toBe("destructive");
     expect(jobStatusBadgeEx({ status: "running" }).variant).toBe("warning");
   });
+
+  it("produção do projeto pausada vence 'aguardando reset' (causa real primeiro)", () => {
+    const b = jobStatusBadgeEx(
+      { status: "queued", progresso: { aguardando_reset: true, retry_at: retry } },
+      { producaoPausada: true }
+    );
+    expect(b.label).toBe("Na fila — produção deste projeto pausada");
+    // job running não é mascarado pela pausa (já está executando)
+    expect(jobStatusBadgeEx({ status: "running" }, { producaoPausada: true }).label).toBe("Executando");
+  });
 });
 
 describe("projectStatusBadge", () => {
@@ -62,6 +72,18 @@ describe("displayProjectStatus", () => {
   it("sem job ativo cai no mapeamento base", () => {
     expect(displayProjectStatus({ projectStatus: "pronto", hasActiveJob: false, workerOnline: true }).label).toBe("Pronto");
     expect(displayProjectStatus({ projectStatus: "fundacao", hasActiveJob: false, workerOnline: false }).label).toBe("Fundação");
+  });
+
+  it("bloqueio de qualidade vence 'Escrevendo' (execução fantasma)", () => {
+    const r = displayProjectStatus({ projectStatus: "escrevendo", hasActiveJob: false, workerOnline: true, qualityBlocked: true });
+    expect(r.label).toBe("Bloqueado por qualidade");
+    expect(r.variant).toBe("destructive");
+    expect(r.pulse).toBe(false);
+  });
+
+  it("job realmente ativo não é mascarado por bloqueio antigo", () => {
+    const r = displayProjectStatus({ projectStatus: "escrevendo", hasActiveJob: true, workerOnline: true, qualityBlocked: true });
+    expect(r.label).toBe("Escrevendo");
   });
 });
 

@@ -11,16 +11,31 @@ export interface JobFila {
 
 export interface ProjInfo { prioridade: number; pausada: boolean }
 
-// Escolhe o PRÓXIMO job pesado elegível, ordenado por prioridade DESC e, no empate,
-// created_at ASC. Pula: jobs aguardando reset do Max (retry_at futuro), projetos
-// com produção pausada, e projetos JÁ em execução (exclusão de concorrência).
+// Anti-starvation (auditoria F-10): sem envelhecimento, um projeto com
+// prioridade>0 alimentado continuamente ("Produzir agora" seta max+1) deixaria
+// jobs de prioridade 0 na fila para sempre. Cada 24h de espera vale +1 de
+// prioridade efetiva — a fila continua respeitando urgência, mas nenhum job
+// morre de fome.
+export const AGING_MS_POR_PONTO = 24 * 60 * 60 * 1000;
+
+export function prioridadeEfetiva(prioridade: number, createdAt: string | undefined, agora: number): number {
+  const t = createdAt ? Date.parse(createdAt) : NaN;
+  const bonus = Number.isNaN(t) ? 0 : Math.max(0, Math.floor((agora - t) / AGING_MS_POR_PONTO));
+  return prioridade + bonus;
+}
+
+// Escolhe o PRÓXIMO job pesado elegível, ordenado por prioridade efetiva DESC
+// (prioridade do projeto + aging) e, no empate, created_at ASC. Pula: jobs
+// aguardando reset do Max (retry_at futuro), projetos com produção pausada, e
+// projetos JÁ em execução (exclusão de concorrência).
 export function escolherProximo(
   candidatos: JobFila[],
   proj: Map<string, ProjInfo>,
   projetosRodando: Set<string>,
   agora: number = Date.now()
 ): JobFila | null {
-  const prio = (j: JobFila) => (j.project_id ? proj.get(j.project_id)?.prioridade ?? 0 : 0);
+  const prio = (j: JobFila) =>
+    prioridadeEfetiva(j.project_id ? proj.get(j.project_id)?.prioridade ?? 0 : 0, j.created_at, agora);
   const elegiveis = (candidatos ?? []).filter((j) => {
     const ra = j.progresso?.retry_at;
     if (ra && !Number.isNaN(Date.parse(ra)) && Date.parse(ra) > agora) return false; // aguardando reset
@@ -30,7 +45,7 @@ export function escolherProximo(
   });
   if (!elegiveis.length) return null;
   elegiveis.sort((a, b) => {
-    const d = prio(b) - prio(a);            // prioridade DESC
+    const d = prio(b) - prio(a);            // prioridade efetiva DESC (com aging)
     if (d !== 0) return d;
     return (a.created_at ?? "").localeCompare(b.created_at ?? ""); // empate: mais antigo
   });

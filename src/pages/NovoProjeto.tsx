@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Check, Loader2, Sparkles, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
@@ -27,16 +27,23 @@ interface Pergunta {
 
 export default function NovoProjeto() {
   const nav = useNavigate();
-  const [fase, setFase] = useState<"ideia" | "entrevista">("ideia");
+  const [params, setParams] = useSearchParams();
+  // Retomada por URL: ?projeto=<id> sobrevive a refresh e permite voltar do Dashboard.
+  const projetoParam = params.get("projeto");
+  const [fase, setFase] = useState<"ideia" | "entrevista">(projetoParam ? "entrevista" : "ideia");
   const [titulo, setTitulo] = useState("");
   const [ideia, setIdeia] = useState("");
   const [iniciando, setIniciando] = useState(false);
 
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(projetoParam);
   const [pendentes, setPendentes] = useState<Pergunta[]>([]);
   const [respostas, setRespostas] = useState<Record<string, string>>({});
   const [turno, setTurno] = useState(0); // nº de blocos já respondidos
   const [pensando, setPensando] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  // Falha visível + retomável: enqueue falho ou job de entrevista com erro não
+  // podem virar spinner eterno.
+  const [erroFluxo, setErroFluxo] = useState<string | null>(null);
   const qaRef = useRef<any[]>([]);
 
   // Lê o estado da entrevista do projeto e reage.
@@ -62,11 +69,34 @@ export default function NovoProjeto() {
           Object.fromEntries(pend.map((p) => [p.campo, p.recomendada ?? p.opcoes?.[0] ?? ""]))
         );
         setPensando(false);
-      } else {
-        // sem perguntas e não concluído => worker ainda processando
-        setPendentes([]);
-        setPensando(true);
+        setErroFluxo(null);
+        return;
       }
+      // Sem perguntas e não concluído: distinguir "worker processando" de "job com erro".
+      const { data: js } = await supabase
+        .from("jobs")
+        .select("status,erro,created_at")
+        .eq("project_id", id)
+        .eq("tipo", "entrevistar")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const j: any = js?.[0];
+      if (j?.status === "error" || j?.status === "paused") {
+        setPendentes([]);
+        setPensando(false);
+        setErroFluxo(j.erro || "A entrevista falhou no worker. Tente novamente.");
+        return;
+      }
+      if (!j) {
+        // projeto existe mas nenhum job de entrevista foi enfileirado (enqueue falhou)
+        setPendentes([]);
+        setPensando(false);
+        setErroFluxo("A entrevista ainda não foi agendada (falha ao criar o job). Tente novamente.");
+        return;
+      }
+      setPendentes([]);
+      setPensando(true);
+      setErroFluxo(null);
     },
     [nav]
   );
@@ -82,10 +112,24 @@ export default function NovoProjeto() {
         () => sincronizar(projectId)
       )
       .subscribe();
+    // Fallback do Realtime: evento perdido não pode congelar a entrevista.
+    const poll = setInterval(() => sincronizar(projectId), 12_000);
     return () => {
       supabase.removeChannel(ch);
+      clearInterval(poll);
     };
   }, [projectId, sincronizar]);
+
+  async function agendarEntrevista(id: string) {
+    try {
+      await enqueueJob("entrevistar", {}, { project_id: id });
+      setPensando(true);
+      setErroFluxo(null);
+    } catch (err) {
+      setPensando(false);
+      setErroFluxo(`Falha ao agendar a entrevista: ${(err as Error).message}`);
+    }
+  }
 
   async function comecar(e: React.FormEvent) {
     e.preventDefault();
@@ -109,19 +153,16 @@ export default function NovoProjeto() {
       toast.error(error.message);
       return;
     }
-    try {
-      await enqueueJob("entrevistar", {}, { project_id: data.id });
-    } catch (err) {
-      toast.error((err as Error).message);
-    }
     setProjectId(data.id);
+    setParams({ projeto: data.id }, { replace: true });
     setFase("entrevista");
-    setPensando(true);
     setIniciando(false);
+    await agendarEntrevista(data.id);
   }
 
   async function responder() {
-    if (!projectId) return;
+    if (!projectId || enviando) return;
+    setEnviando(true);
     const novasQa = [
       ...qaRef.current,
       ...pendentes.map((p) => ({
@@ -132,27 +173,28 @@ export default function NovoProjeto() {
     ];
     setPensando(true);
     setPendentes([]);
-    const { data } = await supabase
-      .from("projects")
-      .select("briefing")
-      .eq("id", projectId)
-      .single();
-    const b: any = data?.briefing || {};
-    const merged = { ...b, qa: novasQa, _interview: { completo: false, pending: [] } };
-    const { error } = await supabase
-      .from("projects")
-      .update({ briefing: merged })
-      .eq("id", projectId);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    qaRef.current = novasQa;
-    setTurno((t) => t + 1);
     try {
-      await enqueueJob("entrevistar", {}, { project_id: projectId });
-    } catch (err) {
-      toast.error((err as Error).message);
+      const { data } = await supabase
+        .from("projects")
+        .select("briefing")
+        .eq("id", projectId)
+        .single();
+      const b: any = data?.briefing || {};
+      const merged = { ...b, qa: novasQa, _interview: { completo: false, pending: [] } };
+      const { error } = await supabase
+        .from("projects")
+        .update({ briefing: merged })
+        .eq("id", projectId);
+      if (error) {
+        toast.error(error.message);
+        setPensando(false);
+        return;
+      }
+      qaRef.current = novasQa;
+      setTurno((t) => t + 1);
+      await agendarEntrevista(projectId);
+    } finally {
+      setEnviando(false);
     }
   }
 
@@ -230,7 +272,20 @@ export default function NovoProjeto() {
         </p>
       </div>
 
-      {pensando || !pendentes.length ? (
+      {erroFluxo ? (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
+            <p className="text-sm text-destructive">{erroFluxo}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => projectId && agendarEntrevista(projectId)}
+            >
+              Tentar novamente
+            </Button>
+          </CardContent>
+        </Card>
+      ) : pensando || !pendentes.length ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
             <Loader2 className="h-7 w-7 animate-spin text-primary" />
@@ -302,7 +357,7 @@ export default function NovoProjeto() {
             <Button
               size="lg"
               onClick={responder}
-              disabled={pendentes.some((p) => !(respostas[p.campo] ?? "").trim())}
+              disabled={enviando || pendentes.some((p) => !(respostas[p.campo] ?? "").trim())}
             >
               <Sparkles className="h-4 w-4" />
               Responder e continuar

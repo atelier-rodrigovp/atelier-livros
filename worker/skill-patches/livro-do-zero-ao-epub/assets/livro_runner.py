@@ -219,12 +219,40 @@ def _marcador_revcap(projeto, n):
 
 def _marcador_revtry(projeto, n):
     # Fix C: bound da re-revisao dirigida. Existir = ja houve 1 passada em que a guarda
-    # deterministica reprovou (piso/tiques); a 2a passada aceita para nao travar o livro.
+    # deterministica reprovou (piso/tiques); se a 2a passada seguir reprovada, o runner
+    # BLOQUEIA (quality_status=blocked_quality, rc=3). Teto nunca aprova.
     return os.path.join(projeto, DIR_REVIEW, "_revcap-{:02d}.try".format(int(n)))
 
 
 def _quality_cap_path(projeto, n):
     return os.path.join(projeto, "quality", "capitulo-{:02d}.json".format(int(n)))
+
+
+def _parada_limpa_apos_cap(projeto, state, piso, args):
+    """Parada LIMPA por marcador: se <projeto>/_PARAR_APOS_CAP existir (conteudo =
+    N, default 1), o runner encerra com rc=0 assim que os N primeiros capitulos
+    estiverem validos E aceitos pelo micro-loop (marcador _revcap). rc=0 incompleto
+    faz o worker sincronizar Storage/banco e re-enfileirar — mesmo caminho do
+    limite do Max. Usado por execucoes controladas (auditoria) e por quem quiser
+    parar um livro no fim do capitulo atual sem matar o processo."""
+    marker = os.path.join(projeto, "_PARAR_APOS_CAP")
+    if not os.path.exists(marker):
+        return False
+    try:
+        with open(marker, "r", encoding="utf-8") as fh:
+            n = int((fh.read() or "1").strip() or "1")
+    except (OSError, ValueError):
+        n = 1
+    n = max(1, n)
+    total = _i(state.get("total_capitulos_previstos"))
+    if total and n > total:
+        n = total
+    validos = capitulos_validos(projeto, n, piso)
+    if len(validos) < n:
+        return False
+    if revisao_ligada(args):
+        return all(os.path.exists(_marcador_revcap(projeto, k)) for k in range(1, n + 1))
+    return True
 
 
 def _gravar_quality_cap(projeto, n, status="approved", blockers=None, stage="chapter"):
@@ -1488,7 +1516,8 @@ def _skill_projeto(projeto):
 # SPEC-DB2 — gate deterministico de SPEC por capitulo (skills EXIGENTES).
 # Espelha worker/src/exigencias-skill.ts (EXIGENCIAS_ESTRUTURAIS_POR_SKILL):
 # skill sem entrada = gate INERTE. Filosofia bounded: spec ausente/incompleta
-# vira UMA re-geracao dirigida (marcador .try); na 2a falha aceita com aviso alto.
+# vira UMA re-geracao dirigida (marcador .try); na 2a falha o runner BLOQUEIA
+# (quality_status=blocked_quality, stage=SPEC_CAPITULO, rc=3). Teto nunca aprova.
 # ----------------------------------------------------------------------------
 DIR_SPECS = "specs"
 EXIGE_SPEC_POR_SKILL = {
@@ -1935,6 +1964,15 @@ def executar(projeto, args):
         save_state(projeto, state)
         fase = state["fase_atual"]
 
+        # Parada limpa por marcador (_PARAR_APOS_CAP): encerra com rc=0 no fim do
+        # capitulo aceito, ANTES de iniciar o proximo — o worker sincroniza e
+        # re-enfileira (retomavel do disco). Nunca aprova nada: so para.
+        if fase == "ESCRITA" and _parada_limpa_apos_cap(projeto, state, piso, args):
+            log(projeto, "PARADA LIMPA por _PARAR_APOS_CAP: capitulo(s) aceito(s); "
+                         "encerrando rc=0 para o worker sincronizar e re-enfileirar.")
+            print("RUNNER_PARADA_LIMPA", flush=True)
+            return 0
+
         # Ao esgotar o teto, preserve o texto e exponha blockers. Nao avance para
         # EPUB/CONCLUIDO enquanto a pos-condicao book-wide continuar reprovada.
         if fase == "DESMANEIRISMO":
@@ -2095,8 +2133,8 @@ def executar(projeto, args):
         # Micro-loop: terminou a REVISAO do capitulo. GUARDA DETERMINISTICA (Fix C): o
         # runner (nao o LLM) confirma que o arquivo tem piso E que os tiques de cadencia
         # CAIRAM (ou ja estavam no orcamento) antes de marcar como aceito. Se nao, uma
-        # re-revisao dirigida (bounded: 1x via marcador .try); na 2a passada aceita para
-        # nao travar o livro (filosofia "bounded, nao bloqueia").
+        # re-revisao dirigida (bounded: 1x via marcador .try); se a 2a passada seguir
+        # reprovada, BLOQUEIA (blocked_quality, rc=3). Teto nunca aprova.
         if fase == "ESCRITA" and revisando_cap is not None:
             txt_rev = ler_arquivo(projeto, nome_cap(revisando_cap))
             palavras_rev = len((txt_rev or "").split())

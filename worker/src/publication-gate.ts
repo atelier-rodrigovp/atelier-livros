@@ -1,5 +1,41 @@
 import { isPublishableQuality, stateForCurrentText, type QualityBlocker, type QualityState } from "./quality-state.js";
 
+// ---------------------------------------------------------------------------
+// EPUB↔mestre por HASH (auditoria A17): o runner constrói o EPUB a partir do
+// mestre no disco. Registramos o par (mestre_sha256, epub_sha256) e, em
+// qualquer tentativa posterior de publicação, o EPUB só é coerente se o mestre
+// não mudou desde a construção. EPUB novo (hash inédito) renova o registro.
+// ---------------------------------------------------------------------------
+export interface EpubFonteRegistro {
+  mestre_sha256: string;
+  epub_sha256: string;
+  registrado_em: string;
+}
+
+export function verificarEpubFonte(
+  registro: EpubFonteRegistro | null,
+  mestreSha256: string,
+  epubSha256: string,
+  agora: () => string = () => new Date().toISOString(),
+): { coerente: boolean; novoRegistro: EpubFonteRegistro | null; motivo: string } {
+  if (registro && registro.epub_sha256 === epubSha256) {
+    const coerente = registro.mestre_sha256 === mestreSha256;
+    return {
+      coerente,
+      novoRegistro: null,
+      motivo: coerente
+        ? "EPUB corresponde ao mestre registrado na construção"
+        : "mestre mudou após a construção do EPUB (EPUB_STALE)",
+    };
+  }
+  // EPUB com hash inédito = recém-construído deste mestre neste run.
+  return {
+    coerente: true,
+    novoRegistro: { mestre_sha256: mestreSha256, epub_sha256: epubSha256, registrado_em: agora() },
+    motivo: "EPUB novo — registro de origem gravado",
+  };
+}
+
 export interface PublicationEvidence {
   chaptersExpected: number;
   chapters: Array<{ numero: number; text: string; quality: QualityState | null }>;

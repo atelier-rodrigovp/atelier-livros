@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { escolherProximo, normalizarMaxParalelo, type JobFila, type ProjInfo } from "./fila.js";
+import { escolherProximo, normalizarMaxParalelo, prioridadeEfetiva, type JobFila, type ProjInfo } from "./fila.js";
 
 const J = (id: string, project_id: string | null, created_at: string, retry_at?: string): JobFila =>
   ({ id, project_id, created_at, progresso: retry_at ? { retry_at } : null });
@@ -43,6 +43,30 @@ describe("escolherProximo — prioridade + pausa + concorrência", () => {
     const passado = new Date(AGORA - 60_000).toISOString();
     const r = escolherProximo([J("x", "p1", "2026-01-01", passado)], proj({ p1: { prioridade: 0, pausada: false } }), new Set(), AGORA);
     expect(r?.id).toBe("x");
+  });
+
+  it("ANTI-STARVATION: espera longa vence prioridade recém-criada (aging +1/24h)", () => {
+    // 'faminto' (prioridade 0) espera 3 dias; 'furao' (prioridade 2) acabou de entrar.
+    const cands = [
+      J("faminto", "p1", new Date(AGORA - 3 * 24 * 60 * 60_000).toISOString()),
+      J("furao", "p2", new Date(AGORA - 60_000).toISOString()),
+    ];
+    const r = escolherProximo(cands, proj({ p1: { prioridade: 0, pausada: false }, p2: { prioridade: 2, pausada: false } }), new Set(), AGORA);
+    expect(r?.id).toBe("faminto"); // 0+3 > 2+0
+  });
+
+  it("aging não inverte prioridade entre jobs igualmente novos", () => {
+    const cands = [
+      J("comum", "p1", new Date(AGORA - 60_000).toISOString()),
+      J("urgente", "p2", new Date(AGORA - 30_000).toISOString()),
+    ];
+    const r = escolherProximo(cands, proj({ p1: { prioridade: 0, pausada: false }, p2: { prioridade: 1, pausada: false } }), new Set(), AGORA);
+    expect(r?.id).toBe("urgente");
+  });
+
+  it("prioridadeEfetiva: sem created_at não ganha bônus", () => {
+    expect(prioridadeEfetiva(2, undefined, AGORA)).toBe(2);
+    expect(prioridadeEfetiva(0, new Date(AGORA - 25 * 60 * 60_000).toISOString(), AGORA)).toBe(1);
   });
 
   it("nada elegível → null", () => {

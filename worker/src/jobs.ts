@@ -26,7 +26,17 @@ import {
 } from "./lib.js";
 import { normalizarModelosAgentes } from "./modelos-agentes.js";
 import { normalizarVozRegra4 } from "./voz-regra4.js";
-import { normalizarCraftSkill, sinalConsistenciaVoz } from "./craft-skill.js";
+import { normalizarCraftSkill } from "./craft-skill.js";
+import {
+  avaliarFundacaoNoDisco,
+  diffFundacao,
+  hashesFundacaoNoDisco,
+  instalarAgentesDeStaging,
+  invalidarQualityCapitulos,
+  registrarConsistenciaVozNoDisco,
+  specsExistentes,
+  FUNDACAO_QUALITY_FILE,
+} from "./fundacao-gate.js";
 import { normalizarCraftNosAgentes } from "./craft-agentes.js";
 import { exigenciasParaSkill, normalizarExigenciasSkill } from "./exigencias-skill.js";
 import { normalizarLexicoPtbr } from "./lexico-ptbr.js";
@@ -39,11 +49,13 @@ import { comRetrySb } from "./retry.js";
 import { contarManeirismos, resumoManeirismo, diagnosticarRepeticao } from "./maneirismo.js";
 import { existsSync } from "node:fs";
 import { InfrastructureRetryError, QualityBlockedError } from "./job-errors.js";
-import { decidePublication } from "./publication-gate.js";
-import { applyQualityException, decideQualityState, type QualityState } from "./quality-state.js";
+import { decidePublication, verificarEpubFonte } from "./publication-gate.js";
+import { createHash } from "node:crypto";
+import { applyQualityException, decideQualityState, hashText, type QualityState } from "./quality-state.js";
 import { executePublicationTransaction, type PublicationFile } from "./publication-transaction.js";
 import { advanceEditionStatus, type EditionStatus } from "./state-machine.js";
 import { classifyRunnerOutcome } from "./runner-outcome.js";
+import { promptEntrevista, validarSaidaEntrevista } from "./entrevista.js";
 
 export interface Job {
   id: string;
@@ -379,57 +391,26 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
   const qa: any[] = Array.isArray(briefing.qa) ? briefing.qa : [];
   await hb?.({ fase: "ENTREVISTA", turnos: qa.length });
 
-  const qaText = qa.length
-    ? qa.map((x, i) => `${i + 1}. P: ${x.pergunta}\n   R: ${x.resposta}`).join("\n")
-    : "nenhuma";
-  const camposRespondidos = [...new Set(qa.map((x) => x.campo).filter(Boolean))];
-  const forcarConclusao = qa.length >= 12; // teto rígido: ~4 blocos
+  const forcarConclusao = qa.length >= 12; // teto rígido: ~4 blocos (encerra a AUTOMAÇÃO; nunca aprova sozinho)
   const outFile = path.join(dir, "entrevista-out.json");
   try { await rm(outFile); } catch {}
 
-  const prompt =
-    "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n" +
-    "Conduza a ENTREVISTA de fundação de um livro com a metodologia da skill `arquiteto-de-enredo` " +
-    "(entrevista em blocos, perguntas com opção recomendada; portão de qualidade antes de gerar).\n\n" +
-    `IDEIA DO AUTOR:\n${idea}\n\n` +
-    `RESPOSTAS ATÉ AGORA (${qa.length} no total):\n${qaText}\n\n` +
-    `CAMPOS JÁ RESPONDIDOS (NÃO pergunte nenhum destes de novo): ${camposRespondidos.join(", ") || "nenhum"}.\n` +
-    (forcarConclusao
-      ? "ATENÇÃO: já houve blocos demais — você DEVE CONCLUIR AGORA (completo:true), sem mais perguntas, " +
-        "usando o que tem e defaults sensatos para o que faltar.\n\n"
-      : "\n") +
-    "CAMPOS OBRIGATÓRIOS (não conclua sem ter PERGUNTADO cada um UMA vez — se já está em 'respondidos', considere coberto):\n" +
-    "  1) AUTOR (nome do autor, exatamente como deve aparecer na capa).\n" +
-    "  2) PÁGINAS-ALVO e nº de CAPÍTULOS.\n" +
-    "  3) SÉRIE: é livro único, TRILOGIA, ou SAGA de N livros? Se série, qual o NOME da série e QUANTOS livros (N), e qual o volume atual.\n" +
-    "  4) SKILL DE ESCRITA (metodologia), opções: skill-dan-brown, hoover-mcfadden, skill-jk-rowling, vesper-escritor-de-capitulos, skill-romantasy, Nenhuma.\n" +
-    "  5) Nº DE PERSONAGENS NOMEADOS por papel: quantos protagonista(s), antagonista(s) e personagens de APOIO.\n" +
-    "Verifique nas respostas acima quais já foram cobertos; só conclua quando os 4 estiverem respondidos.\n\n" +
-    "REGRA DE CONVERGÊNCIA: entrevista CURTA, no máximo 4 blocos. Priorize os campos obrigatórios e os " +
-    "essenciais de enredo. Fora dos obrigatórios, adote defaults sensatos para o que faltar (registre como suposição).\n\n" +
-    "SUA TAREFA (UMA rodada):\n" +
-    "- Se ainda falta QUALQUER campo obrigatório OU informação essencial (e você não atingiu 4 blocos), gere o PRÓXIMO BLOCO de NO MÁXIMO 3 perguntas " +
-    "(priorize os obrigatórios que ainda faltam). Cubra também ao longo dos blocos: gênero/subgênero; protagonista (ferida, segredo, desejo ativo); " +
-    "antagonista; tom/PdV/tempo verbal; meta de palavras; final; cânone/proibições/idioma.\n" +
-    "- Cada pergunta tem: campo (id curto), pergunta, 2–4 opções, UMA 'recomendada' e 'porque' (1 frase). " +
-    "Para AUTOR, faça pergunta de RESPOSTA LIVRE (opcoes:[] e recomendada:'') — o autor digita o nome; não force opções nem re-pergunte. " +
-    "Para SÉRIE use opções como: 'Livro único', 'Trilogia (3 livros)', 'Saga (4+ livros)'. Para skill de escrita use as 5 opções acima.\n" +
-    "- Só CONCLUA quando os 4 obrigatórios estiverem respondidos.\n\n" +
-    "SAÍDA: grave APENAS o arquivo entrevista-out.json, exatamente em UMA destas formas:\n" +
-    'CONTINUAR: {"completo": false, "perguntas": [{"campo":"genero","pergunta":"...","opcoes":["A","B"],"recomendada":"A","porque":"...","multipla":false}]}\n' +
-    'CONCLUIR: {"completo": true, "briefing": {"ideia_central":"...","genero":"...","autor":"...","serie":<"Nome da série"|null>,"serie_total":<int,1 se único>,"volume":<int>,"protagonista":{"nome":"...","ferida":"...","segredo":"...","desejo":"..."},"antagonista":"...","personagens":{"protagonistas":1,"antagonistas":1,"apoio":4},"tom":"...","pdv":"...","tempo_verbal":"...","num_capitulos":12,"paginas_alvo":200,"meta_palavras":60000,"linha_tempo":"...","final":"...","canone":"...","proibido":"...","skill_escrita":<"..."|null>,"piso_palavras":1400,"meta_nota":9.0,"idioma":"pt-BR"}}\n' +
-    "NÃO escreva nada além do JSON nesse arquivo. NÃO rode /goal nem gere a fundação agora.";
+  const prompt = promptEntrevista({ idea, qa, forcarConclusao });
   const r = await runClaude(prompt, dir);
 
   const raw = await readText(outFile);
   if (!raw) throw new Error("entrevista sem saída (entrevista-out.json). rc=" + r.code + " " + r.err.slice(-300));
-  let out: any;
-  try { out = JSON.parse(raw); } catch { const m = raw.match(/\{[\s\S]*\}/); out = m ? JSON.parse(m[0]) : null; }
-  if (!out) throw new Error("entrevista-out.json inválido");
 
-  if (out.completo && out.briefing) {
-    const b = out.briefing;
-    const merged = { ...b, idea, qa, _interview: { completo: true } };
+  // Contrato determinístico: a saída do agente nunca atualiza o projeto sem validação.
+  const resultado = validarSaidaEntrevista(raw, qa);
+
+  if (resultado.tipo === "invalido") {
+    throw new Error("entrevista-out.json reprovado no contrato: " + resultado.erros.join("; "));
+  }
+
+  if (resultado.tipo === "concluir") {
+    const b = resultado.briefing;
+    const merged = { ...b, idea, qa, _interview: { completo: true, avisos: resultado.avisos } };
     await must(
       sb.from("projects").update({
         briefing: merged,
@@ -448,11 +429,55 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
     await must(sb.from("jobs").insert({ owner: OWNER, tipo: "criar_fundacao", project_id: job.project_id }));
     await setProgress(job.id, { fase: "ENTREVISTA", completo: true });
   } else {
-    const perguntas = Array.isArray(out.perguntas) ? out.perguntas : [];
-    const merged = { ...briefing, idea, qa, _interview: { completo: false, pending: perguntas } };
+    const perguntas = resultado.perguntas;
+    const merged = { ...briefing, idea, qa, _interview: { completo: false, pending: perguntas, avisos: resultado.avisos } };
     await must(sb.from("projects").update({ briefing: merged }).eq("owner", OWNER).eq("id", job.project_id!));
     await setProgress(job.id, { fase: "ENTREVISTA", perguntas: perguntas.length });
   }
+}
+
+// ===========================================================================
+// Normalizadores determinísticos da fundação — sequência ÚNICA e idempotente,
+// usada por criar_fundacao, refinar_fundacao e pelo preflight de escrever_livro
+// (garante que refino/retomada nunca percam craft, voz, cota e exigências).
+// ===========================================================================
+async function aplicarNormalizadoresFundacao(dir: string, skill: string | null | undefined) {
+  // Agentes gerados em staging (sessão headless com `.claude/` bloqueado)
+  // são instalados deterministicamente antes de qualquer normalizador.
+  for (const a of await instalarAgentesDeStaging(dir))
+    console.log(`[agentes] instalado de _agentes-para-instalar: ${a}`);
+  // Pina o MODELO POR PAPEL dos agentes (o arquiteto os emite por prosa,
+  // então o model: vinha não-determinístico — editor às vezes opus).
+  for (const a of await normalizarModelosAgentes(path.join(dir, ".claude", "agents")))
+    console.log(`[modelos] ${a.agente}: ${a.de ?? "(sem model)"} -> ${a.para}${a.mudou ? " [corrigido]" : ""}`);
+  // Cota de cadência (Regra 4) + guarda dos parágrafos-modelo no perfil/Estrutura.
+  for (const v of await normalizarVozRegra4(dir)) {
+    if (v.mudou) console.log(`[voz] Regra 4 / guarda injetada em ${v.arquivo}`);
+    if (v.aviso) console.warn(`[voz] AVISO ${v.arquivo}: ${v.aviso}`);
+  }
+  // Léxico pt-BR (anti-contaminação de português de Portugal — FASE -1).
+  { const l = await normalizarLexicoPtbr(dir); if (l.mudou) console.log(`[voz] léxico pt-BR injetado em ${l.arquivo}`); }
+  // Resumo de craft da skill no perfil (motor + regras como alvo positivo).
+  {
+    const c = await normalizarCraftSkill(dir, skill);
+    if (c.mudou) console.log(`[craft] resumo da skill '${c.skill}' injetado no perfil-de-voz.md`);
+    else if (!c.reconhecida && skill) console.warn(`[craft] skill '${skill}' sem bloco de craft — perfil segue sem resumo`);
+  }
+  // Escritor lê a craft direto + revisor reprova "competente e chato".
+  {
+    const a = await normalizarCraftNosAgentes(path.join(dir, ".claude", "agents"));
+    if (a.escritor) console.log("[craft] livro-escritor: leitura de craft por capítulo injetada");
+    if (a.revisor) console.log("[craft] livro-revisor: veredito de propulsão injetado");
+  }
+  // Exigências estruturais por skill (rotação de fios, spec completa, dossiê).
+  for (const e of await normalizarExigenciasSkill(dir, skill)) {
+    if (e.mudou) console.log(`[exigencias] ${e.arquivo}: bloco injetado`);
+    if (e.aviso) console.warn(`[exigencias] AVISO ${e.arquivo}: ${e.aviso}`);
+  }
+  // Consistência de voz IDEMPOTENTE: craft comprovada ⇒ alinhamento auditável
+  // gravado na Bíblia; divergência autoral existente é preservada.
+  const v = await registrarConsistenciaVozNoDisco(dir, skill);
+  console.log(`[voz-consistencia] ${v.motivo}`);
 }
 
 // ===========================================================================
@@ -502,61 +527,51 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
     );
   }
 
-  // Pina o MODELO POR PAPEL dos 5 agentes recém-gerados (o arquiteto os emite por
-  // prosa, então o model: vinha não-determinístico — editor às vezes opus). Determinístico.
-  const ajustes = await normalizarModelosAgentes(path.join(dir, ".claude", "agents"));
-  for (const a of ajustes) console.log(`[modelos] ${a.agente}: ${a.de ?? "(sem model)"} -> ${a.para}${a.mudou ? " [corrigido]" : ""}`);
-  // Garante a COTA DE CADÊNCIA (Regra 4) + a guarda dos parágrafos-modelo no
-  // perfil-de-voz.md + Estrutura (o arquiteto não as emite por padrão). Idempotente.
-  for (const v of await normalizarVozRegra4(dir)) {
-    if (v.mudou) console.log(`[voz] Regra 4 / guarda injetada em ${v.arquivo}`);
-    if (v.aviso) console.warn(`[voz] AVISO ${v.arquivo}: ${v.aviso}`);
-  }
-  // Léxico pt-BR (anti-contaminação de português de Portugal — FASE -1). Idempotente.
-  { const l = await normalizarLexicoPtbr(dir); if (l.mudou) console.log(`[voz] léxico pt-BR injetado em ${l.arquivo}`); }
-  // Injeta o RESUMO DE CRAFT da skill no perfil (motor + regras) — fecha a corrente
-  // skill→fundação→escritor de forma determinística (não confia só na paráfrase do LLM).
-  {
-    const c = await normalizarCraftSkill(dir, proj.skill_escrita);
-    if (c.mudou) console.log(`[craft] resumo da skill '${c.skill}' injetado no perfil-de-voz.md`);
-    else if (!c.reconhecida && proj.skill_escrita) console.warn(`[craft] skill '${proj.skill_escrita}' sem bloco de craft — perfil segue sem resumo`);
-  }
-  // Consistência de voz (genérico p/ QUALQUER skill_escrita): sinaliza — não bloqueia — se a
-  // Bíblia não registrou o veredito de alinhamento/divergência vs o registro da skill.
-  {
-    const bib = await readFile(path.join(dir, "Biblia-da-Obra.md"), "utf8").catch(() => "");
-    const s = sinalConsistenciaVoz(bib, proj.skill_escrita);
-    if (s.precisaRegistrar) console.warn(`[voz-consistencia] AVISO: ${s.aviso}`);
-  }
-  // Conserta os AGENTES gerados: escritor lê a craft (não o digest p/ voz) + revisor
-  // reprova "competente e chato" (veredito de propulsão). Idempotente.
-  {
-    const a = await normalizarCraftNosAgentes(path.join(dir, ".claude", "agents"));
-    if (a.escritor) console.log("[craft] livro-escritor: leitura de craft por capítulo injetada");
-    if (a.revisor) console.log("[craft] livro-revisor: veredito de propulsão injetado");
-  }
-  // Exigências estruturais por skill (rotação de fios, spec completa no editor,
-  // fato-vs-dossiê no revisor) — no-op para skill sem entrada. Idempotente.
-  for (const e of await normalizarExigenciasSkill(dir, proj.skill_escrita)) {
-    if (e.mudou) console.log(`[exigencias] ${e.arquivo}: bloco injetado`);
-    if (e.aviso) console.warn(`[exigencias] AVISO ${e.arquivo}: ${e.aviso}`);
-  }
+  // Normalizadores determinísticos da fundação (sequência única, idempotente —
+  // a MESMA usada por refinar_fundacao e pelo preflight de escrever_livro).
+  await aplicarNormalizadoresFundacao(dir, proj.skill_escrita);
 
-  // Sync: sobe a fundação ao Storage
+  // GATE DA FUNDAÇÃO: presença + parseabilidade + coerência cruzada + craft +
+  // voz. Grava Quality State vinculado aos hashes (quality/fundacao.quality.json).
+  const gate = await avaliarFundacaoNoDisco(dir, {
+    skill: proj.skill_escrita ?? null,
+    protagonistaNome: proj.briefing?.protagonista?.nome ?? null,
+  });
+  for (const w of gate.state.warnings) console.warn(`[fundacao] AVISO: ${w}`);
+
+  // Sync: sobe a fundação (e o Quality State dela) ao Storage
   for (const f of ["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md", "ESTADO_LIVRO.json", "briefing.md"]) {
     if (await exists(path.join(dir, f))) {
       await uploadFile("manuscritos", storageKey(job.project_id!, "fundacao", f), path.join(dir, f));
     }
   }
+  if (await exists(path.join(dir, FUNDACAO_QUALITY_FILE))) {
+    await uploadFile("manuscritos", storageKey(job.project_id!, "fundacao", "fundacao.quality.json"), path.join(dir, FUNDACAO_QUALITY_FILE));
+  }
 
-  // Edição de origem + status do projeto
+  if (gate.state.status !== "approved") {
+    // Artefatos ficam no disco/Storage para refino; o projeto NÃO vira 'fundacao'.
+    throw new QualityBlockedError(
+      "GATE_FUNDACAO",
+      gate.state.blockers.map((b) => b.code),
+      "fundação reprovada no gate de qualidade — corrija via refinar_fundacao ou decisão autoral"
+    );
+  }
+
+  // Edição de origem + status do projeto. Projeto EFÊMERO de auditoria
+  // (título AUDIT-*) nunca perde a marcação — o título gerado vira sufixo
+  // (a limpeza e as guardas do harness dependem do prefixo).
+  let tituloFinal = state?.titulo || proj.titulo;
+  if (typeof proj.titulo === "string" && proj.titulo.startsWith("AUDIT-") && !String(tituloFinal).startsWith("AUDIT-")) {
+    tituloFinal = `${proj.titulo.split(" — ")[0]} — ${tituloFinal}`;
+  }
   await ensureEdition(job.project_id!, proj.idioma_origem || "pt-BR", true, "pendente");
   await must(
     sb
       .from("projects")
       .update({
         status: "fundacao",
-        titulo: state?.titulo || proj.titulo,
+        titulo: tituloFinal,
         total_capitulos: total,
         paginas_alvo: state?.paginas_alvo ?? proj.paginas_alvo,
       })
@@ -580,6 +595,10 @@ async function refinarFundacao(job: Job, hb?: Heartbeat) {
   await setProgress(job.id, { fase: "REFINO", etapa: "ajustando fundação" });
   await hb?.({ fase: "REFINO" });
 
+  // Snapshot ANTES do refino: base do diff verificável apresentado ao autor
+  // e da invalidação de aprovações dependentes (F-07).
+  const hashesAntes = await hashesFundacaoNoDisco(dir);
+
   const prompt =
     "Modo headless. Trabalhe SOMENTE nesta pasta de projeto. Use a metodologia da skill `arquiteto-de-enredo`.\n" +
     "REFINE a fundação EXISTENTE (não recomece do zero; preserve o que está bom) aplicando as instruções do autor abaixo.\n\n" +
@@ -598,13 +617,77 @@ async function refinarFundacao(job: Job, hb?: Heartbeat) {
   const total = Number(state?.total_capitulos_previstos ?? proj.total_capitulos ?? 0);
   if (!okBiblia || !okEstrutura) throw new Error(`refino falhou (docs ausentes). rc=${r.code} ${r.err.slice(-300)}`);
 
+  // Re-executa os MESMOS normalizadores da criação: refino não pode perder
+  // craft, voz, cota de cadência nem exigências da skill (F-07).
+  await aplicarNormalizadoresFundacao(dir, proj.skill_escrita);
+
+  // Diff verificável + invalidação: fundação mudou ⇒ aprovações de capítulo
+  // ficam stale e as specs existentes são listadas como afetadas.
+  const hashesDepois = await hashesFundacaoNoDisco(dir);
+  const alterados = diffFundacao(hashesAntes, hashesDepois);
+  let capsInvalidados: string[] = [];
+  let specsAfetadas: string[] = [];
+  if (alterados.length) {
+    capsInvalidados = await invalidarQualityCapitulos(
+      dir,
+      `refino alterou a fundação (${alterados.join(", ")})`
+    );
+    if (alterados.includes("Estrutura-do-Livro.md")) specsAfetadas = await specsExistentes(dir);
+    await mkdir(path.join(dir, "estado"), { recursive: true });
+    await writeFile(
+      path.join(dir, "estado", "refino-impacto.json"),
+      JSON.stringify(
+        {
+          em: new Date().toISOString(),
+          instrucoes,
+          arquivos_alterados: alterados,
+          capitulos_invalidados: capsInvalidados,
+          specs_afetadas: specsAfetadas,
+          acao_necessaria:
+            capsInvalidados.length || specsAfetadas.length
+              ? "reexecutar gates dos capítulos afetados e revalidar specs contra a Estrutura atual"
+              : null,
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+  }
+
+  // Reavalia o gate da fundação: o Quality State anterior pertence a outros hashes.
+  const gate = await avaliarFundacaoNoDisco(dir, {
+    skill: proj.skill_escrita ?? null,
+    protagonistaNome: proj.briefing?.protagonista?.nome ?? null,
+  });
+  for (const w of gate.state.warnings) console.warn(`[fundacao] AVISO: ${w}`);
+
   for (const f of ["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md", "ESTADO_LIVRO.json"]) {
     if (await exists(path.join(dir, f))) {
       await uploadFile("manuscritos", storageKey(job.project_id!, "fundacao", f), path.join(dir, f));
     }
   }
+  if (await exists(path.join(dir, FUNDACAO_QUALITY_FILE))) {
+    await uploadFile("manuscritos", storageKey(job.project_id!, "fundacao", "fundacao.quality.json"), path.join(dir, FUNDACAO_QUALITY_FILE));
+  }
+
+  if (gate.state.status !== "approved") {
+    throw new QualityBlockedError(
+      "GATE_FUNDACAO",
+      gate.state.blockers.map((b) => b.code),
+      "refino deixou a fundação reprovada no gate — novo refino ou decisão autoral necessários"
+    );
+  }
+
   if (total > 0) await must(sb.from("projects").update({ total_capitulos: total }).eq("owner", OWNER).eq("id", job.project_id!));
-  await setProgress(job.id, { fase: "REFINO", concluido: true, total_capitulos: total });
+  await setProgress(job.id, {
+    fase: "REFINO",
+    concluido: true,
+    total_capitulos: total,
+    arquivos_alterados: alterados,
+    capitulos_invalidados: capsInvalidados.length,
+    specs_afetadas: specsAfetadas.length,
+  });
 }
 
 // ===========================================================================
@@ -751,47 +834,39 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
 
   // Preflight: skill de escrita precisa existir — falha alto, sem fallback silencioso.
   assertSkillInstalada(proj.skill_escrita);
-  // Pina o MODELO POR PAPEL dos agentes (editor=haiku etc.) antes de escrever:
-  // corrige projetos vivos cujos agentes nasceram com model: errado/herdado. Idempotente.
-  for (const a of await normalizarModelosAgentes(path.join(dir, ".claude", "agents")))
-    if (a.mudou) console.log(`[modelos] ${a.agente}: ${a.de ?? "(sem model)"} -> ${a.para}`);
-  // Garante a cota de cadência (Regra 4) + guarda dos modelos na fundação antes de
-  // escrever (idempotente): corrige projetos vivos e sinaliza muleta nos modelos.
-  for (const v of await normalizarVozRegra4(dir)) {
-    if (v.mudou) console.log(`[voz] Regra 4 / guarda injetada em ${v.arquivo}`);
-    if (v.aviso) console.warn(`[voz] AVISO ${v.arquivo}: ${v.aviso}`);
-  }
-  // Léxico pt-BR (anti-contaminação de português de Portugal — FASE -1). Idempotente.
-  { const l = await normalizarLexicoPtbr(dir); if (l.mudou) console.log(`[voz] léxico pt-BR injetado em ${l.arquivo}`); }
-  // Garante o resumo de craft da skill no perfil (corrige projetos vivos: do próximo
-  // capítulo em diante o escritor escreve com o DNA da skill). Idempotente.
-  {
-    const c = await normalizarCraftSkill(dir, proj.skill_escrita);
-    if (c.mudou) console.log(`[craft] resumo da skill '${c.skill}' injetado no perfil-de-voz.md`);
-  }
-  // Consistência de voz (genérico p/ QUALQUER skill_escrita) — sinaliza, não bloqueia.
-  {
-    const bib = await readFile(path.join(dir, "Biblia-da-Obra.md"), "utf8").catch(() => "");
-    const s = sinalConsistenciaVoz(bib, proj.skill_escrita);
-    if (s.precisaRegistrar) console.warn(`[voz-consistencia] AVISO: ${s.aviso}`);
-  }
-  // Conserta os agentes gerados (escritor lê craft / revisor cobra propulsão) antes de
-  // escrever — projetos vivos passam a escrever da craft do próximo capítulo em diante.
-  {
-    const a = await normalizarCraftNosAgentes(path.join(dir, ".claude", "agents"));
-    if (a.escritor) console.log("[craft] livro-escritor: leitura de craft por capítulo injetada");
-    if (a.revisor) console.log("[craft] livro-revisor: veredito de propulsão injetado");
-  }
-  // Exigências estruturais por skill (rotação/spec completa/dossiê) — projetos vivos
-  // ganham a fiação do próximo capítulo em diante; no-op p/ skill sem entrada.
-  for (const e of await normalizarExigenciasSkill(dir, proj.skill_escrita)) {
-    if (e.mudou) console.log(`[exigencias] ${e.arquivo}: bloco injetado`);
-    if (e.aviso) console.warn(`[exigencias] AVISO ${e.arquivo}: ${e.aviso}`);
-  }
+  // Normalizadores determinísticos (sequência única, idempotente): corrige projetos
+  // vivos — do próximo capítulo em diante o escritor escreve com o DNA da skill.
+  await aplicarNormalizadoresFundacao(dir, proj.skill_escrita);
   // Pré-passe: limpa meta-texto já no disco antes do runner remontar manuscrito/EPUB.
   await sanitizarPastaCapitulos(path.join(dir, "manuscrito"));
 
   const piso = Number(proj.piso_palavras ?? 1400);
+
+  // GATE DA FUNDAÇÃO no preflight: escrever NÃO começa só porque o status é
+  // 'fundacao'. Início de escrita (0 capítulos no piso) exige gate aprovado.
+  // Retomada de livro em andamento não é brickada: o estado é gravado e o
+  // aviso fica alto — a publicação continua protegida pelo gate final.
+  {
+    const gate = await avaliarFundacaoNoDisco(dir, {
+      skill: proj.skill_escrita ?? null,
+      protagonistaNome: proj.briefing?.protagonista?.nome ?? null,
+    });
+    if (gate.state.status !== "approved") {
+      const codes = gate.state.blockers.map((b) => b.code);
+      const capsExistentes = (await chaptersOnDisk(path.join(dir, "manuscrito"), piso)).length;
+      if (capsExistentes === 0) {
+        throw new QualityBlockedError(
+          "GATE_FUNDACAO",
+          codes,
+          "escrita não inicia com fundação reprovada — corrija a fundação (refinar_fundacao) ou registre decisão autoral"
+        );
+      }
+      console.warn(
+        `[fundacao] AVISO: retomada com fundação reprovada no gate (${codes.join(", ")}) — ` +
+          `livro em andamento (${capsExistentes} caps) continua; resolver antes de publicar`
+      );
+    }
+  }
   const meta = Number(proj.meta_nota ?? 9.0);
   // Teto de reescritas por execução do runner. Mais passadas perseguem melhor a
   // meta; com a auto-retomada do Max, não custam tempo. Configurável por projeto
@@ -849,6 +924,14 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // payload.sem_revisao_por_capitulo → desliga.
   if (process.env.REVISAO_POR_CAPITULO === "0" || job.payload?.sem_revisao_por_capitulo) {
     args.push("--sem-revisao-por-capitulo");
+    // Redução de qualidade REGISTRADA (não silenciosa): rótulo no progresso do
+    // job + log alto. A publicação segue protegida pelo DESMANEIRISMO book-wide
+    // e pelo gate final (aprovações por hash continuam obrigatórias).
+    console.warn(
+      "[qualidade] REDUÇÃO ATIVA: micro-loop revisor/editor por capítulo DESLIGADO " +
+        `(${job.payload?.sem_revisao_por_capitulo ? "payload do job" : "env REVISAO_POR_CAPITULO=0"}).`
+    );
+    await setProgress(job.id, { reducao_qualidade: "sem_revisao_por_capitulo", continua: true });
   }
   // Opcional (default off, custo Max): eleva o veredito de propulsão do revisor a opus.
   if (process.env.REVISOR_CRAFT_OPUS === "1" || job.payload?.revisor_craft_opus) {
@@ -986,13 +1069,28 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   const mestreText = await readText(mestre);
   const epubRel = state?.epub_caminho;
   const epubPath = epubRel ? path.join(dir, epubRel) : "";
+  // EPUB↔mestre por hash (A17): mestre alterado após a construção ⇒ EPUB_STALE.
+  let epubCoerenteComMestre = false;
+  if (epubPath && (await exists(epubPath))) {
+    const epubSha = createHash("sha256").update(await readFile(epubPath)).digest("hex");
+    const fontePath = path.join(dir, "quality", "epub-fonte.json");
+    let registro = null;
+    try { registro = JSON.parse(await readFile(fontePath, "utf8")); } catch { /* primeiro registro */ }
+    const v = verificarEpubFonte(registro, hashText(mestreText), epubSha);
+    if (v.novoRegistro) {
+      await mkdir(path.join(dir, "quality"), { recursive: true });
+      await writeFile(fontePath, JSON.stringify(v.novoRegistro, null, 2) + "\n", "utf8");
+    }
+    epubCoerenteComMestre = v.coerente;
+    if (!v.coerente) console.warn(`[epub] ${v.motivo}`);
+  }
   const decision = decidePublication({
     chaptersExpected: total,
     chapters: await Promise.all(caps.map(async (c) => ({ numero: c.numero, text: await readText(c.file), quality: qualityStates.get(c.numero) ?? null }))),
     manuscriptText: mestreText,
     manuscriptMatchesChapters: (await Promise.all(caps.map(async (c) => mestreText.includes((await readText(c.file)).trim())))).every(Boolean),
     epubPresent: Boolean(epubPath && await exists(epubPath)),
-    epubMatchesManifest: Boolean(state?.epub_gerado && epubPath && await exists(epubPath)),
+    epubMatchesManifest: Boolean(state?.epub_gerado) && epubCoerenteComMestre,
     metaTextFree: true,
     continuityValid: [...qualityStates.values()].every((q) => q?.status === "approved" || q?.status === "approved_with_exception"),
     skillManifestValid: true, // o processo só inicia após preflight de hashes em index.ts

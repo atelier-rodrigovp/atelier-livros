@@ -8,6 +8,7 @@ import { escolherProximo, normalizarMaxParalelo, type ProjInfo } from "./fila.js
 import { aguardarConexao } from "./espera-conexao.js";
 import { comRetrySb, ehErroDeRede } from "./retry.js";
 import { instalarTimestampsISO } from "./log-iso.js";
+import { recuperarOrfaos as recuperarOrfaosCore } from "./orfaos.js";
 import { InfrastructureBlockedError, InfrastructureRetryError, QualityBlockedError } from "./job-errors.js";
 import { decideInfrastructureRetry, type InfrastructureRetryState } from "./retry-policy.js";
 import { verifySkillManifest, type SkillManifest } from "./skill-manifest.js";
@@ -121,14 +122,9 @@ async function recuperarLimiteMax() {
 }
 
 // Recupera jobs 'running' órfãos (worker caiu) -> volta para 'queued'.
+// Lógica em ./orfaos.ts (testável com cliente injetado).
 async function recuperarOrfaos() {
-  const limite = new Date(Date.now() - STALE_MIN * 60_000).toISOString();
-  await sb
-    .from("jobs")
-    .update({ status: "queued", locked_by: null, locked_at: null })
-    .eq("owner", OWNER)
-    .eq("status", "running")
-    .lt("locked_at", limite);
+  await recuperarOrfaosCore(sb, OWNER, STALE_MIN);
 }
 
 // Flag de controle global (a web liga/pausa TODO o processamento). Default: ativo.
