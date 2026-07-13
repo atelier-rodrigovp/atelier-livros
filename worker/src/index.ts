@@ -10,7 +10,7 @@ import { comRetrySb, ehErroDeRede } from "./retry.js";
 import { instalarTimestampsISO } from "./log-iso.js";
 import { recuperarOrfaos as recuperarOrfaosCore } from "./orfaos.js";
 import { InfrastructureBlockedError, InfrastructureRetryError, QualityBlockedError } from "./job-errors.js";
-import { decideInfrastructureRetry, type InfrastructureRetryState } from "./retry-policy.js";
+import { decideInfrastructureRetry, registrarErroRepetido, type ErroRepetidoEstado, type InfrastructureRetryState } from "./retry-policy.js";
 import { verifySkillManifest, type SkillManifest } from "./skill-manifest.js";
 import manifest from "../skill-patches/manifest.json";
 import path from "node:path";
@@ -314,7 +314,28 @@ async function processarJob(job: Job) {
         ? String((e as InfrastructureRetryError).dependency)
         : "supabase-network";
       const { data: cur } = await sb.from("jobs").select("progresso").eq("owner", OWNER).eq("id", job.id).single();
-      const anterior = ((cur?.progresso as Record<string, unknown>)?.infrastructure_retry ?? null) as InfrastructureRetryState | null;
+      const progressoAtual = (cur?.progresso as Record<string, unknown>) ?? {};
+      // H6: erro DETERMINÍSTICO idêntico N vezes seguidas não recicla retries —
+      // para com mensagem legível (o breaker por janela não pega bug estável).
+      const rep = registrarErroRepetido(progressoAtual as ErroRepetidoEstado, String(e?.message ?? e));
+      if (rep.bloquear) {
+        await finalizar(job.id, {
+          status: "paused",
+          erro: rep.motivo,
+          progresso: {
+            ...progressoAtual,
+            ...rep.estado,
+            quality_status: "blocked_infrastructure",
+            motivo: rep.motivo,
+            resumo: "Bloqueado: erro determinístico repetido",
+          },
+          locked_by: null,
+          locked_at: null,
+        });
+        console.error(`[job ${job.id}] ${rep.motivo}`);
+        return;
+      }
+      const anterior = (progressoAtual.infrastructure_retry ?? null) as InfrastructureRetryState | null;
       const decisao = decideInfrastructureRetry(anterior, dependency);
       if (decisao.action === "blocked") {
         await finalizar(job.id, {
@@ -334,7 +355,8 @@ async function processarJob(job: Job) {
         return;
       }
       const progresso = {
-        ...((cur?.progresso as Record<string, unknown>) ?? {}),
+        ...progressoAtual,
+        ...rep.estado, // H6: contagem de erro idêntico persiste entre retries
         aguardando_reset: false,
         retry_at: decisao.retryAt,
         infrastructure_retry: decisao.state,

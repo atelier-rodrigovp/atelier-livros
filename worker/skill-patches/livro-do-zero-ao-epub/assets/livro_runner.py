@@ -641,6 +641,18 @@ def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
     # cobrar por NUMERO, nao por impressao.
     txt_cap = ler_arquivo(projeto, nome_cap(n))
     cads = cadencia_acima(txt_cap, _skill_projeto(projeto))
+    # H3: pendencias cirurgicas herdadas do gate de maneirismo (frases exatas) —
+    # o revisor as recebe como itens OBRIGATORIOS; a guarda de aceitacao reconta.
+    bloco_gate = ""
+    try:
+        with open(_gate_pendencias_path(projeto, n), "r", encoding="utf-8") as fh:
+            _pend = json.load(fh).get("pendencias", [])
+        if _pend:
+            bloco_gate = ("PENDENCIAS DO GATE DE MANEIRISMO (obrigatorias — frases exatas; a "
+                          "guarda de aceitacao RECONTA e reprova se persistirem): " +
+                          " || ".join(_pend[:8]) + ". ")
+    except (OSError, ValueError):
+        pass
     if cads:
         bloco_cad = ("contagem REAL deste capitulo, ACIMA do orcamento -> exija que o "
                      "editor VARIE O RITMO (funda frases curtas coladas, encadeie na "
@@ -680,7 +692,7 @@ def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
         "conformidade + o VEREDITO DE PROPULSAO ('isto esta vivo?') que voce ja conhece "
         "(fair-play, cota de tiques, info-dump, interioridade-com-custo, relogio, "
         "coincidencia, nao-reexposicao, corte-no-pico, exposicao dramatizada). Some a isso "
-        "a EVIDENCIA REAL deste capitulo (contagens do detector, NAO recompute): {bloco_cad} "
+        "a EVIDENCIA REAL deste capitulo (contagens do detector, NAO recompute): {bloco_gate}{bloco_cad} "
         "{bloco_inter} {bloco_prop}{bloco_beats}"
         "Devolva uma LISTA de ate {maxed} EDICOES PONTUAIS (trecho -> correcao) que INJETAM "
         "propulsao (dramatize, corte no pico, encadeie a caca as pistas) e VARIAM o ritmo "
@@ -696,8 +708,8 @@ def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
         "{bloco_spec_proativa}"
         "{n_passo_final}) Encerre. NAO gere a critica nem a prosa na SUA sessao - so dispare os "
         "Tasks acima e confirme que {arq} foi regravado.\n"
-    ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_cad=bloco_cad, bloco_inter=bloco_inter,
-             bloco_prop=bloco_prop, bloco_beats=_beats_recentes(projeto, n),
+    ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_gate=bloco_gate, bloco_cad=bloco_cad,
+             bloco_inter=bloco_inter, bloco_prop=bloco_prop, bloco_beats=_beats_recentes(projeto, n),
              bloco_spec_proativa=bloco_spec_proativa, n_passo_final=n_passo_final)
 
 
@@ -1441,12 +1453,20 @@ def _exposicao_pos_revelacao(texto_atual, houve_antes):
 def _editorial_pos_aceite(projeto, cap):
     """Roda APOS aceitar o capitulo: atualiza estado-editorial. FASE 3 (Novelty loops) +
     FASE 4 (source_reveal_streak) + FASE 5 (exposition_risk pos-revelacao, sinaliza)."""
+    # H5 (auditoria de convergencia): spec ausente/incompleta NAO pode virar
+    # no-op silencioso — atualiza o que nao depende da spec e AVISA alto.
     try:
         with open(_spec_path(projeto, cap), "r", encoding="utf-8") as fh:
             sp = fh.read()
     except OSError:
-        return
+        sp = ""
+        log(projeto, "AVISO (estado-editorial): spec do cap {} ausente — atualizacao "
+                     "editorial PARCIAL (novidade/modo/beat ficam sem registro).".format(cap))
     ed = load_estado_editorial(projeto)
+    faltando = [c for c in ("Novidade", "Modo", "Beat central") if sp and not _campo_spec(sp, c)]
+    if faltando:
+        log(projeto, "AVISO (estado-editorial): spec do cap {} sem campo(s) {} — "
+                     "motif/novelty/streak ficam parciais.".format(cap, ", ".join(faltando)))
     nov = _campo_spec(sp, "Novidade")
     if nov:
         ed = _processar_novidade(ed, nov)
@@ -1803,47 +1823,96 @@ def _ocorrencias_exatas(txt, nomes_estourados):
     return out
 
 
-def gate_maneirismo_capitulo(projeto, n, args):
-    """Depois de escrever o capitulo n: se algum molde/muleta/CADENCIA estourou o
-    orcamento, dispara UMA reescrita-alvo (bounded: 0 ou 1 por escrita, nao bloqueia
-    o avanco do livro). Nomeia as linhas/moldes/tiques de ritmo ofensores."""
-    txt = ler_arquivo(projeto, nome_cap(n))
-    if not txt:
-        return
+def _gate_pendencias_path(projeto, n):
+    return os.path.join(projeto, DIR_REVIEW, "_gate-pendencias-{:02d}.json".format(int(n)))
+
+
+def _recontagem_cap(projeto, n, txt=None):
+    """Recontagem COMPLETA do capitulo (moldes, muletas, cadencia, repeticao
+    cross-cap). Usada pelo gate, pela guarda de aceitacao do micro-loop (H4:
+    capitulo pre-existente nao contorna o gate) e pelos testes."""
+    if txt is None:
+        txt = ler_arquivo(projeto, nome_cap(n))
     offs = maneirismos_acima(txt)
     muls = muletas_acima_cap(txt)
     cads = cadencia_acima(txt, _skill_projeto(projeto))
-    # gap 1: repeticao verbatim/quase-verbatim CROSS-capitulo (ledger, caps < n).
     ledger = _ler_ledger_cross(projeto)
     anteriores = [{"numero": e["capitulo"], "trecho": e.get("trecho_original", "")}
                   for e in ledger if int(e.get("capitulo", 0)) < int(n)]
     reps = detectar_repeticao_cross(txt, anteriores)
-    if offs or muls or cads or reps:
+    return txt, offs, muls, cads, reps
+
+
+def _excesso_total(offs, muls, cads, reps):
+    """Excesso agregado acima do orcamento — o criterio de convergencia (H1)
+    exige que este numero seja ESTRITAMENTE decrescente por iteracao."""
+    return (sum(c - PER_CAP_BUDGET for _n, c in offs) +
+            sum(c - b for _n, c, b in muls) +
+            sum(c - a for _n, c, a in cads) +
+            len(reps))
+
+
+def _restantes_legiveis(projeto, txt, offs, muls, cads, reps):
+    """Relatorio cirurgico: cada item nomeia as frases exatas (linha + trecho)."""
+    nomes = set([nome for nome, _c in offs] + [nome for nome, _c, _b in muls])
+    ocorr = _ocorrencias_exatas(txt, nomes)
+    def _frases_de(nome):
+        ps = [u"L{}: \"{}\"".format(l, tr[:90]) for l, nm, tr in ocorr if nm == nome]
+        return (u" — " + u" | ".join(ps[:6])) if ps else u""
+    return (["molde {} {}x{}".format(nome, cnt, _frases_de(nome)) for nome, cnt in offs] +
+            ["muleta {} {}x{}".format(nome, cnt, _frases_de(nome)) for nome, cnt, _b in muls] +
+            ["cadencia {} {}x".format(nome, cnt) for nome, cnt, _alvo in cads] +
+            ["repeticao cross-cap {}".format(r["cap"]) for r in reps])
+
+
+def gate_maneirismo_capitulo(projeto, n, args):
+    """Depois de escrever o capitulo n (AUDITORIA-CONVERGENCIA, H1/H2/H3):
+    - ate max_iteracoes_reescrita EDICOES DIRIGIDAS, cada uma DELEGADA ao
+      subagente livro-escritor (Opus com a skill vestida) com a lista cirurgica
+      de (linha, trecho) — o orquestrador so roteia, nunca edita prosa;
+    - convergencia: excesso agregado ESTRITAMENTE decrescente; estagnou 2x ou
+      esgotou o orcamento -> PARA;
+    - NAO bloqueia aqui: pendencias restantes viram insumo do micro-loop
+      revisor->editor (review/_gate-pendencias-NN.json); o bloqueio, se vier,
+      e da guarda de aceitacao apos o time inteiro trabalhar."""
+    txt = ler_arquivo(projeto, nome_cap(n))
+    if not txt:
+        return
+    state = ensure_fields(load_state(projeto), args)
+    max_iter = max(1, _i(state.get("max_iteracoes_reescrita")) or 4)
+    txt, offs, muls, cads, reps = _recontagem_cap(projeto, n, txt)
+    arq = nome_cap(n).replace("\\", "/")
+    anterior = None
+    estagnacao = 0
+    iteracao = 0
+    while (offs or muls or cads or reps) and iteracao < max_iter and estagnacao < 2:
+        iteracao += 1
         lista = "; ".join(["{} {}x".format(nome, cnt) for nome, cnt in offs] +
                           ["MULETA {} {}x (alvo <= {})".format(nome, cnt, b) for nome, cnt, b in muls] +
                           ["CADENCIA {} {}x (alvo <= {})".format(nome, cnt, alvo) for nome, cnt, alvo in cads] +
                           [u"REPETICAO CROSS-CAP '{}' (= cap {})".format(r["trecho"], r["cap"]) for r in reps])
-        arq = nome_cap(n).replace("\\", "/")
-        log(projeto, "GATE CAP {}: acima do orcamento -> reescrevendo ({}).".format(n, lista))
-        # Instrucao CIRURGICA: as ocorrencias exatas (linha + trecho) do que o
-        # CONTADOR marca — o corretor edita SOMENTE esses pontos, nao adivinha.
+        log(projeto, "GATE CAP {}: acima do orcamento (iteracao {}/{}) -> edicao dirigida ({}).".format(
+            n, iteracao, max_iter, lista))
         nomes_estourados = set([nome for nome, _c in offs] + [nome for nome, _c, _b in muls])
         ocorr = _ocorrencias_exatas(txt, nomes_estourados)
         bloco_ocorr = "".join(
             u"- L{}: [{}] \"{}\"\n".format(l, nm, tr[:160]) for l, nm, tr in ocorr[:40])
         prompt = (
             "Modo headless. Trabalhe SOMENTE nesta pasta de projeto.\n"
-            "REVISAO DE PROSA do {arq}: os itens abaixo estao SOBRE-REPRESENTADOS neste "
-            "capitulo (contagem real). Reduza CADA UM ao alvo. Para MULETAS (ex.: 'coisa'), "
-            "TROQUE pela coisa concreta a que se refere (objeto, ideia, gesto) — nunca deixe "
-            "'coisa' generica. Para MOLDES, desadense o tique com sintaxe variada. Para "
-            "CADENCIA (ritmo), VARIE o comprimento das frases — FUNDA as frases curtas coladas "
-            "numa frase mais longa e encadeada onde for revelacao, quebre a anafora, corte o "
-            "clipe de negacao repetido; nunca dois fragmentos colados (Regra 4). Para "
-            "REPETICAO CROSS-CAP, o trecho ja apareceu num capitulo ANTERIOR (frase-assinatura "
-            "reciclada) — REESCREVA-O com imagem/sintaxe nova aqui, sem repetir o molde do "
-            "capitulo citado. NAO basta cortar palavra: a instrucao e variar. PRESERVE sentido "
-            "e voz; NAO reescreva a cena a toa. Regrave o MESMO arquivo {arq}.\n"
+            "Voce e o ORQUESTRADOR: NAO edite prosa voce mesmo. DELEGUE via Task ao "
+            "subagente `livro-escritor` (que veste a skill e o perfil de voz deste "
+            "projeto) a EDICAO DIRIGIDA do {arq} descrita abaixo, e depois confirme no "
+            "disco que o arquivo foi regravado.\n"
+            "INSTRUCAO PARA O livro-escritor — os itens abaixo estao SOBRE-REPRESENTADOS "
+            "neste capitulo (contagem real). Reduza CADA UM ao alvo. Para MULETAS (ex.: "
+            "'coisa'), TROQUE pela coisa concreta a que se refere (objeto, ideia, gesto). "
+            "Para MOLDES, desadense o tique com sintaxe variada. Para CADENCIA (ritmo), "
+            "VARIE o comprimento das frases — FUNDA as frases curtas coladas numa frase "
+            "mais longa onde for revelacao, quebre a anafora, corte o clipe de negacao "
+            "repetido; nunca dois fragmentos colados (Regra 4). Para REPETICAO CROSS-CAP, "
+            "REESCREVA o trecho com imagem/sintaxe nova (frase-assinatura reciclada de "
+            "capitulo anterior). E uma EDICAO DIRIGIDA, nao reescrita: PRESERVE sentido, "
+            "voz e todos os paragrafos nao listados. Regrave o MESMO arquivo {arq}.\n"
             "Itens acima do orcamento: {lista}\n"
         ).format(arq=arq, lista=lista)
         if bloco_ocorr:
@@ -1853,25 +1922,33 @@ def gate_maneirismo_capitulo(projeto, n, args):
                        "paragrafos):\n" + bloco_ocorr)
         run_claude(projeto, prompt, args)
         # A chamada do agente nao prova correcao: rele o arquivo e reconta tudo.
-        txt = ler_arquivo(projeto, nome_cap(n))
-        offs = maneirismos_acima(txt)
-        muls = muletas_acima_cap(txt)
-        cads = cadencia_acima(txt, _skill_projeto(projeto))
-        reps = detectar_repeticao_cross(txt, anteriores)
-    # Relatorio LEGIVEL: cada molde/muleta restante nomeia as frases exatas
-    # (linha + trecho) para decisao autoral — nunca so um numero.
-    nomes_rest = set([nome for nome, _c in offs] + [nome for nome, _c, _b in muls])
-    ocorr_rest = _ocorrencias_exatas(txt, nomes_rest)
-    def _frases_de(nome):
-        ps = [u"L{}: \"{}\"".format(l, tr[:90]) for l, nm, tr in ocorr_rest if nm == nome]
-        return (u" — " + u" | ".join(ps[:6])) if ps else u""
-    restantes = (["molde {} {}x{}".format(nome, cnt, _frases_de(nome)) for nome, cnt in offs] +
-                  ["muleta {} {}x{}".format(nome, cnt, _frases_de(nome)) for nome, cnt, _b in muls] +
-                  ["cadencia {} {}x".format(nome, cnt) for nome, cnt, _alvo in cads] +
-                  ["repeticao cross-cap {}".format(r["cap"]) for r in reps])
-    if restantes:
-        log(projeto, "GATE CAP {}: REPROVADO apos recontagem: {}".format(n, "; ".join(restantes)))
-        return restantes
+        txt, offs, muls, cads, reps = _recontagem_cap(projeto, n)
+        exc = _excesso_total(offs, muls, cads, reps)
+        log(projeto, "GATE CAP {}: recontagem da iteracao {} -> excesso agregado {}{}.".format(
+            n, iteracao, exc, "" if anterior is None else " (antes {})".format(anterior)))
+        if anterior is not None and exc >= anterior:
+            estagnacao += 1
+        else:
+            estagnacao = 0
+        anterior = exc
+    pend_path = _gate_pendencias_path(projeto, n)
+    if offs or muls or cads or reps:
+        # H3: nao bloqueia — as pendencias cirurgicas viram insumo do micro-loop
+        # revisor->editor; a guarda de aceitacao decide (e bloqueia se persistir).
+        restantes = _restantes_legiveis(projeto, txt, offs, muls, cads, reps)
+        os.makedirs(os.path.join(projeto, DIR_REVIEW), exist_ok=True)
+        with open(pend_path, "w", encoding="utf-8") as fh:
+            json.dump({"capitulo": int(n), "iteracoes": iteracao,
+                       "excesso": _excesso_total(offs, muls, cads, reps),
+                       "pendencias": restantes}, fh, ensure_ascii=False, indent=2)
+        log(projeto, "GATE CAP {}: {} pendencia(s) apos {} edicao(oes) dirigida(s) — "
+                     "encaminhadas ao micro-loop revisor->editor (nao bloqueia aqui).".format(
+                         n, len(restantes), iteracao))
+        return []
+    try:
+        os.remove(pend_path)
+    except OSError:
+        pass
     # O ledger so recebe texto cuja pos-condicao foi comprovada.
     _atualizar_ledger_com_cap(projeto, n)
     return []
@@ -2194,20 +2271,12 @@ def executar(projeto, args):
             print("RUNNER_LIMITE_MAX reset={}".format(reset or "?"), flush=True)
             return 0
 
-        # Portao de maneirismo na ORIGEM: se o capitulo recem-escrito estourou o
-        # orcamento de tiques/muletas, dispara UMA reescrita-alvo (bounded; nao bloqueia).
+        # Portao de maneirismo na ORIGEM (H1/H3): edicoes dirigidas convergentes
+        # delegadas ao livro-escritor; pendencias restantes seguem para o
+        # micro-loop revisor->editor — o bloqueio, se vier, e da guarda de
+        # aceitacao (apos o time inteiro trabalhar), nunca daqui.
         if fase == "ESCRITA" and alvo is not None:
-            restantes_cap = gate_maneirismo_capitulo(projeto, alvo, args)
-            if restantes_cap:
-                state = ensure_fields(load_state(projeto), args)
-                state["quality_status"] = "blocked_quality"
-                state["quality_stage"] = "GATE_CAPITULO"
-                state["quality_blockers"] = restantes_cap
-                state["quality_reason"] = "correcao executada, mas a recontagem continuou reprovada"
-                save_state(projeto, state)
-                print("QUALITY_BLOCKED stage=GATE_CAPITULO cap={} blockers={}".format(
-                    alvo, len(restantes_cap)), flush=True)
-                return 3
+            gate_maneirismo_capitulo(projeto, alvo, args)
 
         # Micro-loop: terminou a REVISAO do capitulo. GUARDA DETERMINISTICA (Fix C): o
         # runner (nao o LLM) confirma que o arquivo tem piso E que os tiques de cadencia
@@ -2229,43 +2298,48 @@ def executar(projeto, args):
             agencia_ok, agencia_motivo = _agencia_guarda(projeto, revisando_cap)  # FASE 2 (Agency)
             streak_ok, streak_motivo = _streak_guarda(projeto, revisando_cap)     # FASE 4 (Source streak)
             setpiece_ok, setpiece_motivo = _setpiece_guarda(projeto, revisando_cap)  # FASE 6 (aviso, nao bloqueia)
+            # H4: a aceitacao RECONTA o gate completo (moldes, muletas, cadencia,
+            # cross-cap) — capitulo pre-existente/retomado nao contorna o gate
+            # pelo piso de palavras.
+            _txt_g, offs_g, muls_g, cads_g, reps_g = _recontagem_cap(projeto, revisando_cap, txt_rev)
+            gate_ok = not (offs_g or muls_g or reps_g)  # cadencia julgada por tiques_ok (delta)
             try_path = _marcador_revtry(projeto, revisando_cap)
             ja_tentou = os.path.exists(try_path)
-            # 1a passada: exige piso + ledger + tiques + agencia + streak (estrito).
-            if piso_ok and ledger_ok and tiques_ok and agencia_ok and streak_ok:
+            # 1a passada: exige piso + ledger + tiques + agencia + streak + gate (estrito).
+            if piso_ok and ledger_ok and tiques_ok and agencia_ok and streak_ok and gate_ok:
                 try:
                     os.makedirs(os.path.join(projeto, DIR_REVIEW), exist_ok=True)
                     with open(_marcador_revcap(projeto, revisando_cap), "w", encoding="utf-8") as fh:
                         fh.write(agora())
                     if ja_tentou:
                         os.remove(try_path)
+                    os.remove(_gate_pendencias_path(projeto, revisando_cap))
                 except OSError:
                     pass
                 state["_runner"]["tentativas_sem_progresso"] = 0
                 save_state(projeto, state)
-                pend = []
-                if not tiques_ok: pend.append("tiques nao baixaram")
-                if not ledger_ok: pend.append("CONTINUIDADE nao gravada no estado-narrativo")
-                if not agencia_ok: pend.append(agencia_motivo)  # FASE 2 (Agency)
-                if not streak_ok: pend.append(streak_motivo)    # FASE 4 (Source streak)
-                if not setpiece_ok: pend.append(setpiece_motivo)  # FASE 6 (ritmo, so aviso)
-                aviso = " [aceito p/ nao travar apos re-revisao; PENDENTE: {}]".format("; ".join(pend)) if pend else ""
-                log(projeto, "Capitulo {} revisado (delegado) -> aceito{}. cadencia excesso {}->{}; piso {}; ledger {}.".format(
-                    revisando_cap, aviso, exc_antes, exc_depois, "ok" if piso_ok else "BAIXO", "ok" if ledger_ok else "NAO-GRAVADO"))
+                if not setpiece_ok:
+                    log(projeto, "SINAL (ritmo): {}".format(setpiece_motivo))
+                log(projeto, "Capitulo {} revisado (delegado) -> aceito. cadencia excesso {}->{}; piso {}; ledger {}; gate ok.".format(
+                    revisando_cap, exc_antes, exc_depois, "ok" if piso_ok else "BAIXO", "ok" if ledger_ok else "NAO-GRAVADO"))
+                _atualizar_ledger_com_cap(projeto, revisando_cap)  # texto comprovado entra no ledger cross-cap
                 _editorial_pos_aceite(projeto, revisando_cap)  # FASES 3-4 (Novelty loops + streak)
                 _gravar_quality_cap(projeto, revisando_cap, stage="REVISAO_CAPITULO")
                 continue
             if ja_tentou:
                 pend = []
-                if not piso_ok: pend.append("piso de palavras reprovado")
+                if not piso_ok: pend.append("piso de palavras reprovado ({} < {})".format(palavras_rev, piso))
                 if not tiques_ok: pend.append("tiques nao baixaram")
                 if not ledger_ok: pend.append("continuidade nao gravada")
                 if not agencia_ok: pend.append(agencia_motivo)
                 if not streak_ok: pend.append(streak_motivo)
+                if not gate_ok:
+                    # Relatorio CIRURGICO: frases exatas, nunca so um numero.
+                    pend.extend(_restantes_legiveis(projeto, _txt_g, offs_g, muls_g, [], reps_g))
                 state["quality_status"] = "blocked_quality"
                 state["quality_stage"] = "REVISAO_CAPITULO"
                 state["quality_blockers"] = pend
-                state["quality_reason"] = "re-revisao esgotada sem comprovar pos-condicoes"
+                state["quality_reason"] = "time escritor->revisor->editor esgotou o orcamento sem comprovar pos-condicoes"
                 save_state(projeto, state)
                 log(projeto, "QUALITY_BLOCKED revisao cap {}: {}".format(
                     revisando_cap, "; ".join(pend)))

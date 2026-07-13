@@ -1,5 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { decideInfrastructureRetry } from "./retry-policy.js";
+import { decideInfrastructureRetry, registrarErroRepetido } from "./retry-policy.js";
+
+// H6 (auditoria de convergência): erro determinístico idêntico N vezes seguidas
+// bloqueia com mensagem legível, sem reciclar retries.
+describe("registrarErroRepetido", () => {
+  it("3ª ocorrência idêntica bloqueia; mensagem diferente zera a contagem", () => {
+    const e1 = registrarErroRepetido(null, "NameError: txt_norm");
+    expect(e1.bloquear).toBe(false);
+    expect(e1.estado.erro_repetido).toBe(1);
+    const e2 = registrarErroRepetido(e1.estado, "NameError: txt_norm");
+    expect(e2.bloquear).toBe(false);
+    const e3 = registrarErroRepetido(e2.estado, "NameError: txt_norm");
+    expect(e3.bloquear).toBe(true);
+    expect(e3.motivo).toContain("3x seguidas");
+    expect(e3.motivo).toContain("NameError");
+    const e4 = registrarErroRepetido(e3.estado, "outro erro qualquer");
+    expect(e4.bloquear).toBe(false);
+    expect(e4.estado.erro_repetido).toBe(1);
+  });
+  it("mensagem vazia nunca acumula", () => {
+    const a = registrarErroRepetido({ ultimo_erro: "", erro_repetido: 5 }, "");
+    expect(a.bloquear).toBe(false);
+  });
+});
 
 describe("infrastructure retry policy", () => {
   it("aplica backoff exponencial com teto", () => {

@@ -33,6 +33,16 @@ export const AGENTES_FUNDACAO = [
   "livro-contextualizador.md",
 ] as const;
 
+// H7 (auditoria de convergência): faixa de palavras/capítulo DECLARADA pela
+// própria skill (SKILL.md). Piso do projeto ≥ teto da faixa força TODO capítulo
+// a exceder o alvo da skill → infla interioridade → gera os padrões que os
+// gates punem. Skills sem faixa declarada ficam fora (no-op).
+export const FAIXA_PALAVRAS_POR_SKILL: Record<string, { min: number; max: number }> = {
+  "hoover-mcfadden": { min: 2000, max: 2800 },
+  "skill-dan-brown": { min: 1300, max: 2200 },
+  "vesper-escritor-de-capitulos": { min: 3000, max: 3800 },
+};
+
 export interface ConteudoFundacao {
   // chave = caminho relativo (ex.: "Biblia-da-Obra.md", ".claude/agents/livro-escritor.md");
   // valor = conteúdo, ou null se o arquivo não existe.
@@ -118,6 +128,19 @@ export function avaliarFundacaoConteudo(c: ConteudoFundacao, ctx: ContextoFundac
           severity: "critical",
         });
     }
+  }
+
+  // 2b) H7: piso de palavras do projeto dentro da faixa declarada pela skill.
+  // Piso ≥ teto da faixa = todo capítulo forçado a exceder o alvo da skill
+  // (inflação de interioridade). Sinaliza — exceder exige decisão autoral.
+  if (estado && typeof estado === "object" && ctx.skill && FAIXA_PALAVRAS_POR_SKILL[ctx.skill]) {
+    const faixa = FAIXA_PALAVRAS_POR_SKILL[ctx.skill];
+    const pisoCap = Number(estado.piso_palavras_cap ?? 0);
+    if (pisoCap >= faixa.max)
+      warnings.push(
+        `piso_palavras_cap (${pisoCap}) >= teto da faixa da skill ${ctx.skill} (${faixa.min}–${faixa.max}) — ` +
+          `todo capítulo será forçado a exceder o alvo da skill; exceder exige decisão autoral explícita`
+      );
   }
 
   // 3) Estrutura: capítulos declarados batem com o estado

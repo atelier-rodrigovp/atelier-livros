@@ -143,6 +143,28 @@ describe("gate da fundação — pós-condições", () => {
   });
 });
 
+describe("H7 — piso do projeto vs faixa da skill", () => {
+  it("piso >= teto da faixa da skill sinaliza (exige decisão autoral)", () => {
+    const c = fundacaoValida();
+    c.arquivos["Biblia-da-Obra.md"] += `\n${MARCADOR_VOZ_CONSISTENCIA} alinhado`;
+    c.arquivos["ESTADO_LIVRO.json"] = JSON.stringify({
+      titulo: "Farol", total_capitulos_previstos: 12, fase_atual: "ESCRITA",
+      skill_escrita: "skill-dan-brown", piso_palavras_cap: 2800,
+    });
+    const av = avaliarFundacaoConteudo(c, ctx);
+    expect(av.warnings.join(" ")).toContain("teto da faixa da skill");
+  });
+  it("piso dentro da faixa não sinaliza; skill sem faixa é no-op", () => {
+    const c = fundacaoValida();
+    c.arquivos["Biblia-da-Obra.md"] += `\n${MARCADOR_VOZ_CONSISTENCIA} alinhado`;
+    c.arquivos["ESTADO_LIVRO.json"] = JSON.stringify({
+      titulo: "Farol", total_capitulos_previstos: 12, fase_atual: "ESCRITA",
+      skill_escrita: "skill-dan-brown", piso_palavras_cap: 1800,
+    });
+    expect(avaliarFundacaoConteudo(c, ctx).warnings.join(" ")).not.toContain("teto da faixa");
+  });
+});
+
 describe("contagem de capítulos da Estrutura", () => {
   it("conta cabeçalhos distintos", () => {
     expect(contarCapitulosEstrutura("## Capítulo 1\n## Capítulo 2\n### Capítulo 2\nCapítulo 3 — final")).toBe(3);

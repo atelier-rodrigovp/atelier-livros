@@ -1,7 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { verifySkillManifest, type SkillManifest } from "./skill-manifest.js";
+import manifestReal from "../skill-patches/manifest.json";
+
+// ETAPA 0c (rodada final): drift do manifest morre AQUI, na suíte — não na
+// partida do worker. Editou arquivo coberto ⇒ rode
+// `npx tsx worker/scripts/gerar-manifest.ts`.
+describe("manifest bate com os arquivos versionados do repo", () => {
+  const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "skill-patches");
+  for (const f of manifestReal.files) {
+    it(`hash de ${f.path} corresponde ao manifest ${manifestReal.manifestVersion}`, () => {
+      const atual = createHash("sha256").update(readFileSync(path.join(raiz, ...f.path.split("/")))).digest("hex");
+      expect(atual).toBe(f.sha256);
+    });
+  }
+});
 
 const hash = (s: string) => createHash("sha256").update(Buffer.from(s)).digest("hex");
 const manifest: SkillManifest = { manifestVersion: "1", generatedAt: "now", compatibility: "test", requiredTests: [], files: [{ path: "skill/a.txt", sha256: hash("igual") }] };
