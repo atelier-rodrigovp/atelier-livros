@@ -27,5 +27,8 @@
    depende exclusivamente do autor (guia: `docs/audits/APLICAR-RELIABILITY-SQL.md`).
    Sem ele, a guarda de `pronto` no banco e o dedupe de enqueue existem só no
    arquivo versionado (o comportamento do worker já os cobre em código/testes).
-2. **Confirmar o deploy** das correções de UI na URL publicada (push desta
-   rodada dispara o GitHub Actions).
+2. ~~Confirmar o deploy~~ **PROVADO** (2026-07-13): Actions run 29217850074
+   `success`; bundle publicado `assets/index-CaF4Ni1J.js` contém as strings
+   novas; Dashboard ao vivo exibe "Bloqueado por qualidade" nos 2 livros
+   `blocked_quality` (antes mostrava "Escrevendo") e nenhum projeto AUDIT-*
+   restante na UI.
