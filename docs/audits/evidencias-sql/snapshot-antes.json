@@ -1,0 +1,52 @@
+{
+  "status": 201,
+  "body": [
+    {
+      "snapshot": {
+        "indexes": [
+          {
+            "name": "artifacts_identity_uidx",
+            "def": "CREATE UNIQUE INDEX artifacts_identity_uidx ON public.artifacts USING btree (edition_id, tipo, storage_path)"
+          },
+          {
+            "name": "artifacts_pkey",
+            "def": "CREATE UNIQUE INDEX artifacts_pkey ON public.artifacts USING btree (id)"
+          },
+          {
+            "name": "editions_pkey",
+            "def": "CREATE UNIQUE INDEX editions_pkey ON public.editions USING btree (id)"
+          },
+          {
+            "name": "editions_project_id_idioma_key",
+            "def": "CREATE UNIQUE INDEX editions_project_id_idioma_key ON public.editions USING btree (project_id, idioma)"
+          },
+          {
+            "name": "jobs_pkey",
+            "def": "CREATE UNIQUE INDEX jobs_pkey ON public.jobs USING btree (id)"
+          },
+          {
+            "name": "jobs_queue_idx",
+            "def": "CREATE INDEX jobs_queue_idx ON public.jobs USING btree (status, created_at)"
+          }
+        ],
+        "triggers": [
+          {
+            "name": "trg_editions_updated",
+            "def": "CREATE TRIGGER trg_editions_updated BEFORE UPDATE ON public.editions FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+          }
+        ],
+        "functions": [
+          {
+            "name": "claim_job",
+            "def": "CREATE OR REPLACE FUNCTION public.claim_job(p_job_id uuid, p_owner uuid, p_worker text)\n RETURNS SETOF jobs\n LANGUAGE plpgsql\n SET search_path TO 'public'\nAS $function$\r\ndeclare\r\n  v_project uuid;\r\nbegin\r\n  select project_id into v_project\r\n  from public.jobs\r\n  where id = p_job_id and owner = p_owner and status = 'queued';\r\n\r\n  if not found then return; end if;\r\n\r\n  -- Serializa claims do mesmo projeto mesmo quando são jobs diferentes e workers\r\n  -- diferentes. Jobs sem projeto usam o próprio id como chave.\r\n  perform pg_advisory_xact_lock(hashtext(coalesce(v_project::text, p_job_id::text)));\r\n\r\n  if v_project is not null and exists (\r\n    select 1 from public.jobs\r\n    where owner = p_owner and project_id = v_project and status = 'running'\r\n  ) then\r\n    return;\r\n  end if;\r\n\r\n  return query\r\n  update public.jobs\r\n  set status = 'running', locked_by = p_worker, locked_at = now()\r\n  where id = p_job_id and owner = p_owner and status = 'queued'\r\n  returning *;\r\nend;\r\n$function$\n"
+          },
+          {
+            "name": "promote_publication",
+            "def": "CREATE OR REPLACE FUNCTION public.promote_publication(p_owner uuid, p_project_id uuid, p_edition_id uuid, p_manifest jsonb, p_chapters jsonb, p_artifacts jsonb)\n RETURNS jsonb\n LANGUAGE plpgsql\n SET search_path TO 'public'\nAS $function$\r\ndeclare\r\n  c jsonb;\r\n  a jsonb;\r\nbegin\r\n  if not exists (\r\n    select 1 from public.editions\r\n    where id = p_edition_id and project_id = p_project_id and owner = p_owner\r\n  ) then raise exception 'edition fora do owner/project'; end if;\r\n\r\n  for c in select * from jsonb_array_elements(p_chapters) loop\r\n    insert into public.chapters(owner, edition_id, numero, titulo, palavras, storage_path)\r\n    values (p_owner, p_edition_id, (c->>'numero')::int, c->>'titulo',\r\n            coalesce((c->>'palavras')::int, 0), c->>'storage_path')\r\n    on conflict (edition_id, numero) do update set\r\n      titulo = excluded.titulo, palavras = excluded.palavras,\r\n      storage_path = excluded.storage_path;\r\n  end loop;\r\n\r\n  for a in select * from jsonb_array_elements(p_artifacts) loop\r\n    insert into public.artifacts(owner, edition_id, tipo, storage_path, meta)\r\n    values (p_owner, p_edition_id, a->>'tipo', a->>'storage_path',\r\n            coalesce(a->'meta', '{}'::jsonb) || jsonb_build_object('publication_manifest', p_manifest))\r\n    on conflict (edition_id, tipo, storage_path) do update set meta = excluded.meta;\r\n  end loop;\r\n\r\n  update public.editions set status = 'pronto', updated_at = now()\r\n  where id = p_edition_id and owner = p_owner;\r\n  update public.projects set status = 'pronto', updated_at = now()\r\n  where id = p_project_id and owner = p_owner;\r\n  return jsonb_build_object('ok', true, 'manifest_id', p_manifest->>'id');\r\nend;\r\n$function$\n"
+          }
+        ],
+        "dup_queued": []
+      }
+    }
+  ]
+}

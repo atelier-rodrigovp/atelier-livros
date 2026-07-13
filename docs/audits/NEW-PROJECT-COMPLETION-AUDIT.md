@@ -1,7 +1,7 @@
 # Auditoria de conclusão — Novo Projeto
 
-- Estado do goal: **ativo** (2 critérios pendentes de ação/decisão do autor)
-- Data de abertura: 2026-07-11 · Última atualização: 2026-07-12
+- Estado do goal: **CONCLUÍDO** em 2026-07-13
+- Data de abertura: 2026-07-11 · Última atualização: 2026-07-13
 
 | Critério | Estado | Evidência |
 |---|---|---|
@@ -21,14 +21,26 @@
 | E2E controlado | **comprovado (rodada 2)** | percurso real completo: criação UI → entrevista (5 turnos, teto) → fundação (gate bloqueou→autocura→approved hash-bound) → 1 capítulo aceito (hash do quality state == hash do arquivo; guarda determinística) → sync banco+Storage → visível na plataforma → retomada idempotente → limpeza provada (tudo 0 depois) |
 | documentação e riscos residuais | **comprovado** | 7 docs de auditoria + ADR 0002/0003 atualizados |
 
-## O que falta para concluir o goal
+## Fechamento (2026-07-13)
 
-1. **Aplicar o DDL** (`supabase/reliability.sql`) no dashboard — único item que
-   depende exclusivamente do autor (guia: `docs/audits/APLICAR-RELIABILITY-SQL.md`).
-   Sem ele, a guarda de `pronto` no banco e o dedupe de enqueue existem só no
-   arquivo versionado (o comportamento do worker já os cobre em código/testes).
+1. ~~Aplicar o DDL~~ **PROVADO** (2026-07-13, dashboard via sessão de browser
+   autorizada): snapshot antes/depois em `pre-sql-snapshot.sql` e
+   `evidencias-sql/`; trigger `editions_guard_pronto` e índice
+   `jobs_one_queued_per_project_tipo_uidx` existentes em `pg_trigger`/
+   `pg_indexes`; teste negativo do trigger (`ERROR: P0001 … promocao
+   transacional`, rollback, 0 restantes) e do dedupe (2º insert `REJEITADO …
+   jobs_one_queued_per_project_tipo_uidx`; antes era ACEITO; limpeza 0/0).
 2. ~~Confirmar o deploy~~ **PROVADO** (2026-07-13): Actions run 29217850074
    `success`; bundle publicado `assets/index-CaF4Ni1J.js` contém as strings
    novas; Dashboard ao vivo exibe "Bloqueado por qualidade" nos 2 livros
    `blocked_quality` (antes mostrava "Escrevendo") e nenhum projeto AUDIT-*
    restante na UI.
+
+Todos os critérios de saída do goal estão comprovados. Riscos residuais e
+limitações inerentes permanecem documentados na matriz de falhas e no
+END-TO-END (rubrica anti-genérico é heurística; avaliação literária holística
+depende de agente revisor — a nota é auxiliar, nunca substitui blockers).
+
+Observação operacional (fora do escopo do goal): o dashboard exibiu aviso de
+quota excedida da organização Supabase com prazo de graça até 07/08/2026 —
+monitorar/planejar upgrade para não restringir o projeto.

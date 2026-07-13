@@ -1,0 +1,6 @@
+{
+  "status": 400,
+  "body": {
+    "message": "Failed to run sql query: ERROR:  P0001: editions.status=pronto so pode ser gravado pela promocao transacional (promote_publication)\nCONTEXT:  PL/pgSQL function guard_edition_pronto() line 5 at RAISE\n"
+  }
+}

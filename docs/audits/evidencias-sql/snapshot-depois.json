@@ -1,0 +1,64 @@
+{
+  "status": 201,
+  "body": [
+    {
+      "snapshot": {
+        "indexes": [
+          {
+            "name": "artifacts_identity_uidx",
+            "def": "CREATE UNIQUE INDEX artifacts_identity_uidx ON public.artifacts USING btree (edition_id, tipo, storage_path)"
+          },
+          {
+            "name": "artifacts_pkey",
+            "def": "CREATE UNIQUE INDEX artifacts_pkey ON public.artifacts USING btree (id)"
+          },
+          {
+            "name": "editions_pkey",
+            "def": "CREATE UNIQUE INDEX editions_pkey ON public.editions USING btree (id)"
+          },
+          {
+            "name": "editions_project_id_idioma_key",
+            "def": "CREATE UNIQUE INDEX editions_project_id_idioma_key ON public.editions USING btree (project_id, idioma)"
+          },
+          {
+            "name": "jobs_one_queued_per_project_tipo_uidx",
+            "def": "CREATE UNIQUE INDEX jobs_one_queued_per_project_tipo_uidx ON public.jobs USING btree (owner, project_id, tipo) WHERE ((status = 'queued'::text) AND (project_id IS NOT NULL))"
+          },
+          {
+            "name": "jobs_pkey",
+            "def": "CREATE UNIQUE INDEX jobs_pkey ON public.jobs USING btree (id)"
+          },
+          {
+            "name": "jobs_queue_idx",
+            "def": "CREATE INDEX jobs_queue_idx ON public.jobs USING btree (status, created_at)"
+          }
+        ],
+        "triggers": [
+          {
+            "name": "editions_guard_pronto",
+            "def": "CREATE TRIGGER editions_guard_pronto BEFORE INSERT OR UPDATE OF status ON public.editions FOR EACH ROW EXECUTE FUNCTION guard_edition_pronto()"
+          },
+          {
+            "name": "trg_editions_updated",
+            "def": "CREATE TRIGGER trg_editions_updated BEFORE UPDATE ON public.editions FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+          }
+        ],
+        "functions": [
+          {
+            "name": "claim_job",
+            "def": "CREATE OR REPLACE FUNCTION public.claim_job(p_job_id uuid, p_owner uuid, p_worker text)\n RETURNS SETOF jobs\n LANGUAGE plpgsql\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_project uuid;\nbegin\n  select project_id into v_project\n  from public.jobs\n  where id = p_job_id and owner = p_owner and status = 'queued';\n\n  if not found then return; end if;\n\n  -- Serializa claims do mesmo projeto mesmo quando são jobs diferentes e workers\n  -- diferentes. Jobs sem projeto usam o próprio id como chave.\n  perform pg_advisory_xact_lock(hashtext(coalesce(v_project::text, p_job_id::text)));\n\n  if v_project is not null and exists (\n    select 1 from public.jobs\n    where owner = p_owner and project_id = v_project and status = 'running'\n  ) then\n    return;\n  end if;\n\n  return query\n  update public.jobs\n  set status = 'running', locked_by = p_worker, locked_at = now()\n  where id = p_job_id and owner = p_owner and status = 'queued'\n  returning *;\nend;\n$function$\n"
+          },
+          {
+            "name": "guard_edition_pronto",
+            "def": "CREATE OR REPLACE FUNCTION public.guard_edition_pronto()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'public'\nAS $function$\nbegin\n  if new.status = 'pronto' and coalesce(old.status, '') <> 'pronto'\n     and coalesce(current_setting('app.promotion_gate', true), '') <> '1' then\n    raise exception 'editions.status=pronto so pode ser gravado pela promocao transacional (promote_publication)';\n  end if;\n  return new;\nend;\n$function$\n"
+          },
+          {
+            "name": "promote_publication",
+            "def": "CREATE OR REPLACE FUNCTION public.promote_publication(p_owner uuid, p_project_id uuid, p_edition_id uuid, p_manifest jsonb, p_chapters jsonb, p_artifacts jsonb)\n RETURNS jsonb\n LANGUAGE plpgsql\n SET search_path TO 'public'\nAS $function$\ndeclare\n  c jsonb;\n  a jsonb;\nbegin\n  if not exists (\n    select 1 from public.editions\n    where id = p_edition_id and project_id = p_project_id and owner = p_owner\n  ) then raise exception 'edition fora do owner/project'; end if;\n\n  for c in select * from jsonb_array_elements(p_chapters) loop\n    insert into public.chapters(owner, edition_id, numero, titulo, palavras, storage_path)\n    values (p_owner, p_edition_id, (c->>'numero')::int, c->>'titulo',\n            coalesce((c->>'palavras')::int, 0), c->>'storage_path')\n    on conflict (edition_id, numero) do update set\n      titulo = excluded.titulo, palavras = excluded.palavras,\n      storage_path = excluded.storage_path;\n  end loop;\n\n  for a in select * from jsonb_array_elements(p_artifacts) loop\n    insert into public.artifacts(owner, edition_id, tipo, storage_path, meta)\n    values (p_owner, p_edition_id, a->>'tipo', a->>'storage_path',\n            coalesce(a->'meta', '{}'::jsonb) || jsonb_build_object('publication_manifest', p_manifest))\n    on conflict (edition_id, tipo, storage_path) do update set meta = excluded.meta;\n  end loop;\n\n  -- Marca a transação para o trigger editions_guard_pronto: só a promoção\n  -- transacional pode gravar status='pronto'.\n  perform set_config('app.promotion_gate', '1', true);\n  update public.editions set status = 'pronto', updated_at = now()\n  where id = p_edition_id and owner = p_owner;\n  update public.projects set status = 'pronto', updated_at = now()\n  where id = p_project_id and owner = p_owner;\n  return jsonb_build_object('ok', true, 'manifest_id', p_manifest->>'id');\nend;\n$function$\n"
+          }
+        ],
+        "dup_queued": []
+      }
+    }
+  ]
+}

@@ -1,4 +1,32 @@
-# Aplicar `supabase/reliability.sql` — passo a passo (pendente de autor)
+# Aplicar `supabase/reliability.sql` — APLICADO E PROVADO em 2026-07-13
+
+> **Status: CONCLUÍDO.** Aplicado pelo SQL Editor do dashboard via sessão de
+> browser autorizada pelo autor (Chrome com CDP + perfil de automação logado;
+> nenhuma credencial digitada pela auditoria; nenhum token capturado).
+> Evidências em `docs/audits/evidencias-sql/` e `pre-sql-snapshot.sql`:
+>
+> - **Snapshot ANTES** (`snapshot-antes.json`): sem
+>   `jobs_one_queued_per_project_tipo_uidx`, sem `editions_guard_pronto`,
+>   sem `guard_edition_pronto`; zero duplicatas queued (pré-condição ok).
+> - **Aplicação**: arquivo inteiro, em ordem, numa execução (HTTP 201;
+>   `shot-aplicacao.png`).
+> - **Verificação estrutural DEPOIS** (`snapshot-depois.json` +
+>   `shot-verificacao.png`): índice e trigger presentes;
+>   `promote_publication` com `set_config('app.promotion_gate',…)` ANTES do
+>   update de status; `guard_edition_pronto` checando `status='pronto'`.
+> - **Teste negativo 1 — guarda de `pronto`** (`guard-negativo.json` +
+>   `shot-guard-negativo.png`): UPDATE lateral em edição efêmera
+>   `xx-AUDIT-TESTE` falhou com `ERROR: P0001: editions.status=pronto so pode
+>   ser gravado pela promocao transacional (promote_publication)`; rollback;
+>   contagem restante 0.
+> - **Teste negativo 2 — dedupe** (probe local): 2º insert idêntico
+>   `REJEITADO: duplicate key value violates unique constraint
+>   "jobs_one_queued_per_project_tipo_uidx"` (antes da aplicação era ACEITO);
+>   limpeza provada (jobs 0, projeto probe 0).
+>
+> O passo a passo abaixo fica como registro histórico do procedimento.
+
+## (histórico) passo a passo original
 
 A auditoria NÃO tem via DDL (sem CLI, sem connection string, dashboard exige
 login — regra: não contornar). Estado ANTES já comprovado em 2026-07-12:
