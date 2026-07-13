@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "muletas": [
     {
       "name": "coisa",
@@ -56,6 +56,38 @@
       "text": "Ela desce a colina em paz. Não há borrão: trinta e um. Cinco anos depois, nada mudou.",
       "moldeContains": "fragmento antit",
       "expectedCount": 0
+    }
+  ],
+  "cadencia": [
+    {
+      "name": "fp-anafora-artigo (cap-37 A1)",
+      "text": "O cabeçalho dizia reavaliação de ativo, e ele conhecia os dois formulários de cor. O segundo ele só vira chegar para outros. O homem dobrou o papel com cuidado. O carro esperava lá fora com o motor ligado.",
+      "tiqueContains": "anafora",
+      "expectedAbove": false
+    },
+    {
+      "name": "real-anafora-verbo",
+      "text": "Davam datas para cada um dos desaparecidos da lista. Davam horas exatas de cada sumiço registrado. Davam nomes que ninguém tinha coragem de pedir.",
+      "tiqueContains": "anafora",
+      "expectedAbove": true
+    },
+    {
+      "name": "real-anafora-artigo-mesmo-substantivo",
+      "text": "O campo abria antes do sol nascer para os que chegavam cedo. O campo fechava quando o último caminhão saía carregado. O campo cobrava de todos o mesmo preço antigo.",
+      "tiqueContains": "anafora",
+      "expectedAbove": true
+    },
+    {
+      "name": "fp-frag-acao-3-palavras (cap-37 F3/F4/F5)",
+      "text": "Ligou o carro. Ele saiu da garagem devagar naquela manhã fria pensando no caso que não fechava. Guardava como memória. A rua estava vazia e as janelas fechadas guardavam o resto da cidade adormecida. Havia contas maiores.",
+      "tiqueContains": "fragmento de enfase",
+      "expectedAbove": false
+    },
+    {
+      "name": "real-frag-beats (Travou/Impossivel/Nao pode ser)",
+      "text": "Ele abriu o dossiê com cuidado e leu duas vezes o cabeçalho datilografado antes de entender o que tinha nas mãos. Travou. A sala continuou como sempre estivera, indiferente ao que acabava de mudar dentro dele. Impossível. O telefone começou a tocar na mesa ao lado e ninguém atendeu por um longo tempo. Não pode ser.",
+      "tiqueContains": "fragmento de enfase",
+      "expectedAbove": true
     }
   ]
 }

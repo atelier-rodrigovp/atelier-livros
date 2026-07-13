@@ -34,4 +34,19 @@ for case in fixtures.get("moldes", []):
         failures.append("molde {}: esperado {}, obtido {}".format(case["name"], case["expectedCount"], actual))
     print("[{}] molde {} -> {}".format("ok" if actual == case["expectedCount"] else "FALHA", case["name"], actual))
 
+# Cadencia (autopsia 53abdade cap-37): expectedAbove = tique presente em
+# cadencia_acima com o orcamento da skill-dan-brown (default). Nomes comparados
+# sem acento (TS/Python diferem na acentuacao dos rotulos).
+import unicodedata
+def _norm(s):
+    return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode().lower()
+for case in fixtures.get("cadencia", []):
+    acima = m.cadencia_acima(case["text"], "skill-dan-brown")
+    hit = any(_norm(case["tiqueContains"]) in _norm(nome) for nome, _n, _a in acima)
+    ok = hit == case["expectedAbove"]
+    if not ok:
+        failures.append("cadencia {}: esperado above={}, obtido {} ({})".format(
+            case["name"], case["expectedAbove"], hit, acima))
+    print("[{}] cadencia {} -> above={}".format("ok" if ok else "FALHA", case["name"], hit))
+
 raise SystemExit("; ".join(failures) if failures else 0)

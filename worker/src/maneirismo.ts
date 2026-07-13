@@ -212,8 +212,32 @@ function semAbertura(f: string): string {
 function palavrasFrase(f: string): number {
   return (semAbertura(f).match(/[A-Za-zÀ-ÿ0-9’'-]+/g) ?? []).length;
 }
-function primeiraPalavra(f: string): string {
-  return (semAbertura(f).match(/[A-Za-zÀ-ÿ0-9’'-]+/) ?? [""])[0].toLowerCase();
+// AUDITORIA-CONVERGENCIA 2026-07-13 (autópsia 53abdade): anáfora por palavra
+// FUNCIONAL ("O cabeçalho…"/"O segundo…") é português ordinário, não tique.
+// Quando a 1ª palavra é funcional, a chave compara as DUAS primeiras palavras
+// ("O campo…/O campo…" continua contando como anáfora real).
+const PALAVRAS_FUNCIONAIS = new Set([
+  "o", "a", "os", "as", "um", "uma", "e", "de", "do", "da", "dos", "das",
+  "em", "no", "na", "nos", "nas", "ao", "à", "aos", "às", "mas", "que",
+  "se", "por", "com", "para",
+]);
+function chaveAnafora(f: string): string {
+  const palavras = semAbertura(f).match(/[A-Za-zÀ-ÿ0-9’'-]+/g) ?? [];
+  const p1 = (palavras[0] ?? "").toLowerCase();
+  if (!p1) return "";
+  if (!PALAVRAS_FUNCIONAIS.has(p1)) return p1;
+  const p2 = (palavras[1] ?? "").toLowerCase();
+  return p2 ? `${p1} ${p2}` : "";
+}
+
+// Fragmento de ÊNFASE (Regra 4): beat deliberado — 1–2 palavras ("Travou.",
+// "*Comprometido.*") ou 3 palavras iniciando por negação ("Não pode ser.").
+// Frase completa de 3 palavras com verbo+complemento ("Ligou o carro.") é
+// compressão comum de prosa, não fragmento (autópsia: 3/5 marcações eram isso).
+function ehFragmentoEnfase(f: string, len: number, tetoEnfase: number): boolean {
+  if (len < 1) return false;
+  if (len <= 2) return true;
+  return len <= tetoEnfase && /^(n[ãa]o|nem|nunca|nada)\b/i.test(semAbertura(f));
 }
 function ehDialogo(f: string): boolean {
   return /^[—–\-"'“”‘’]/.test(f.trim());
@@ -332,8 +356,8 @@ export function diagnosticarCadencia(texto: string, orc: OrcamentoCadencia = ORC
   const anaforaEx: string[] = [];
   let anafora = 0;
   for (let i = 1; i < fr.length; i++) {
-    const a = primeiraPalavra(fr[i - 1]);
-    if (narr[i - 1] && narr[i] && a && a === primeiraPalavra(fr[i])) {
+    const a = chaveAnafora(fr[i - 1]);
+    if (narr[i - 1] && narr[i] && a && a === chaveAnafora(fr[i])) {
       anafora++;
       anaforaEx.push(`${fr[i - 1]} / ${fr[i]}`);
     }
@@ -342,11 +366,11 @@ export function diagnosticarCadencia(texto: string, orc: OrcamentoCadencia = ORC
   const epi = [...t.matchAll(RE_EPIGRAMA)].map((m) => m[0]);
   // 6) cota da Regra 4: fragmento de ênfase (1–enfase palavras, narração) + colados;
   //    itálico; retórica. Fragmento em DIÁLOGO vira só sinal.
-  const frag = fr.filter((f, i) => narr[i] && lens[i] >= 1 && lens[i] <= orc.enfase);
-  const fragDialogo = fr.filter((f, i) => !narr[i] && lens[i] >= 1 && lens[i] <= orc.enfase).length;
+  const frag = fr.filter((f, i) => narr[i] && ehFragmentoEnfase(f, lens[i], orc.enfase));
+  const fragDialogo = fr.filter((f, i) => !narr[i] && ehFragmentoEnfase(f, lens[i], orc.enfase)).length;
   let fragColados = 0;
   for (let i = 1; i < fr.length; i++)
-    if (narr[i - 1] && narr[i] && lens[i - 1] >= 1 && lens[i - 1] <= orc.enfase && lens[i] >= 1 && lens[i] <= orc.enfase)
+    if (narr[i - 1] && narr[i] && ehFragmentoEnfase(fr[i - 1], lens[i - 1], orc.enfase) && ehFragmentoEnfase(fr[i], lens[i], orc.enfase))
       fragColados++;
   const italicos = [...t.matchAll(RE_ITALICO)].map((m) => m[2]);
   const retoricas = fr.filter((f, i) => narr[i] && /[?]["'”’)\]]*$/.test(f));

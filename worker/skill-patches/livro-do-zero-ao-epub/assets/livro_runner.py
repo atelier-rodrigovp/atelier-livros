@@ -1682,6 +1682,35 @@ def _primeira_palavra(f):
     return m.group(0).lower() if m else ""
 
 
+# AUDITORIA-CONVERGENCIA 2026-07-13 (autopsia 53abdade) — espelha o TS:
+# anafora por palavra FUNCIONAL ("O cabecalho…"/"O segundo…") e portugues
+# ordinario; com 1a palavra funcional, a chave compara as DUAS primeiras.
+_PALAVRAS_FUNCIONAIS = set(
+    u"o a os as um uma e de do da dos das em no na nos nas ao à aos às mas que se por com para".split())
+
+
+def _chave_anafora(f):
+    palavras = re.findall(u"[A-Za-zÀ-ÿ0-9’'\\-]+", _sem_abertura(f), re.U)
+    p1 = palavras[0].lower() if palavras else u""
+    if not p1:
+        return u""
+    if p1 not in _PALAVRAS_FUNCIONAIS:
+        return p1
+    p2 = palavras[1].lower() if len(palavras) > 1 else u""
+    return (p1 + u" " + p2) if p2 else u""
+
+
+def _eh_fragmento_enfase(f, ln, teto):
+    """Beat deliberado: 1-2 palavras ('Travou.') ou 3 iniciando por negacao
+    ('Nao pode ser.'). Frase completa de 3 palavras com verbo+complemento
+    ('Ligou o carro.') e compressao comum, nao fragmento. Espelha o TS."""
+    if ln < 1:
+        return False
+    if ln <= 2:
+        return True
+    return ln <= teto and bool(re.match(u"^(n[ãa]o|nem|nunca|nada)\\b", _sem_abertura(f), re.I | re.U))
+
+
 def _eh_dialogo(f):
     return bool(re.match(u"^[—–\\-\"'“”‘’]", (f or "").strip(), re.U))
 
@@ -1717,16 +1746,18 @@ def cadencia_acima(texto, skill=None):
     clip = sum(1 for i, f in enumerate(fr) if narr[i] and lens[i] <= 3 and re.match(u"^n[ãa]o\\b", _sem_abertura(f), re.I | re.U))
     if clip > cad["clipe_neg"]:
         out.append(("clipe de negacao curto", clip, cad["clipe_neg"]))
-    ana = sum(1 for i in range(1, nf) if narr[i - 1] and narr[i] and _primeira_palavra(fr[i - 1]) and _primeira_palavra(fr[i - 1]) == _primeira_palavra(fr[i]))
+    ana = sum(1 for i in range(1, nf) if narr[i - 1] and narr[i] and _chave_anafora(fr[i - 1]) and _chave_anafora(fr[i - 1]) == _chave_anafora(fr[i]))
     if ana > cad["anafora"]:
         out.append(("anafora (frases coladas, mesmo inicio)", ana, cad["anafora"]))
     epi = len(_RE_EPIGRAMA.findall(texto or ""))
     if epi > cad["epigrama"]:
         out.append(("epigrama antitetico", epi, cad["epigrama"]))
-    frag = sum(1 for i in range(nf) if narr[i] and 1 <= lens[i] <= cad["enfase"])
+    frag = sum(1 for i in range(nf) if narr[i] and _eh_fragmento_enfase(fr[i], lens[i], cad["enfase"]))
     if frag > cad["frag_enfase"]:
         out.append(("fragmento de enfase (Regra 4 <=1-2)", frag, cad["frag_enfase"]))
-    fcol = sum(1 for i in range(1, nf) if narr[i - 1] and narr[i] and 1 <= lens[i - 1] <= cad["enfase"] and 1 <= lens[i] <= cad["enfase"])
+    fcol = sum(1 for i in range(1, nf) if narr[i - 1] and narr[i]
+               and _eh_fragmento_enfase(fr[i - 1], lens[i - 1], cad["enfase"])
+               and _eh_fragmento_enfase(fr[i], lens[i], cad["enfase"]))
     if fcol > cad["frag_colados"]:
         out.append(("fragmentos de enfase COLADOS (Regra 4: nunca dois)", fcol, cad["frag_colados"]))
     ital = len(_RE_ITALICO.findall(texto or ""))
