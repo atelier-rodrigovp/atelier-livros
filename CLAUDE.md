@@ -119,6 +119,17 @@ Inside `livro_runner.py` (executed by the worker), after each chapter is written
 
 3. **Book-wide mannerism purge phase** (`DESMANEIRISMO`, runs before EPUB) — iterates counting → rewriting → recounting until muleta budget is met
 
+## Automatic Quality Recovery (no click required)
+
+When the runner blocks on quality (rc=3), the worker no longer parks the job as `paused`. `index.ts` delegates to `tratarBloqueioQualidade` (`worker/src/correcao-fluxo.ts` + pure decisions in `correcao-automatica.ts`):
+
+- **Classification (persisted in `progresso.quality_categoria`):** `recuperavel_qualidade` (auto-retry) vs `fundacao_pendente` / `decisao_autoral` / `circuit_breaker` (paused, human decision). Quota (`retry_at` + `aguardando_reset`) and infra retries keep their own flows.
+- **Correction ladder (executes, never just recommends):** degrau 1 deterministic (worker) → 2 directed revision → 3 focused edit → 4 focused rewrite → 5 broad revision → 6 alternative model (`revisor_craft_opus`) → 7 circuit breaker. Ladder start chosen by blocker type (`escada-correcao.ts:classificarBlocker`); never repeats the same strategy on the same text hash; 2 failures at a degrau escalate; budget = 5 attempts per chapter/stage.
+- **Mechanics:** the worker writes `review/_correcao-cap-NN.json` (degrau directive + exact blockers — the runner injects it into the micro-loop prompt) and removes the bounded-retry marker (`_revcap-NN.try` / `_spec-NN.try`) to grant exactly one new gated attempt; the runner's acceptance guard **recounts the same gates unchanged** (removing the marker never approves anything). The job is requeued with `progresso.retry_at` (backoff 90s×2^n, cap 30min) — the heavy picker already skips future `retry_at` and re-claims on its own.
+- **Persistent ledger:** `quality/correcao-ledger.json` in the project WORK_DIR (truth on disk; survives restarts) mirrored as `progresso.correcao` for the UI. Attempts close as `aprovado` on the success path of `escrever_livro` (`concluirCorrecoesAprovadas`).
+- **Foundation (SG7):** a failed foundation gate on a book in progress persists `fundacao_status/fundacao_blockers` in progresso — writing continues, publication stays blocked; UI shows a separate banner (`aviso_fundacao`), never mixed with the chapter blocker.
+- **UI:** resolver states `correcao_automatica`, `aguardando_correcao` (button becomes optional "Tentar agora"), `circuit_breaker`, `aguardando_decisao`, `producao_desativada` (global `worker_control` pause, distinct from per-project pause).
+
 ## Observability
 
 Painel **Observabilidade** (`src/pages/Observabilidade.tsx`) consumes telemetry row (`tipo='telemetria'` in `jobs` table, populated by `worker/src/telemetria.ts`). Signals:

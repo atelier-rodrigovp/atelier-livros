@@ -10,6 +10,7 @@ import { comRetrySb, ehErroDeRede } from "./retry.js";
 import { instalarTimestampsISO } from "./log-iso.js";
 import { recuperarOrfaos as recuperarOrfaosCore } from "./orfaos.js";
 import { InfrastructureBlockedError, InfrastructureRetryError, QualityBlockedError } from "./job-errors.js";
+import { tratarBloqueioQualidade } from "./correcao-fluxo.js";
 import { decideInfrastructureRetry, registrarErroRepetido, type ErroRepetidoEstado, type InfrastructureRetryState } from "./retry-policy.js";
 import { verifySkillManifest, type SkillManifest } from "./skill-manifest.js";
 import manifest from "../skill-patches/manifest.json";
@@ -266,12 +267,33 @@ async function processarJob(job: Job) {
     if (e instanceof QualityBlockedError || e?.name === "QualityBlockedError") {
       const err = e as QualityBlockedError;
       // MERGE, nunca substituição (Bug B / S4): preserva cap_atual/total/fase/
-      // palavras/nota/continua do progresso vigente. Antes gravava um literal e a
-      // UI caía na contagem do banco sem explicar o resto.
-      const { data: cur } = await sb.from("jobs").select("progresso").eq("owner", OWNER).eq("id", job.id).single();
+      // palavras/nota/continua do progresso vigente.
+      const { data: cur } = await sb.from("jobs").select("progresso,payload").eq("owner", OWNER).eq("id", job.id).single();
       const progressoAtual = (cur?.progresso as Record<string, unknown>) ?? {};
-      await finalizar(job.id, {
-        status: "paused",
+      // Correção automática (goal correcao-sem-clique): bloqueio de qualidade
+      // RECUPERÁVEL reagenda o próprio job (queued + retry_at) com escada de
+      // correção, orçamento e ledger persistente — o picker retoma sozinho, sem
+      // clique. Só decisão autoral, fundação e circuit breaker pausam. Fail-safe:
+      // erro no fluxo de correção cai no comportamento anterior (paused explícito).
+      let resultado: Awaited<ReturnType<typeof tratarBloqueioQualidade>> | null = null;
+      try {
+        resultado = await tratarBloqueioQualidade({
+          jobId: job.id,
+          jobTipo: job.tipo,
+          projectId: job.project_id ?? null,
+          payload: ((cur as any)?.payload as Record<string, any>) ?? (job as any).payload,
+          stage: err.stage,
+          blockers: err.blockers,
+          mensagem: err.message,
+          progressoAtual,
+        });
+      } catch (fluxoErr: any) {
+        console.error(
+          `[job ${job.id}] fluxo de correção automática falhou (${String(fluxoErr?.message ?? fluxoErr).slice(0, 200)}) — pausando por segurança.`
+        );
+      }
+      const patch = resultado?.patch ?? {
+        status: "paused" as const,
         erro: err.message,
         progresso: {
           ...progressoAtual,
@@ -280,10 +302,11 @@ async function processarJob(job: Job) {
           quality_blockers: err.blockers,
           resumo: "Bloqueado por qualidade",
         },
-        locked_by: null,
-        locked_at: null,
-      });
-      console.error(`[job ${job.id}] bloqueado por qualidade em ${err.stage}: ${err.blockers.join("; ")}`);
+      };
+      await finalizar(job.id, { ...patch, locked_by: null, locked_at: null });
+      const linha = resultado?.log ?? `bloqueado por qualidade em ${err.stage}: ${err.blockers.join("; ")}`;
+      if (patch.status === "queued") console.log(`[job ${job.id}] ${linha}`);
+      else console.error(`[job ${job.id}] ${linha}`);
       return;
     }
     if (e instanceof InfrastructureBlockedError || e?.name === "InfrastructureBlockedError") {

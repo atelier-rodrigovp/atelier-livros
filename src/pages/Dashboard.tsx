@@ -67,7 +67,9 @@ export default function Dashboard() {
     ]);
     const projList = (projs as Project[]) ?? [];
     setProjects(projList);
-    const producaoPausada = (ctrl as { enabled?: boolean } | null)?.enabled === false;
+    // worker_control.enabled é a pausa GLOBAL (SG6: producao_desativada), não a
+    // pausa por projeto (briefing.producao_pausada) — o resolvedor distingue.
+    const producaoGlobalAtiva = (ctrl as { enabled?: boolean } | null)?.enabled !== false;
 
     const origemEd: Record<string, string> = {};
     const edToProj: Record<string, string> = {};
@@ -90,7 +92,7 @@ export default function Dashboard() {
     const est: Record<string, OperationalState> = {};
     for (const p of projList) {
       est[p.id] = resolveOperationalState(
-        buildResolverInput({ jobs: jobsPorProj[p.id] ?? [], chapters: chsPorProj[p.id] ?? [], totalCapitulos: p.total_capitulos ?? 0, workerOnline: online, producaoPausada })
+        buildResolverInput({ jobs: jobsPorProj[p.id] ?? [], chapters: chsPorProj[p.id] ?? [], totalCapitulos: p.total_capitulos ?? 0, workerOnline: online, producaoPausada: (p.briefing as any)?.producao_pausada === true, producaoGlobalAtiva })
       );
     }
     setEstados(est);

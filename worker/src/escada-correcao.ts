@@ -16,10 +16,16 @@ export const DEGRAU_MINIMO: Record<CategoriaBlocker, number> = {
 };
 
 // Classifica um blocker pela sua categoria a partir do code e/ou mensagem do gate.
+// Moldes, cadência e repetição cross-cap são defeitos DE FRASE (o gate aponta as
+// ocorrências exatas): entram como lexical_prosa — a correção mínima é o editor
+// focado nos trechos (degrau 2+), nunca uma revisão ampla logo de cara.
 export function classificarBlocker(codeOuMsg: string): CategoriaBlocker {
   const s = codeOuMsg.toLowerCase();
   if (/(meta-?texto|meta_text|espac|spacing|whitespace|espaç)/.test(s)) return "mecanico_seguro";
   if (/(muleta|coisa|\balgo\b|lexico|léxico|lexical)/.test(s)) return "lexical_prosa";
+  if (/(molde|cadencia|cadência|antitese|antítese|anafora|anáfora|fragmento|staccato|italico|itálico|retoric|epigrama|clipe de negacao|clipe de negação|repeticao cross|repetição cross|simile|símile|aposto)/.test(s)) {
+    return "lexical_prosa";
+  }
   return "narrativo";
 }
 

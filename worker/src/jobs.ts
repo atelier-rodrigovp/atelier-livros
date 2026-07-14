@@ -57,6 +57,7 @@ import { executePublicationTransaction, type PublicationFile } from "./publicati
 import { advanceEditionStatus, type EditionStatus } from "./state-machine.js";
 import { classifyRunnerOutcome } from "./runner-outcome.js";
 import { promptEntrevista, validarSaidaEntrevista } from "./entrevista.js";
+import { concluirCorrecoesAprovadas, resumoCorrecaoDoDisco } from "./correcao-fluxo.js";
 
 export interface Job {
   id: string;
@@ -885,6 +886,9 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // 'fundacao'. Início de escrita (0 capítulos no piso) exige gate aprovado.
   // Retomada de livro em andamento não é brickada: o estado é gravado e o
   // aviso fica alto — a publicação continua protegida pelo gate final.
+  // SG7: a pendência de fundação é PERSISTIDA no progresso (fundacao_status),
+  // separada do bloqueio editorial do capítulo — a UI mostra as duas sem misturar.
+  let fundacaoInfo: Record<string, unknown> = {};
   {
     const gate = await avaliarFundacaoNoDisco(dir, {
       skill: proj.skill_escrita ?? null,
@@ -900,12 +904,16 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
           "escrita não inicia com fundação reprovada — corrija a fundação (refinar_fundacao) ou registre decisão autoral"
         );
       }
+      fundacaoInfo = { fundacao_status: "reprovada", fundacao_blockers: codes };
       console.warn(
         `[fundacao] AVISO: retomada com fundação reprovada no gate (${codes.join(", ")}) — ` +
           `livro em andamento (${capsExistentes} caps) continua; resolver antes de publicar`
       );
     }
   }
+  // Espelho do ledger de correção automática (SG3/SG6): a UI acompanha degrau/
+  // tentativa/retry sem carregar o ledger; atualizado após o run pelo fechamento.
+  let correcaoResumo = await resumoCorrecaoDoDisco(dir, job.project_id!).catch(() => null);
   const meta = Number(proj.meta_nota ?? 9.0);
   // Teto de reescritas por execução do runner. Mais passadas perseguem melhor a
   // meta; com a auto-retomada do Max, não custam tempo. Configurável por projeto
@@ -931,6 +939,8 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // que aborta em ~13s não pode mais reportar "0/N" com capítulos no disco.
   await setProgress(job.id, {
     ...engineInfo,
+    ...fundacaoInfo,
+    correcao: correcaoResumo,
     fase: "ESCRITA", cap_atual: capsAntes,
     total: Number(proj.total_capitulos ?? 0), continua: true,
   });
@@ -947,6 +957,8 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     const caps = await chaptersOnDisk(path.join(dir, "manuscrito"), piso);
     await setProgress(job.id, {
       ...engineInfo,
+      ...fundacaoInfo,
+      correcao: correcaoResumo,
       fase: st?.fase_atual ?? "ESCRITA",
       cap_atual: caps.length,
       total: Number(st?.total_capitulos_previstos ?? proj.total_capitulos ?? 0),
@@ -1020,6 +1032,14 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // nunca impede a persistência do N aprovado (cap-37). Fix do Bug A (jobs.ts:959
   // lançava ANTES do sync — o aprovado só ficava no disco e podia se perder).
   await sincronizarAprovados(job.project_id!, dir, edicao.id, piso);
+  // Fecha no ledger de correção as tentativas cujo capítulo o gate APROVOU neste
+  // run (ciclo correção→reavaliação→aprovação auditável, SG3) — ANTES de propagar
+  // qualquer novo bloqueio, para a pendência antiga não contaminar a decisão.
+  try {
+    correcaoResumo = await concluirCorrecoesAprovadas(dir, job.project_id!);
+  } catch (e: any) {
+    console.warn(`[correcao-ledger] fechamento pós-run falhou: ${String(e?.message ?? e).slice(0, 200)}`);
+  }
   if ((state as any)?.quality_status === "blocked_quality") {
     throw new QualityBlockedError(
       String((state as any)?.quality_stage ?? "runner"),
@@ -1050,6 +1070,8 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // Reporta a contagem REAL do disco APÓS o run, antes de qualquer branch/throw —
   // assim a UI nunca fica em "0/N" mesmo num run curto que pausa/erra.
   await setProgress(job.id, {
+    ...fundacaoInfo,
+    correcao: correcaoResumo,
     fase: state?.fase_atual ?? "ESCRITA", cap_atual: caps.length, total,
     nota: state?.ultima_nota ?? null, palavras: state?.palavras_totais ?? 0,
     continua: !completo,
@@ -1085,7 +1107,7 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     // via RUNNER_LIMITE_MAX / aguardando_reset / "resets at") segue intacto.
     if (caps.length > capsAntes || revDepois > revAntes) {
       await enfileirarEscritaSeNovo(job.project_id!);
-      await setProgress(job.id, { fase: "ESCRITA", cap_atual: caps.length, total, continua: true });
+      await setProgress(job.id, { ...fundacaoInfo, correcao: correcaoResumo, fase: "ESCRITA", cap_atual: caps.length, total, continua: true });
       return;
     }
     // NÃO avançou, mas o livro está ÍNTEGRO e incompleto (caps>0): o run foi
@@ -1117,7 +1139,7 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // NÃO publica manuscrito/EPUB; re-enfileira para remontar do texto já limpo.
   if (sujeiraAposRunner) {
     await enfileirarEscritaSeNovo(job.project_id!);
-    await setProgress(job.id, { fase: "ESCRITA", cap_atual: caps.length, total, sanitizado: true, continua: true });
+    await setProgress(job.id, { ...fundacaoInfo, correcao: correcaoResumo, fase: "ESCRITA", cap_atual: caps.length, total, sanitizado: true, continua: true });
     console.log("[sanitize] meta-texto removido neste run; EPUB não publicado, re-enfileirado para rebuild limpo.");
     return;
   }

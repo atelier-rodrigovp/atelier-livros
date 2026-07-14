@@ -61,7 +61,7 @@ function JobStatus({ job, producaoPausada }: { job?: Job; producaoPausada?: bool
 export default function Projeto() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
-  const { online: workerOnline } = useWorkerStatus();
+  const { online: workerOnline, producaoAtiva } = useWorkerStatus();
   const [proj, setProj] = useState<Project | null>(null);
   const [editions, setEditions] = useState<Edition[]>([]);
   const [chapters, setChapters] = useState<Record<string, number>>({});
@@ -353,7 +353,7 @@ export default function Projeto() {
   // senão, o ciclo de vida do projeto. Mesma OperationalState do dashboard e da aba.
   const sincronizadosProj = origem ? chapters[origem.id] ?? 0 : 0;
   const chapterRowsProj = Array.from({ length: sincronizadosProj }, (_, i) => ({ numero: i + 1, text_sha256: "synced", quality_status: "approved" }));
-  const stProjeto = resolveOperationalState(buildResolverInput({ jobs, chapters: chapterRowsProj, totalCapitulos: Number(proj.total_capitulos ?? 0), workerOnline, producaoPausada: (proj.briefing as any)?.producao_pausada === true }));
+  const stProjeto = resolveOperationalState(buildResolverInput({ jobs, chapters: chapterRowsProj, totalCapitulos: Number(proj.total_capitulos ?? 0), workerOnline, producaoPausada: (proj.briefing as any)?.producao_pausada === true, producaoGlobalAtiva: producaoAtiva }));
   const sb = escritaGovernaCartao(stProjeto.situacao)
     ? { label: stProjeto.badge, variant: toneToVariant(stProjeto.tone), pulse: stProjeto.situacao === "executando" }
     : displayProjectStatus({ projectStatus: proj.status, hasActiveJob, workerOnline });
@@ -702,7 +702,7 @@ export default function Projeto() {
                 // Resolvedor único (S7): a MESMA OperationalState do dashboard/observabilidade.
                 // chapters sincronizados são aprovados+hash (o worker só sincroniza aprovados).
                 const chapterRows = Array.from({ length: sincronizados }, (_, i) => ({ numero: i + 1, text_sha256: "synced", quality_status: "approved" }));
-                const st = resolveOperationalState(buildResolverInput({ jobs, chapters: chapterRows, totalCapitulos: Number(proj.total_capitulos ?? total), workerOnline, producaoPausada: (proj.briefing as any)?.producao_pausada === true }));
+                const st = resolveOperationalState(buildResolverInput({ jobs, chapters: chapterRows, totalCapitulos: Number(proj.total_capitulos ?? total), workerOnline, producaoPausada: (proj.briefing as any)?.producao_pausada === true, producaoGlobalAtiva: producaoAtiva }));
                 // Nota oficial = avaliação independente (nota_review). Auto-nota da
                 // escrita fica separada e rotulada como provisória.
                 const notaOficial = origem?.nota_review != null ? Number(origem.nota_review) : null;
@@ -752,13 +752,35 @@ export default function Projeto() {
                     {st.blocker_humano ? (
                       <p className="text-xs text-amber-700 dark:text-amber-400">{st.blocker_humano}</p>
                     ) : null}
+                    {/* SG7: pendência de FUNDAÇÃO em banner próprio — não se mistura ao capítulo. */}
+                    {st.aviso_fundacao ? (
+                      <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">{st.aviso_fundacao}</p>
+                    ) : null}
                     <div className="flex flex-wrap items-center gap-3">
-                      <Button title={dicaRefino} disabled={escrevendo || escritaPausada} onClick={() => enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {})}>
+                      {/* SG6: em correção automática o clique NÃO é necessário — o botão vira
+                          ação excepcional ("Tentar agora" antecipa a janela do retry). */}
+                      <Button
+                        title={st.situacao === "aguardando_correcao" ? "Opcional: antecipa a tentativa automática (o fluxo segue sozinho sem clique)." : dicaRefino}
+                        disabled={escrevendo || escritaPausada || st.situacao === "correcao_automatica"}
+                        onClick={() => enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {})}
+                      >
                         {escrevendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenLine className="h-4 w-4" />}
-                        {st.situacao === "bloqueado_qualidade" ? `Corrigir capítulo ${st.capitulo_bloqueado ?? ""}`.trim() : rotulo}
+                        {st.situacao === "aguardando_correcao"
+                          ? "Tentar agora"
+                          : st.situacao === "correcao_automatica"
+                            ? "Corrigindo…"
+                            : st.situacao === "bloqueado_qualidade" || st.situacao === "circuit_breaker"
+                              ? `Corrigir capítulo ${st.capitulo_bloqueado ?? ""}`.trim()
+                              : rotulo}
                       </Button>
                       {st.engine_info?.modelo ? (
                         <span className="text-xs text-muted-foreground">motor: {st.engine_info.engine} · {st.engine_info.modelo}</span>
+                      ) : null}
+                      {st.correcao_info?.tentativa ? (
+                        <span className="text-xs text-muted-foreground">
+                          correção automática: tentativa {st.correcao_info.tentativa}
+                          {st.correcao_info.max_tentativas ? `/${st.correcao_info.max_tentativas}` : ""} · degrau {st.correcao_info.degrau ?? "?"}
+                        </span>
                       ) : null}
                     </div>
                     {/* Erro cru do runner NUNCA é mensagem principal (S8): vai para diagnóstico. */}

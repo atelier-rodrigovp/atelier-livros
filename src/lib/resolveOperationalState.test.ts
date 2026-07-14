@@ -106,3 +106,68 @@ describe("hierarquia de precedência", () => {
     expect(st.situacao).toBe("sem_escrita");
   });
 });
+
+// Goal correcao-sem-clique (SG6): os 7 estados distintos aparecem sem contradição
+// entre telas (mesmo resolvedor) e o clique deixa de ser necessário no recuperável.
+describe("estados da correção automática (SG6 / cenário 18)", () => {
+  const chapters = chaptersAte(37);
+  const correcao = { ativa: true, capitulo: 38, estagio: "REVISAO_CAPITULO", degrau: 2, estrategia: "revisao_dirigida", tentativa: 1, max_tentativas: 5, retry_at: "2026-07-14T12:03:00Z", total_tentativas: 1 };
+  const mk = (status: any, progresso: any, extra: any = {}) =>
+    buildResolverInput({ jobs: [{ id: "j", tipo: "escrever_livro", created_at: "2026-07-14T00:00:00Z", status, erro: null, progresso }], chapters, totalCapitulos: 60, workerOnline: true, now: Date.parse("2026-07-14T12:00:00Z"), ...extra });
+
+  it("aguardando_correcao: queued + auto_correcao → retoma sozinho, botão vira 'Tentar agora'", () => {
+    const st = resolveOperationalState(mk("queued", { quality_status: "auto_correcao", quality_cap: 38, cap_atual: 38, retry_at: correcao.retry_at, correcao }));
+    expect(st.situacao).toBe("aguardando_correcao");
+    expect(st.mensagem_humana).toContain("nenhum clique é necessário");
+    expect(st.capitulo_bloqueado).toBe(38);
+    expect(st.correcao_info).toMatchObject({ tentativa: 1, degrau: 2, max_tentativas: 5 });
+    expect(st.botoes.map((b) => b.id)).toContain("tentar_agora");
+    expect(st.contadores.em_correcao).toBe(1);
+  });
+
+  it("correcao_automatica: running + correcao ativa → 'correção automática em andamento'", () => {
+    const st = resolveOperationalState(mk("running", { cap_atual: 38, correcao }));
+    expect(st.situacao).toBe("correcao_automatica");
+    expect(st.mensagem_humana).toContain("Correção automática em andamento");
+  });
+
+  it("circuit_breaker: paused + categoria circuit_breaker → decisão humana com diagnóstico", () => {
+    const st = resolveOperationalState(mk("paused", { quality_status: "blocked_quality", quality_categoria: "circuit_breaker", quality_cap: 38, quality_motivo: "Circuit breaker: 5 tentativas", correcao: { ...correcao, ativa: false } }));
+    expect(st.situacao).toBe("circuit_breaker");
+    expect(st.badge).toBe("Bloqueado após circuit breaker");
+    expect(st.diagnostico_tecnico).toContain("Circuit breaker");
+  });
+
+  it("aguardando_decisao: decisão autoral e fundação pendente são distintos do editorial", () => {
+    const a = resolveOperationalState(mk("paused", { quality_status: "blocked_quality", quality_categoria: "decisao_autoral", quality_stage: "GATE_FUNDACAO" }));
+    expect(a.situacao).toBe("aguardando_decisao");
+    const f = resolveOperationalState(mk("paused", { quality_status: "blocked_quality", quality_categoria: "fundacao_pendente", quality_stage: "PUBLICATION_GATE" }));
+    expect(f.situacao).toBe("aguardando_decisao");
+    expect(f.badge).toContain("Fundação");
+  });
+
+  it("producao_desativada: pausa GLOBAL vence a fila e explica a correção parada", () => {
+    const st = resolveOperationalState(mk("queued", { quality_status: "auto_correcao", correcao }, { producaoGlobalAtiva: false }));
+    expect(st.situacao).toBe("producao_desativada");
+    expect(st.mensagem_humana).toContain("religar");
+  });
+
+  it("aguardando_cota e pausado_manual permanecem estados próprios (sem regressão)", () => {
+    expect(resolveOperationalState(mk("queued", { aguardando_reset: true, retry_at: "2999-01-01T00:00:00Z" })).situacao).toBe("aguardando_cota");
+    expect(resolveOperationalState(mk("queued", {}, { producaoPausada: true })).situacao).toBe("pausado_manual");
+  });
+
+  it("SG7: aviso_fundacao é banner separado e não muda a situação da escrita", () => {
+    const st = resolveOperationalState(mk("running", { cap_atual: 39, fundacao_status: "reprovada", fundacao_blockers: ["PROTAGONISTA_INCOERENTE"] }));
+    expect(st.situacao).toBe("executando");
+    expect(st.aviso_fundacao).toContain("PROTAGONISTA_INCOERENTE");
+    expect(st.aviso_fundacao).toContain("publicação");
+  });
+
+  it("paridade entre telas nos novos estados (mesma entrada → mesmo estado)", () => {
+    const progresso = { quality_status: "auto_correcao", quality_cap: 38, retry_at: correcao.retry_at, correcao };
+    const a = resolveOperationalState(mk("queued", progresso));
+    const b = resolveOperationalState(mk("queued", progresso));
+    expect(a).toEqual(b);
+  });
+});

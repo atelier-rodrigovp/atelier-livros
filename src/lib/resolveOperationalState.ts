@@ -22,11 +22,30 @@ export interface ProgressoEscrita {
   quality_status?: string;
   quality_stage?: string;
   quality_blockers?: string[];
+  quality_categoria?: string; // SG1: recuperavel_qualidade | fundacao_pendente | decisao_autoral | circuit_breaker | ...
+  quality_cap?: number | null; // capítulo bloqueado/em correção (do runner/worker)
+  quality_motivo?: string;
   aguardando_reset?: boolean;
   retry_at?: string | null;
   motivo?: string;
   infrastructure_retry?: unknown;
   reducao_qualidade?: string;
+  // SG3/SG6: espelho do ledger de correção automática (worker).
+  correcao?: {
+    ativa?: boolean;
+    capitulo?: number | null;
+    estagio?: string | null;
+    degrau?: number | null;
+    estrategia?: string | null;
+    tentativa?: number | null;
+    max_tentativas?: number;
+    retry_at?: string | null;
+    total_tentativas?: number;
+    historico?: unknown[];
+  } | null;
+  // SG7: pendência de FUNDAÇÃO (não bloqueia a escrita; bloqueia a publicação).
+  fundacao_status?: string;
+  fundacao_blockers?: string[];
 }
 
 export interface ChapterRow {
@@ -37,10 +56,14 @@ export interface ChapterRow {
 
 export type Situacao =
   | "executando"
+  | "correcao_automatica" // correção automática em andamento (rodando agora)
+  | "aguardando_correcao" // aguardando a próxima tentativa automática (retry_at)
   | "aguardando_cota"
   | "retry_infra"
   | "bloqueado_qualidade"
+  | "circuit_breaker" // não convergiu no orçamento — decisão humana com diagnóstico
   | "aguardando_decisao"
+  | "producao_desativada" // pausa GLOBAL do usuário (worker_control)
   | "pausado_manual"
   | "na_fila"
   | "interrompido_retomavel"
@@ -67,6 +90,11 @@ export interface OperationalState {
   proxima_acao: string | null;
   engine_info: { engine: string; provedor: string; modelo: string } | null;
   botoes: OperationalButton[];
+  // SG7: pendência de fundação SEPARADA do bloqueio editorial do capítulo —
+  // banner próprio; nunca some nem se mistura com o estado da escrita.
+  aviso_fundacao: string | null;
+  // SG6: detalhe da correção automática (degrau/tentativa/próxima janela).
+  correcao_info: { capitulo: number | null; degrau: number | null; tentativa: number | null; max_tentativas: number | null; retry_at: string | null } | null;
 }
 
 export type JobLite = Pick<Job, "status" | "erro"> & { progresso?: ProgressoEscrita | null };
@@ -76,7 +104,8 @@ export interface ResolverInput {
   chapters: ChapterRow[]; // linhas de chapters da edição de origem
   totalCapitulos: number;
   workerOnline: boolean;
-  producaoPausada?: boolean;
+  producaoPausada?: boolean; // pausa POR PROJETO (briefing.producao_pausada)
+  producaoGlobalAtiva?: boolean; // worker_control.enabled (default true) — pausa GLOBAL
   now?: number;
 }
 
@@ -93,7 +122,12 @@ export function toneToVariant(tone: Tone): "default" | "secondary" | "destructiv
 
 // Situações em que a ESCRITA governa o cartão (senão, o ciclo do projeto manda).
 export function escritaGovernaCartao(s: Situacao): boolean {
-  return s === "executando" || s === "bloqueado_qualidade" || s === "aguardando_cota" || s === "retry_infra" || s === "interrompido_retomavel" || s === "na_fila";
+  return (
+    s === "executando" || s === "correcao_automatica" || s === "aguardando_correcao" ||
+    s === "bloqueado_qualidade" || s === "circuit_breaker" || s === "aguardando_decisao" ||
+    s === "aguardando_cota" || s === "retry_infra" || s === "interrompido_retomavel" ||
+    s === "producao_desativada" || s === "na_fila"
+  );
 }
 
 const BLOQUEADO_DB = new Set(["blocked_quality", "blocked_infrastructure"]);
@@ -107,7 +141,8 @@ function contadores(chapters: ChapterRow[], pg: ProgressoEscrita) {
   const sincronizados = chapters.length;
   const aprovados = chapters.filter((c) => !(c.quality_status != null && BLOQUEADO_DB.has(c.quality_status))).length;
   const produzidos = Math.max(Number(pg.cap_atual ?? 0), sincronizados);
-  const em_correcao = pg.quality_status === "blocked_quality" ? 1 : 0;
+  const em_correcao =
+    pg.quality_status === "blocked_quality" || pg.quality_status === "auto_correcao" || pg.correcao?.ativa ? 1 : 0;
   return { produzidos, aprovados, sincronizados, em_correcao };
 }
 
@@ -145,7 +180,27 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
   const engine_info = pg.engine ? { engine: pg.engine, provedor: pg.provedor ?? "", modelo: pg.modelo ?? "" } : null;
   const retry = pg.retry_at ? Date.parse(pg.retry_at) : NaN;
   const retryFuturo = !Number.isNaN(retry) && retry > now;
-  const capituloBloqueado = pg.quality_status === "blocked_quality" ? (Number(pg.cap_atual ?? 0) || null) : null;
+  const emCorrecaoAuto = pg.quality_status === "auto_correcao" || pg.correcao?.ativa === true;
+  const capituloBloqueado =
+    pg.quality_status === "blocked_quality" || emCorrecaoAuto
+      ? (Number(pg.quality_cap ?? pg.correcao?.capitulo ?? pg.cap_atual ?? 0) || null)
+      : null;
+  const globalDesativada = input.producaoGlobalAtiva === false;
+
+  // SG7: pendência de fundação — banner PRÓPRIO, nunca misturado ao capítulo.
+  const aviso_fundacao =
+    pg.fundacao_status === "reprovada"
+      ? `Fundação com pendência (${(pg.fundacao_blockers ?? []).join(", ") || "gate reprovado"}) — a escrita continua; a publicação fica bloqueada até resolver.`
+      : null;
+  const correcao_info = pg.correcao
+    ? {
+        capitulo: pg.correcao.capitulo ?? null,
+        degrau: pg.correcao.degrau ?? null,
+        tentativa: pg.correcao.tentativa ?? null,
+        max_tentativas: pg.correcao.max_tentativas ?? null,
+        retry_at: pg.correcao.retry_at ?? null,
+      }
+    : null;
 
   // Botões contextuais (§7) montados ao fim conforme a situação.
   const botoes: OperationalButton[] = [];
@@ -155,7 +210,9 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
     contadores: cont,
     capitulo_bloqueado: capituloBloqueado,
     engine_info,
-    diagnostico_tecnico: job?.erro ?? pg.motivo ?? null,
+    diagnostico_tecnico: job?.erro ?? pg.quality_motivo ?? pg.motivo ?? null,
+    aviso_fundacao,
+    correcao_info,
   };
 
   // Sem job de escrita: estado neutro (projeto ainda não escreveu ou só histórico).
@@ -164,6 +221,12 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
   }
 
   // Hierarquia de precedência (§5).
+  // 1a. correção automática RODANDO agora (o job foi reivindicado pelo worker).
+  if (job.status === "running" && input.workerOnline && emCorrecaoAuto) {
+    add("ver_diagnostico", "Ver diagnóstico");
+    const t = pg.correcao?.tentativa ? ` (tentativa ${pg.correcao.tentativa}${pg.correcao?.max_tentativas ? `/${pg.correcao.max_tentativas}` : ""})` : "";
+    return { situacao: "correcao_automatica", badge: capituloBloqueado ? `Correção automática — cap ${capituloBloqueado}` : "Correção automática", tone: "info", mensagem_humana: `Correção automática em andamento${capituloBloqueado ? ` no capítulo ${capituloBloqueado}` : ""}${t} — nenhum clique é necessário.`, ...base, blocker_humano: humanizarBlocker(pg.quality_blockers, capituloBloqueado), proxima_acao: null, botoes };
+  }
   // 1. executando
   if (job.status === "running" && input.workerOnline) {
     add("ver_diagnostico", "Ver diagnóstico");
@@ -172,6 +235,25 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
   // 8. interrompido recuperável (running mas sem heartbeat)
   if (job.status === "running" && !input.workerOnline) {
     return { situacao: "interrompido_retomavel", badge: "Interrompido — retoma do disco", tone: "warning", mensagem_humana: "Execução interrompida; retoma automaticamente do disco quando o worker voltar.", ...base, blocker_humano: null, proxima_acao: null, botoes };
+  }
+  // 2a. correção automática AGENDADA (queued + retry_at): sem clique — o worker
+  // retoma sozinho na janela. Se a produção global estiver desativada, a verdade
+  // é outra (ramo 5a): a retomada NÃO vai acontecer até religar.
+  if (job.status === "queued" && emCorrecaoAuto && !globalDesativada) {
+    const h = horaCurta(pg.correcao?.retry_at ?? pg.retry_at);
+    const t = pg.correcao?.tentativa ? `tentativa ${pg.correcao.tentativa}${pg.correcao?.max_tentativas ? `/${pg.correcao.max_tentativas}` : ""}` : "próxima tentativa";
+    add("tentar_agora", "Tentar agora"); // ação EXCEPCIONAL: a ausência de clique não impede o fluxo
+    add("ver_diagnostico", "Ver diagnóstico");
+    return {
+      situacao: "aguardando_correcao",
+      badge: capituloBloqueado ? `Correção automática — cap ${capituloBloqueado}` : "Correção automática",
+      tone: "info",
+      mensagem_humana: `Correção automática do capítulo ${capituloBloqueado ?? "?"} agendada (${t}${h ? `, ~${h}` : ""}, degrau ${pg.correcao?.degrau ?? "?"}) — retoma sozinha, nenhum clique é necessário.`,
+      ...base,
+      blocker_humano: humanizarBlocker(pg.quality_blockers, capituloBloqueado),
+      proxima_acao: null,
+      botoes,
+    };
   }
   // 2. aguardando cota (limite do Max)
   if (job.status === "queued" && (pg.aguardando_reset || (retryFuturo && !pg.infrastructure_retry))) {
@@ -182,7 +264,42 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
   if (job.status === "queued" && pg.infrastructure_retry && retryFuturo) {
     return { situacao: "retry_infra", badge: "Retomada de infraestrutura agendada", tone: "warning", mensagem_humana: "Instabilidade técnica — retomando automaticamente.", ...base, blocker_humano: null, proxima_acao: null, botoes };
   }
-  // 4. bloqueado por qualidade
+  // 4a. circuit breaker (SG1-f): a engine tentou o orçamento inteiro e parou com
+  // diagnóstico — aqui a decisão é humana de verdade.
+  if (job.status === "paused" && pg.quality_categoria === "circuit_breaker") {
+    add("corrigir", `Corrigir capítulo ${capituloBloqueado ?? ""}`.trim());
+    add("ver_diagnostico", "Ver diagnóstico");
+    return {
+      situacao: "circuit_breaker",
+      badge: "Bloqueado após circuit breaker",
+      tone: "danger",
+      mensagem_humana: `A correção automática do capítulo ${capituloBloqueado ?? "?"} não convergiu após ${pg.correcao?.total_tentativas ?? "várias"} tentativa(s) — decisão humana necessária (diagnóstico completo disponível).`,
+      ...base,
+      blocker_humano: humanizarBlocker(pg.quality_blockers, capituloBloqueado),
+      proxima_acao: `Revisar o diagnóstico e decidir o capítulo ${capituloBloqueado ?? ""}`.trim(),
+      botoes,
+    };
+  }
+  // 4b'. decisão autoral / fundação pendente (SG1-e / SG7-d): não é defeito de
+  // capítulo nem falha técnica — o autor precisa decidir.
+  if (job.status === "paused" && (pg.quality_categoria === "decisao_autoral" || pg.quality_categoria === "fundacao_pendente")) {
+    const fundacao = pg.quality_categoria === "fundacao_pendente";
+    add("corrigir", fundacao ? "Resolver fundação" : "Resolver pendência");
+    add("ver_diagnostico", "Ver diagnóstico");
+    return {
+      situacao: "aguardando_decisao",
+      badge: fundacao ? "Fundação pendente (bloqueia publicação)" : "Decisão autoral necessária",
+      tone: "warning",
+      mensagem_humana: fundacao
+        ? "A publicação está bloqueada por uma inconsistência de fundação — os capítulos aprovados continuam intactos; decida a fundação para publicar."
+        : "A engine parou num ponto que exige decisão autoral (ver diagnóstico).",
+      ...base,
+      blocker_humano: humanizarBlocker(pg.quality_blockers, capituloBloqueado),
+      proxima_acao: fundacao ? "Resolver a fundação (refinar ou registrar exceção)" : "Registrar a decisão autoral",
+      botoes,
+    };
+  }
+  // 4. bloqueado por qualidade (legado/sem categoria — mantém o contrato anterior)
   if (job.status === "paused" && pg.quality_status === "blocked_quality") {
     const blocker = humanizarBlocker(pg.quality_blockers, capituloBloqueado);
     add("corrigir", `Corrigir capítulo ${capituloBloqueado ?? ""}`.trim());
@@ -194,6 +311,22 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
   // 4b. bloqueado por infraestrutura (paused)
   if (job.status === "paused" && pg.quality_status === "blocked_infrastructure") {
     return { situacao: "retry_infra", badge: "Bloqueado por infraestrutura", tone: "danger", mensagem_humana: traduzirMensagem(pg, null), ...base, blocker_humano: pg.motivo ?? null, proxima_acao: "Ver diagnóstico", botoes };
+  }
+  // 5a. produção GLOBAL desativada (worker_control): nada roda até religar — a
+  // verdade da fila inteira; distinto da pausa por projeto e da correção.
+  if (globalDesativada && (job.status === "queued" || job.status === "paused")) {
+    return {
+      situacao: "producao_desativada",
+      badge: "Produção global desativada",
+      tone: "neutral",
+      mensagem_humana: emCorrecaoAuto
+        ? "Produção global desativada — a correção automática agendada retoma quando você religar a produção."
+        : "Produção global desativada — nada roda até religar (Configurações).",
+      ...base,
+      blocker_humano: null,
+      proxima_acao: "Religar a produção (Configurações)",
+      botoes,
+    };
   }
   // 6. pausado manualmente (produção)
   if (input.producaoPausada && (job.status === "queued" || job.status === "paused")) {
@@ -221,6 +354,7 @@ export function buildResolverInput(args: {
   totalCapitulos: number;
   workerOnline: boolean;
   producaoPausada?: boolean;
+  producaoGlobalAtiva?: boolean;
   now?: number;
 }): ResolverInput {
   const vig = selecionarJobVigenteEscrita(args.jobs);
@@ -230,6 +364,7 @@ export function buildResolverInput(args: {
     totalCapitulos: args.totalCapitulos,
     workerOnline: args.workerOnline,
     producaoPausada: args.producaoPausada,
+    producaoGlobalAtiva: args.producaoGlobalAtiva,
     now: args.now,
   };
 }

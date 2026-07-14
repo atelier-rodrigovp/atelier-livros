@@ -228,6 +228,49 @@ def _quality_cap_path(projeto, n):
     return os.path.join(projeto, "quality", "capitulo-{:02d}.json".format(int(n)))
 
 
+def _correcao_instrucao_path(projeto, n):
+    # Instrucao de correcao gravada pelo WORKER (escada de correcao automatica,
+    # goal correcao-sem-clique): degrau/estrategia/blockers. O runner a injeta no
+    # micro-loop de revisao; a guarda de aceitacao RECONTA tudo do mesmo jeito —
+    # a instrucao dirige a correcao, nunca afrouxa o gate.
+    return os.path.join(projeto, DIR_REVIEW, "_correcao-cap-{:02d}.json".format(int(n)))
+
+
+# Diretiva por degrau da escada (goal correcao-sem-clique). Correcao MINIMA e
+# focalizada: nunca reescrever o capitulo inteiro quando poucas frases resolvem.
+_DIRETIVA_DEGRAU = {
+    2: ("CORRECAO DIRIGIDA (degrau 2): os blockers abaixo sao OBRIGATORIOS e vem com as "
+        "frases exatas — corrija-os pontualmente; nada alem do necessario."),
+    3: ("EDICAO FOCALIZADA (degrau 3): toque APENAS nos trechos apontados nos blockers "
+        "abaixo (o revisor so mapeia os trechos; o editor aplica). NAO reescreva paragrafos "
+        "inteiros nem o capitulo."),
+    4: ("REESCRITA FOCALIZADA (degrau 4): delegue ao `livro-escritor` a reescrita SOMENTE "
+        "dos trechos/cenas problematicos dos blockers abaixo, PRESERVANDO fatos, voz, "
+        "continuidade e o restante do capitulo."),
+    5: ("REVISAO AMPLA (degrau 5): o defeito e narrativo — revise o capitulo inteiro "
+        "(estrutura da cena, evento, propulsao), mantendo fatos e continuidade."),
+    6: ("REVISAO AMPLA COM MODELO ALTERNATIVO (degrau 6): revise o capitulo inteiro; o "
+        "veredito de propulsao roda elevado (revisor-craft-opus)."),
+}
+
+
+def _bloco_correcao(projeto, n):
+    # Le a instrucao de correcao do worker (se houver) e monta o bloco do prompt.
+    try:
+        with open(_correcao_instrucao_path(projeto, n), "r", encoding="utf-8") as fh:
+            inst = json.load(fh)
+    except (OSError, ValueError):
+        return ""
+    degrau = inst.get("degrau")
+    diretiva = _DIRETIVA_DEGRAU.get(degrau)
+    if not diretiva:
+        return ""
+    blockers = [str(b) for b in (inst.get("blockers") or [])][:8]
+    return ("INSTRUCAO DE CORRECAO AUTOMATICA (tentativa {} da escada): {} BLOCKERS DO GATE "
+            "(a guarda de aceitacao RECONTA e reprova se persistirem): {}. ").format(
+        inst.get("tentativa", "?"), diretiva, " || ".join(blockers) or "(ver pendencias do gate)")
+
+
 def _parada_limpa_apos_cap(projeto, state, piso, args):
     """Parada LIMPA por marcador: se <projeto>/_PARAR_APOS_CAP existir (conteudo =
     N, default 1), o runner encerra com rc=0 assim que os N primeiros capitulos
@@ -653,6 +696,8 @@ def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
                           " || ".join(_pend[:8]) + ". ")
     except (OSError, ValueError):
         pass
+    # Escada de correcao automatica (worker): diretiva do degrau + blockers exatos.
+    bloco_correcao = _bloco_correcao(projeto, n)
     if cads:
         bloco_cad = ("contagem REAL deste capitulo, ACIMA do orcamento -> exija que o "
                      "editor VARIE O RITMO (funda frases curtas coladas, encadeie na "
@@ -692,7 +737,7 @@ def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
         "conformidade + o VEREDITO DE PROPULSAO ('isto esta vivo?') que voce ja conhece "
         "(fair-play, cota de tiques, info-dump, interioridade-com-custo, relogio, "
         "coincidencia, nao-reexposicao, corte-no-pico, exposicao dramatizada). Some a isso "
-        "a EVIDENCIA REAL deste capitulo (contagens do detector, NAO recompute): {bloco_gate}{bloco_cad} "
+        "a EVIDENCIA REAL deste capitulo (contagens do detector, NAO recompute): {bloco_correcao}{bloco_gate}{bloco_cad} "
         "{bloco_inter} {bloco_prop}{bloco_beats}"
         "Devolva uma LISTA de ate {maxed} EDICOES PONTUAIS (trecho -> correcao) que INJETAM "
         "propulsao (dramatize, corte no pico, encadeie a caca as pistas) e VARIAM o ritmo "
@@ -708,7 +753,8 @@ def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
         "{bloco_spec_proativa}"
         "{n_passo_final}) Encerre. NAO gere a critica nem a prosa na SUA sessao - so dispare os "
         "Tasks acima e confirme que {arq} foi regravado.\n"
-    ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_gate=bloco_gate, bloco_cad=bloco_cad,
+    ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_correcao=bloco_correcao,
+             bloco_gate=bloco_gate, bloco_cad=bloco_cad,
              bloco_inter=bloco_inter, bloco_prop=bloco_prop, bloco_beats=_beats_recentes(projeto, n),
              bloco_spec_proativa=bloco_spec_proativa, n_passo_final=n_passo_final)
 
@@ -2112,6 +2158,7 @@ def executar(projeto, args):
         s0["quality_status"] = "pending"
         s0["quality_blockers"] = []
         s0["quality_reason"] = ""
+        s0["quality_cap"] = None
     save_state(projeto, s0)
 
     while True:
@@ -2140,6 +2187,7 @@ def executar(projeto, args):
                 state["quality_stage"] = "DESMANEIRISMO"
                 state["quality_blockers"] = acima_teto
                 state["quality_reason"] = "teto automatico atingido com blockers residuais"
+                state["quality_cap"] = None  # book-wide
                 save_state(projeto, state)
                 log(projeto, "QUALITY_BLOCKED DESMANEIRISMO: {} blocker(s) apos o teto.".format(len(acima_teto)))
                 print("QUALITY_BLOCKED stage=DESMANEIRISMO blockers={}".format(len(acima_teto)), flush=True)
@@ -2212,6 +2260,7 @@ def executar(projeto, args):
                         state["quality_stage"] = "SPEC_CAPITULO"
                         state["quality_blockers"] = [motivo_spec]
                         state["quality_reason"] = "spec segue reprovada apos o teto automatico"
+                        state["quality_cap"] = int(alvo)  # capitulo bloqueado (worker/UI)
                         save_state(projeto, state)
                         log(projeto, "QUALITY_BLOCKED spec cap {}: {}".format(alvo, motivo_spec))
                         print("QUALITY_BLOCKED stage=SPEC_CAPITULO cap={}".format(alvo), flush=True)
@@ -2316,6 +2365,11 @@ def executar(projeto, args):
                     os.remove(_gate_pendencias_path(projeto, revisando_cap))
                 except OSError:
                     pass
+                # Instrucao de correcao do worker cumprida: remove (idempotente).
+                try:
+                    os.remove(_correcao_instrucao_path(projeto, revisando_cap))
+                except OSError:
+                    pass
                 state["_runner"]["tentativas_sem_progresso"] = 0
                 save_state(projeto, state)
                 if not setpiece_ok:
@@ -2340,6 +2394,7 @@ def executar(projeto, args):
                 state["quality_stage"] = "REVISAO_CAPITULO"
                 state["quality_blockers"] = pend
                 state["quality_reason"] = "time escritor->revisor->editor esgotou o orcamento sem comprovar pos-condicoes"
+                state["quality_cap"] = int(revisando_cap)  # capitulo bloqueado (worker/UI)
                 save_state(projeto, state)
                 log(projeto, "QUALITY_BLOCKED revisao cap {}: {}".format(
                     revisando_cap, "; ".join(pend)))

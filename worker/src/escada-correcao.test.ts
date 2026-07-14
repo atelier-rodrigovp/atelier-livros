@@ -9,12 +9,18 @@ const recontarCoisa = (t: string): BlockerLite[] => {
 };
 
 describe("escada de correção (S9/1.6)", () => {
-  it("classifica: meta/espaço = mecânico seguro; muleta = lexical; cadência = narrativo", () => {
+  it("classifica: meta/espaço = mecânico seguro; muleta/molde/cadência = lexical (frase); resto = narrativo", () => {
     expect(classificarBlocker("META_TEXTO residual")).toBe("mecanico_seguro");
     expect(classificarBlocker("espaçamento duplo")).toBe("mecanico_seguro");
     expect(classificarBlocker("muleta coisa/coisas 2x")).toBe("lexical_prosa");
     expect(classificarBlocker("MULETA_COISA")).toBe("lexical_prosa");
-    expect(classificarBlocker("cadencia anafora frases coladas")).toBe("narrativo");
+    // Defeitos DE FRASE apontados com ocorrências exatas pelo gate: correção mínima
+    // é o editor focado (degrau 2), não revisão ampla (goal correcao-sem-clique).
+    expect(classificarBlocker("cadencia anafora frases coladas")).toBe("lexical_prosa");
+    expect(classificarBlocker("molde antitese 'nao X, mas Y' 2x")).toBe("lexical_prosa");
+    expect(classificarBlocker("repeticao cross-cap 12")).toBe("lexical_prosa");
+    expect(classificarBlocker("continuidade nao gravada")).toBe("narrativo");
+    expect(classificarBlocker("piso de palavras reprovado (900 < 1800)")).toBe("narrativo");
   });
 
   it("degrau 1 remove meta-texto e normaliza espaço, SEM tocar palavras da prosa", () => {
