@@ -234,7 +234,7 @@ export default function Dashboard() {
                           <div className="pt-1">
                             <div className="mb-0.5 text-[11px] text-muted-foreground">
                               {produzidos} produzidos · {aprovados} aprovados · {sincronizados} sincronizados
-                              {em_correcao ? ` · cap ${st.capitulo_bloqueado} em correção` : ""}
+                              {em_correcao ? (st.capitulo_bloqueado != null ? ` · cap ${st.capitulo_bloqueado} em correção` : " · 1 em correção") : ""}
                             </div>
                             <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
                               <div className="h-full bg-primary" style={{ width: `${Math.min(100, (sincronizados / tt) * 100)}%` }} />
