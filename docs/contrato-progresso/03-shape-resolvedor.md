@@ -98,7 +98,7 @@ interface OperationalState {
   diagnostico_tecnico: string | null; // erro cru vai AQUI (área de diagnóstico)
   contadores: { produzidos: number; aprovados: number; sincronizados: number; em_correcao: number };
   capitulo_bloqueado: number | null;
-  blocker_humano: string | null;     // ex.: "2 usos de 'coisa' no cap 38 — trocar pela coisa concreta"
+  blocker_humano: string | null;     // ex.: "2 usos de 'coisa' no cap 38 — trocar pelo referente concreto"
   proxima_acao: string | null;       // ex.: "Corrigir capítulo 38"
   engine_info: { engine: string; provedor: string; modelo: string } | null;
   botoes: Array<{ id: string; label: string; habilitado: boolean }>;

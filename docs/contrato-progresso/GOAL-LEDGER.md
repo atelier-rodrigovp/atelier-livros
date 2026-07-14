@@ -28,7 +28,7 @@ religação da fila é decisão exclusiva do autor; nunca iniciar jobs de produ�
 | 1 | Contrato (specs 1.1–1.8) | **CONCLUÍDA** · PORTÃO 1 **APROVADO** |
 | 2 | Implementação incremental (loop agêntico) | **CONCLUÍDA** (backend + frontend) |
 | 3 | Testes obrigatórios (regressão 36/37/38 + demais) | **em andamento** (unit/integração verdes; falta paridade end-to-end visual) |
-| 4 | Reconciliação do caso real + validação visual | pendente (exige OK explícito no portão) |
+| 4 | Reconciliação do caso real + validação visual | **CONCLUÍDA** — reconciliação+deploy+validação visual autenticada PROVADOS |
 
 ## Subgoals
 
@@ -181,3 +181,50 @@ religação da fila é decisão exclusiva do autor; nunca iniciar jobs de produ�
   validação visual na plataforma publicada (Fase 4) e reconciliação real.
 - **Próximo passo:** PORTÃO — Fase 4 (reconciliação real do 53abdade + deploy + validação
   visual). Exige OK EXPLÍCITO do autor (opera sobre dado real; deploy).
+
+### Ciclo 7 — 2026-07-14 — Fase 4: reconciliação real + deploy (aprovado opção 1)
+- **Ajuste de contador (regra de segurança):** `aprovados` = linhas sincronizadas NÃO
+  bloqueadas (invariante S3: worker só sincroniza aprovados). NÃO escrevemos "approved"
+  em linhas legadas — respeita "não aprovar arquivo só porque existe". +2 testes (14/14).
+- **RECONCILIAÇÃO REAL do 53abdade** (dogfooding do fix: `resolveChapterState` +
+  `deveSincronizar`): cap-37 sincronizado ao Storage + `chapters` com
+  `text_sha256=f26e5831…`, `quality_status=approved`; **38 NÃO tocado** (bloqueado);
+  progresso do job vigente reconstruído por MERGE honesto (cap_atual=38, total=60,
+  engine, mantendo quality_status/stage/blockers).
+- **PROVA (3 camadas):** banco `chapters` total 37, max 37, cap37 com hash aprovado,
+  cap38 AUSENTE · Storage 37 arquivos, tem 37 não tem 38 · disco cap37 sha256 =
+  `f26e5831…` = banco = aprovado (hash bate). Scripts temporários removidos.
+- **DEPLOY:** commit SELETIVO (só 20 arquivos do goal; nada das outras iniciativas) →
+  push `bdd549f..35a2262` na master → GitHub Actions **success**. Bundle live
+  `index-YBRqGu3C.js` **contém** as strings do resolvedor (produzidos 8, sincronizados 6,
+  aprovados 6, "Ver diagnóstico técnico" 1, "Corrigir capítulo" 3) — UI do contrato NO AR.
+- **Verificação:** suíte COMPLETA monorepo 521/521 verde; `npm run build` OK; tsc -b limpo.
+- **PENDENTE (depende do autor):** screenshot AUTENTICADO das 2 telas do 53abdade. A
+  extensão do Chrome do Claude não está conectada e não posso logar (senha proibida) —
+  não faço a captura autenticada sozinho. Código live comprovado; falta a foto renderizada.
+- **DoD:** todos os critérios PROVADOS exceto a validação visual autenticada (bloqueada
+  por acesso, não por defeito). Goal **ATIVO** só nesse item.
+
+### Ciclo 8 — 2026-07-14 — Validação visual autenticada + fechamento
+- **VALIDAÇÃO VISUAL AUTENTICADA CONFIRMADA PELO AUTOR** (sessão logada) nas DUAS telas:
+  - **Dashboard (cartão 53abdade):** "Correção necessária no cap 38 · 38 produzidos ·
+    37 aprovados · 37 sincronizados · cap 38 em correção" ✅
+  - **Aba Escrita:** "38 produzidos · 37 aprovados · 37 sincronizados · meta 60" +
+    mensagem TRADUZIDA ("Capítulo 38 precisa de uma correção de estilo antes de seguir.
+    2 usos de 'coisa' no capítulo 38 …") + erro cru APENAS dentro de "Ver diagnóstico
+    técnico" ✅
+  - Nenhuma tela divergiu do resolvedor (paridade real confirmada).
+- **Retoque cosmético (não reabriu o goal):** frase do humanizador `humanizarBlocker`
+  "trocar pela coisa concreta" → "trocar pelo referente concreto" (evita a ironia de
+  usar "coisa" num blocker sobre "coisa"). String minha, não citação do gate.
+- **DECISÃO FINAL: goal CONCLUÍDO.** Todos os critérios da Definition of Done com
+  evidência verificável: aprovado persistido antes do próximo; bloqueio posterior não
+  oculta anterior; progresso sobrevive a exceção/reinício (merge); banco+Storage+disco
+  reconciliados; dashboard e projeto no MESMO resolvedor com paridade testada; contadores
+  semânticos corretos; jobs antigos sem bloqueio falso; mensagens traduzidas com
+  diagnóstico acionável; qualidade≠cota≠infra distintos; contrato engine-agnóstico
+  (alinhado a engine_calls/engine_chapter_provenance); caso 36/37/38 passa (fixture E
+  reconciliação real); testes automatizados verdes (521/521); validação visual na
+  plataforma publicada; nenhum gate enfraquecido; nenhum capítulo perdido.
+- **Decisões que ficam com o autor:** corrigir o cap-38 (escada S9 disponível; escrita
+  NÃO retomada); reiniciar o worker para ativar o backend novo (produção pausada).

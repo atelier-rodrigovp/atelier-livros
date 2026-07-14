@@ -118,7 +118,7 @@ function humanizarBlocker(blockers: string[] | undefined, capitulo: number | nul
   const mMuleta = /muleta\s+([^\s]+)\s+(\d+)x/i.exec(b);
   if (mMuleta) {
     const palavra = mMuleta[1].split("/")[0];
-    return `${mMuleta[2]} usos de "${palavra}"${capitulo ? ` no capítulo ${capitulo}` : ""} — trocar pela coisa concreta a que se refere.`;
+    return `${mMuleta[2]} usos de "${palavra}"${capitulo ? ` no capítulo ${capitulo}` : ""} — trocar pelo referente concreto a que se refere.`;
   }
   if (/cadencia|cadência|anafora|anáfora|fragmento/i.test(b)) return `Ajuste de cadência${capitulo ? ` no capítulo ${capitulo}` : ""} (ritmo repetitivo).`;
   return b.length > 140 ? b.slice(0, 137) + "…" : b;
