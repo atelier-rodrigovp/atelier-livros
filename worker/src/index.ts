@@ -265,10 +265,16 @@ async function processarJob(job: Job) {
   } catch (e: any) {
     if (e instanceof QualityBlockedError || e?.name === "QualityBlockedError") {
       const err = e as QualityBlockedError;
+      // MERGE, nunca substituição (Bug B / S4): preserva cap_atual/total/fase/
+      // palavras/nota/continua do progresso vigente. Antes gravava um literal e a
+      // UI caía na contagem do banco sem explicar o resto.
+      const { data: cur } = await sb.from("jobs").select("progresso").eq("owner", OWNER).eq("id", job.id).single();
+      const progressoAtual = (cur?.progresso as Record<string, unknown>) ?? {};
       await finalizar(job.id, {
         status: "paused",
         erro: err.message,
         progresso: {
+          ...progressoAtual,
           quality_status: "blocked_quality",
           quality_stage: err.stage,
           quality_blockers: err.blockers,
@@ -282,10 +288,14 @@ async function processarJob(job: Job) {
     }
     if (e instanceof InfrastructureBlockedError || e?.name === "InfrastructureBlockedError") {
       const err = e as InfrastructureBlockedError;
+      // MERGE, nunca substituição (Bug B / S4): idem QualityBlockedError.
+      const { data: cur } = await sb.from("jobs").select("progresso").eq("owner", OWNER).eq("id", job.id).single();
+      const progressoAtual = (cur?.progresso as Record<string, unknown>) ?? {};
       await finalizar(job.id, {
         status: "paused",
         erro: err.message,
         progresso: {
+          ...progressoAtual,
           quality_status: "blocked_infrastructure",
           dependency: err.dependency,
           resumo: "Bloqueado por infraestrutura",

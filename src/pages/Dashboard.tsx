@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
 import { signedUrl, deleteProject } from "@/lib/storage";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
-import type { Project } from "@/lib/types";
-import { displayProjectStatus } from "@/lib/status";
+import type { Job, Project } from "@/lib/types";
+import { projectStatusBadge } from "@/lib/status";
+import { resolveOperationalState, buildResolverInput, toneToVariant, escritaGovernaCartao, type OperationalState, type ChapterRow } from "@/lib/resolveOperationalState";
 import { CoverArt } from "@/components/CoverArt";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -49,21 +50,24 @@ export default function Dashboard() {
   const nav = useNavigate();
   const { online } = useWorkerStatus(15_000);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [feitos, setFeitos] = useState<Record<string, number>>({});
+  const [estados, setEstados] = useState<Record<string, OperationalState>>({});
   const [capas, setCapas] = useState<Record<string, string>>({});
-  const [ativos, setAtivos] = useState<Set<string>>(new Set());
-  const [bloqueados, setBloqueados] = useState<Set<string>>(new Set());
 
   const carregar = useCallback(async () => {
-    const [{ data: projs }, { data: eds }, { data: chs }, { data: jobsAtivos }, { data: arts }, { data: jobsPausados }] = await Promise.all([
+    // Resolvedor único (S7): busca jobs de escrita + chapters (com hash/quality) +
+    // pausa de produção; cada projeto vira UMA OperationalState — mesma fonte da
+    // página de projeto e da observabilidade (paridade).
+    const [{ data: projs }, { data: eds }, { data: chs }, { data: jobsEscrita }, { data: arts }, { data: ctrl }] = await Promise.all([
       supabase.from("projects").select("*").order("created_at", { ascending: false }),
       supabase.from("editions").select("id,project_id,is_origem"),
-      supabase.from("chapters").select("edition_id"),
-      supabase.from("jobs").select("project_id").in("status", ["queued", "running"]).neq("tipo", "controle_escrita"),
+      supabase.from("chapters").select("edition_id,numero,text_sha256,quality_status"),
+      supabase.from("jobs").select("id,project_id,tipo,status,erro,progresso,created_at").eq("tipo", "escrever_livro"),
       supabase.from("artifacts").select("edition_id,storage_path,url_publica").eq("tipo", "capa"),
-      supabase.from("jobs").select("project_id,progresso").eq("status", "paused"),
+      supabase.from("worker_control").select("enabled").maybeSingle(),
     ]);
-    setProjects((projs as Project[]) ?? []);
+    const projList = (projs as Project[]) ?? [];
+    setProjects(projList);
+    const producaoPausada = (ctrl as { enabled?: boolean } | null)?.enabled === false;
 
     const origemEd: Record<string, string> = {};
     const edToProj: Record<string, string> = {};
@@ -71,11 +75,25 @@ export default function Dashboard() {
       edToProj[e.id] = e.project_id;
       if (e.is_origem) origemEd[e.project_id] = e.id;
     }
-    const porEd: Record<string, number> = {};
-    for (const c of (chs as { edition_id: string }[]) ?? []) porEd[c.edition_id] = (porEd[c.edition_id] ?? 0) + 1;
-    const f: Record<string, number> = {};
-    for (const [pid, edid] of Object.entries(origemEd)) f[pid] = porEd[edid] ?? 0;
-    setFeitos(f);
+    // chapters da edição de origem, por projeto.
+    const chsPorProj: Record<string, ChapterRow[]> = {};
+    for (const c of (chs as (ChapterRow & { edition_id: string })[]) ?? []) {
+      const pid = edToProj[c.edition_id];
+      if (!pid || origemEd[pid] !== c.edition_id) continue;
+      (chsPorProj[pid] ??= []).push({ numero: c.numero, text_sha256: c.text_sha256, quality_status: c.quality_status });
+    }
+    // jobs de escrita por projeto.
+    const jobsPorProj: Record<string, Job[]> = {};
+    for (const j of (jobsEscrita as Job[]) ?? []) {
+      if (j.project_id) (jobsPorProj[j.project_id] ??= []).push(j);
+    }
+    const est: Record<string, OperationalState> = {};
+    for (const p of projList) {
+      est[p.id] = resolveOperationalState(
+        buildResolverInput({ jobs: jobsPorProj[p.id] ?? [], chapters: chsPorProj[p.id] ?? [], totalCapitulos: p.total_capitulos ?? 0, workerOnline: online, producaoPausada })
+      );
+    }
+    setEstados(est);
 
     // Capa do projeto = capa da edição de origem.
     const origemSet = new Set(Object.values(origemEd));
@@ -88,17 +106,7 @@ export default function Dashboard() {
         })
     );
     setCapas(Object.fromEntries(capaEntries.filter(([, u]) => u)) as Record<string, string>);
-
-    setAtivos(new Set(((jobsAtivos as { project_id: string | null }[]) ?? []).map((j) => j.project_id).filter(Boolean) as string[]));
-    setBloqueados(
-      new Set(
-        (((jobsPausados as { project_id: string | null; progresso: any }[]) ?? [])
-          .filter((j) => j.progresso?.quality_status === "blocked_quality")
-          .map((j) => j.project_id)
-          .filter(Boolean)) as string[]
-      )
-    );
-  }, []);
+  }, [online]);
 
   useEffect(() => {
     carregar();
@@ -111,15 +119,17 @@ export default function Dashboard() {
     return () => { supabase.removeChannel(ch); };
   }, [carregar]);
 
+  // Status do cartão: a ESCRITA governa quando ativa/bloqueada (via resolvedor único);
+  // senão, o ciclo de vida do projeto. Mesma OperationalState das outras telas.
   const statusDe = useCallback(
-    (p: Project): Derivado =>
-      displayProjectStatus({
-        projectStatus: p.status,
-        hasActiveJob: ativos.has(p.id),
-        workerOnline: online,
-        qualityBlocked: bloqueados.has(p.id),
-      }),
-    [ativos, online, bloqueados]
+    (p: Project): Derivado => {
+      const st = estados[p.id];
+      if (st && escritaGovernaCartao(st.situacao)) {
+        return { label: st.badge, variant: toneToVariant(st.tone), pulse: st.situacao === "executando" };
+      }
+      return { ...projectStatusBadge(p.status), pulse: false };
+    },
+    [estados]
   );
 
   async function excluir(p: Project) {
@@ -214,14 +224,18 @@ export default function Dashboard() {
                       <p className="text-xs text-muted-foreground">{c.project.genero ?? "—"} · {c.project.idioma_origem}</p>
                       <StatusBadge s={statusDe(c.project)} />
                       {(() => {
-                        const fe = feitos[c.project.id] ?? 0;
+                        const st = estados[c.project.id];
                         const tt = c.project.total_capitulos;
-                        if (!fe || !tt) return null;
+                        if (!st || !tt || st.contadores.produzidos === 0) return null;
+                        const { produzidos, aprovados, sincronizados, em_correcao } = st.contadores;
                         return (
                           <div className="pt-1">
-                            <div className="mb-0.5 text-[11px] text-muted-foreground">{fe}/{tt} capítulos</div>
+                            <div className="mb-0.5 text-[11px] text-muted-foreground">
+                              {produzidos} produzidos · {aprovados} aprovados · {sincronizados} sincronizados
+                              {em_correcao ? ` · cap ${st.capitulo_bloqueado} em correção` : ""}
+                            </div>
                             <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
-                              <div className="h-full bg-primary" style={{ width: `${Math.min(100, (fe / tt) * 100)}%` }} />
+                              <div className="h-full bg-primary" style={{ width: `${Math.min(100, (sincronizados / tt) * 100)}%` }} />
                             </div>
                           </div>
                         );

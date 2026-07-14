@@ -3,7 +3,8 @@ import { Activity, AlertTriangle, Coins, Gauge, PauseCircle, RotateCcw, Timer, Z
 import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
-import { deriveWritingStatus } from "@/lib/operationalStatus";
+import { resolveOperationalState, type ProgressoEscrita } from "@/lib/resolveOperationalState";
+import type { JobStatus } from "@/lib/types";
 
 // Espelha worker/src/telemetria.ts (payload da linha jobs tipo='telemetria').
 type Usage = { input: number; cache_creation: number; cache_read: number; output: number; msgs: number };
@@ -54,11 +55,18 @@ function Kpi({ label, valor, sub, Icon, tone }: { label: string; valor: string; 
   );
 }
 
-// Estado derivado do job ativo: rodando / na fila / pausado (limite do Max).
+// Estado derivado do job ativo pelo RESOLVEDOR ÚNICO (S7) — mesma OperationalState
+// do dashboard e da página do projeto (paridade).
 function statusVivo(v: Vivo): { label: string; dot: string; detail?: string } {
-  const s = deriveWritingStatus(v.job, v.workerOnline);
-  const dot = s.tone === "danger" ? "bg-red-500" : s.tone === "warning" ? "bg-amber-500" : s.tone === "success" ? "bg-emerald-500 animate-pulse" : s.tone === "queued" ? "bg-sky-500" : "bg-muted-foreground/40";
-  return { label: s.label, dot, detail: s.detail };
+  const st = resolveOperationalState({
+    job: v.job ? { status: v.job.status as JobStatus, erro: null, progresso: (v.job.progresso ?? null) as ProgressoEscrita | null } : null,
+    chapters: [],
+    totalCapitulos: Number(v.job?.progresso?.total ?? 0),
+    workerOnline: v.workerOnline,
+  });
+  const dot = st.tone === "danger" ? "bg-red-500" : st.tone === "warning" || st.tone === "info" ? "bg-amber-500" : st.tone === "success" ? "bg-emerald-500 animate-pulse" : st.situacao === "na_fila" ? "bg-sky-500" : "bg-muted-foreground/40";
+  const detail = st.blocker_humano ?? (st.situacao === "bloqueado_qualidade" || st.situacao === "aguardando_cota" ? st.mensagem_humana : undefined);
+  return { label: st.badge, dot, detail };
 }
 
 // Seção "Em produção agora": comportamento de consumo AO VIVO dos projetos escrevendo.

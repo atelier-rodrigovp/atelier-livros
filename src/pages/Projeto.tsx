@@ -22,6 +22,7 @@ import {
 import { ChevronDown } from "lucide-react";
 import { IDIOMAS, type Job, type Project } from "@/lib/types";
 import { displayProjectStatus, jobStatusBadgeEx } from "@/lib/status";
+import { resolveOperationalState, buildResolverInput, toneToVariant, escritaGovernaCartao } from "@/lib/resolveOperationalState";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -348,7 +349,14 @@ export default function Projeto() {
 
   if (!proj) return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   const hasActiveJob = jobs.some((j) => j.status === "queued" || j.status === "running");
-  const sb = displayProjectStatus({ projectStatus: proj.status, hasActiveJob, workerOnline });
+  // Header pelo MESMO resolvedor único (S7): a escrita governa quando ativa/bloqueada;
+  // senão, o ciclo de vida do projeto. Mesma OperationalState do dashboard e da aba.
+  const sincronizadosProj = origem ? chapters[origem.id] ?? 0 : 0;
+  const chapterRowsProj = Array.from({ length: sincronizadosProj }, (_, i) => ({ numero: i + 1, text_sha256: "synced", quality_status: "approved" }));
+  const stProjeto = resolveOperationalState(buildResolverInput({ jobs, chapters: chapterRowsProj, totalCapitulos: Number(proj.total_capitulos ?? 0), workerOnline, producaoPausada: (proj.briefing as any)?.producao_pausada === true }));
+  const sb = escritaGovernaCartao(stProjeto.situacao)
+    ? { label: stProjeto.badge, variant: toneToVariant(stProjeto.tone), pulse: stProjeto.situacao === "executando" }
+    : displayProjectStatus({ projectStatus: proj.status, hasActiveJob, workerOnline });
   // Dados da saga: estado da SÉRIE inteira (idêntico em qualquer volume aberto).
   // Conta volumes distintos já criados (este + irmãos), não o nº do volume atual.
   const serieTotal = Number((proj.briefing as any)?.serie_total ?? 0);
@@ -691,6 +699,10 @@ export default function Projeto() {
                 const sincronizados = origem ? chapters[origem.id] ?? 0 : 0;
                 const feitos = escrevendo ? Math.max(Number(p.cap_atual ?? 0), sincronizados) : sincronizados;
                 const pct = total > 0 ? Math.min(100, Math.round((feitos / total) * 100)) : 0;
+                // Resolvedor único (S7): a MESMA OperationalState do dashboard/observabilidade.
+                // chapters sincronizados são aprovados+hash (o worker só sincroniza aprovados).
+                const chapterRows = Array.from({ length: sincronizados }, (_, i) => ({ numero: i + 1, text_sha256: "synced", quality_status: "approved" }));
+                const st = resolveOperationalState(buildResolverInput({ jobs, chapters: chapterRows, totalCapitulos: Number(proj.total_capitulos ?? total), workerOnline, producaoPausada: (proj.briefing as any)?.producao_pausada === true }));
                 // Nota oficial = avaliação independente (nota_review). Auto-nota da
                 // escrita fica separada e rotulada como provisória.
                 const notaOficial = origem?.nota_review != null ? Number(origem.nota_review) : null;
@@ -714,7 +726,7 @@ export default function Projeto() {
                 return (
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
-                      <span><span className="text-muted-foreground">Capítulos:</span> <strong>{feitos}{total ? `/${total}` : ""}</strong></span>
+                      <span><span className="text-muted-foreground">Capítulos:</span> <strong>{st.contadores.produzidos} produzidos · {st.contadores.aprovados} aprovados · {st.contadores.sincronizados} sincronizados</strong>{total ? <span className="text-muted-foreground"> · meta {total}</span> : null}</span>
                       {palavras > 0 && <span><span className="text-muted-foreground">Palavras:</span> <strong>{palavras.toLocaleString("pt-BR")}</strong></span>}
                       {notaOficial != null ? (
                         <span className="flex items-center gap-1.5">
@@ -727,16 +739,9 @@ export default function Projeto() {
                       {escrevendo && autoNota != null && (
                         <span className="text-xs text-muted-foreground">auto-avaliação {autoNota} (provisória)</span>
                       )}
-                      <span className="text-muted-foreground">
-                        {escrevendo
-                          ? (p.fase ? String(p.fase) : "escrevendo…")
-                          : total > 0 && feitos >= total
-                            ? "concluído"
-                            : j?.status === "paused"
-                              ? "pausado — decisão pendente"
-                              : feitos > 0
-                                ? "interrompido"
-                                : "não iniciado"}
+                      <span className="flex items-center gap-2">
+                        <Badge variant={toneToVariant(st.tone)}>{st.badge}</Badge>
+                        {st.mensagem_humana ? <span className="text-muted-foreground">{st.mensagem_humana}</span> : null}
                       </span>
                     </div>
                     {total > 0 && (
@@ -744,13 +749,25 @@ export default function Projeto() {
                         <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
                       </div>
                     )}
-                    <div className="flex items-center gap-3">
+                    {st.blocker_humano ? (
+                      <p className="text-xs text-amber-700 dark:text-amber-400">{st.blocker_humano}</p>
+                    ) : null}
+                    <div className="flex flex-wrap items-center gap-3">
                       <Button title={dicaRefino} disabled={escrevendo || escritaPausada} onClick={() => enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {})}>
                         {escrevendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenLine className="h-4 w-4" />}
-                        {rotulo}
+                        {st.situacao === "bloqueado_qualidade" ? `Corrigir capítulo ${st.capitulo_bloqueado ?? ""}`.trim() : rotulo}
                       </Button>
-                      <JobStatus job={j} producaoPausada={(proj.briefing as any)?.producao_pausada === true} />
+                      {st.engine_info?.modelo ? (
+                        <span className="text-xs text-muted-foreground">motor: {st.engine_info.engine} · {st.engine_info.modelo}</span>
+                      ) : null}
                     </div>
+                    {/* Erro cru do runner NUNCA é mensagem principal (S8): vai para diagnóstico. */}
+                    {st.diagnostico_tecnico ? (
+                      <details className="text-xs text-muted-foreground">
+                        <summary className="cursor-pointer select-none">Ver diagnóstico técnico</summary>
+                        <p className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px]">{st.diagnostico_tecnico}</p>
+                      </details>
+                    ) : null}
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-2.5">
                       <div className="space-y-0.5 pr-3">
                         <p className="flex items-center gap-2 text-xs font-medium">

@@ -52,6 +52,7 @@ import { InfrastructureRetryError, QualityBlockedError } from "./job-errors.js";
 import { decidePublication, verificarEpubFonte } from "./publication-gate.js";
 import { createHash } from "node:crypto";
 import { applyQualityException, decideQualityState, hashText, type QualityState } from "./quality-state.js";
+import { resolveChapterState, deveSincronizar } from "./chapter-state.js";
 import { executePublicationTransaction, type PublicationFile } from "./publication-transaction.js";
 import { advanceEditionStatus, type EditionStatus } from "./state-machine.js";
 import { classifyRunnerOutcome } from "./runner-outcome.js";
@@ -814,6 +815,44 @@ async function upsertCapResiliente(row: Record<string, unknown>): Promise<void> 
   }
 }
 
+// Persistência incremental (contrato de progresso S3/1.2): sincroniza ao
+// Storage + banco SÓ os capítulos APROVADOS (hash-bound, via resolveChapterState),
+// de forma idempotente — pula os já duráveis com o mesmo hash. Torna o aprovado
+// durável ANTES de o próximo bloquear: a reprovação do N+1 nunca oculta o N
+// aprovado (corrige a perda do caso 36/37/38). Só aprovados vão ao leitor.
+async function sincronizarAprovados(projectId: string, dir: string, editionId: string, piso: number): Promise<number[]> {
+  const caps = await chaptersOnDisk(path.join(dir, "manuscrito"), piso);
+  const { data: rows } = await sb.from("chapters").select("numero,text_sha256").eq("owner", OWNER).eq("edition_id", editionId);
+  const dbHash = new Map<number, string | null>((rows ?? []).map((r: any) => [Number(r.numero), (r.text_sha256 ?? null) as string | null]));
+  const sincronizados: number[] = [];
+  for (const c of caps) {
+    const nn = String(c.numero).padStart(2, "0");
+    let quality: QualityState | null = null;
+    try { quality = JSON.parse(await readFile(path.join(dir, "quality", `capitulo-${nn}.json`), "utf8")) as QualityState; } catch { quality = null; }
+    const diskText = await readText(c.file);
+    const st = resolveChapterState({
+      numero: c.numero, piso, diskExists: true, diskText, qualityState: quality,
+      dbRow: dbHash.has(c.numero) ? { text_sha256: dbHash.get(c.numero) ?? null } : null,
+    });
+    if (!deveSincronizar(st, dbHash.get(c.numero) ?? null)) continue; // só aprovados hash-bound ainda não duráveis
+    // Sanitiza antes de subir; se a limpeza alterar o texto, a aprovação não vale
+    // para o novo conteúdo → não sincroniza mismatch (o gate final de compilação trata).
+    await sanitizarArquivoCap(c.file, "sync-aprovado");
+    const txt = await readText(c.file);
+    const hash = hashText(txt);
+    if (hash !== st.hashDisco) { console.warn(`[sync-aprovado] cap ${nn}: sanitização alterou o texto aprovado — adiado`); continue; }
+    const key = storageKey(projectId, "origem", `capitulo-${nn}.md`);
+    await uploadFile("manuscritos", key, c.file); // Storage PRIMEIRO (compensação: banco só aponta p/ objeto existente)
+    const titulo = txt.split("\n").find((l) => l.startsWith("#"))?.replace(/^#+\s*/, "").trim() ?? null;
+    await upsertCapResiliente({
+      owner: OWNER, edition_id: editionId, numero: c.numero, titulo, palavras: countWords(txt), storage_path: key,
+      text_sha256: hash, quality_status: quality?.status ?? "approved", quality_stage: quality?.stage ?? null, approved_at: new Date().toISOString(),
+    }); // banco DEPOIS
+    sincronizados.push(c.numero);
+  }
+  return sincronizados;
+}
+
 async function escreverLivro(job: Job, hb?: Heartbeat) {
   if (!RUNNER_PATH) throw new Error("RUNNER_PATH não configurado no worker/.env");
   const proj = await getProject(job.project_id!);
@@ -883,24 +922,44 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     (await readdir(path.join(dir, "review")).catch(() => []))
       .filter((f) => /^_revcap-\d+\.done$/.test(f)).length;
   const revAntes = await contarRevMarkers();
+  // Neutralidade de engine (S10/1.7): registra quem executa. Alinhado aos campos de
+  // engine_calls (provedor/modelo). A engine atual é o Claude Code; o escritor (papel
+  // que produz a prosa) roda no modelo pesado (MODEL). Quando a engine hospedada
+  // entrar, estes campos virão de engine_calls/engine_chapter_provenance.
+  const engineInfo = { engine: "claude-code", provedor: "anthropic", modelo: MODEL };
   // Grava a contagem REAL do disco JÁ no início (antes do poller de 20s). Run curto
   // que aborta em ~13s não pode mais reportar "0/N" com capítulos no disco.
   await setProgress(job.id, {
+    ...engineInfo,
     fase: "ESCRITA", cap_atual: capsAntes,
     total: Number(proj.total_capitulos ?? 0), continua: true,
   });
 
-  // Poller de progresso (verdade do disco) enquanto o runner roda
+  // Edição de origem criada JÁ (antes do poller): a persistência incremental dos
+  // aprovados precisa dela durante o run e antes de qualquer bloqueio (S3/1.2).
+  const edicao = await ensureEdition(job.project_id!, proj.idioma_origem || "pt-BR", true, "escrevendo");
+
+  // Poller de progresso (verdade do disco) enquanto o runner roda. Além dos
+  // contadores, torna DURÁVEL cada capítulo aprovado em ~20s (sync incremental).
+  let sincronizando = false;
   const poll = setInterval(async () => {
     const st = await readState(dir);
     const caps = await chaptersOnDisk(path.join(dir, "manuscrito"), piso);
     await setProgress(job.id, {
+      ...engineInfo,
       fase: st?.fase_atual ?? "ESCRITA",
       cap_atual: caps.length,
       total: Number(st?.total_capitulos_previstos ?? proj.total_capitulos ?? 0),
       nota: st?.ultima_nota ?? null,
       palavras: st?.palavras_totais ?? 0,
     });
+    // Sync incremental dos aprovados (idempotente; guarda contra ticks sobrepostos).
+    if (!sincronizando) {
+      sincronizando = true;
+      try { await sincronizarAprovados(job.project_id!, dir, edicao.id, piso); }
+      catch (e: any) { console.warn(`[sync-incremental] ${String(e?.message ?? e).slice(0, 200)}`); }
+      finally { sincronizando = false; }
+    }
     await hb?.({ fase: st?.fase_atual, caps: caps.length });
   }, 20_000);
 
@@ -956,6 +1015,11 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
 
   // Verdade do disco
   const state = await readState(dir);
+  // PERSISTÊNCIA INCREMENTAL (S3/1.2): torna DURÁVEL todo capítulo aprovado ANTES
+  // de propagar qualquer bloqueio/interrupção. A reprovação do N+1 (ex.: cap-38)
+  // nunca impede a persistência do N aprovado (cap-37). Fix do Bug A (jobs.ts:959
+  // lançava ANTES do sync — o aprovado só ficava no disco e podia se perder).
+  await sincronizarAprovados(job.project_id!, dir, edicao.id, piso);
   if ((state as any)?.quality_status === "blocked_quality") {
     throw new QualityBlockedError(
       String((state as any)?.quality_stage ?? "runner"),
@@ -972,18 +1036,17 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     throw new InfrastructureRetryError(`runner-${runnerOutcome.kind}`, runnerOutcome.message);
   }
 
-  // Edição de origem + sync dos capítulos JÁ existentes (mesmo parcial: a UI mostra progresso real)
-  const edicao = await ensureEdition(job.project_id!, proj.idioma_origem || "pt-BR", true, completo ? "revisao" : "escrevendo");
+  // Status da edição (idempotente; nunca rebaixa). A edição já foi criada antes do
+  // poller e os aprovados já foram sincronizados incrementalmente acima.
+  await ensureEdition(job.project_id!, proj.idioma_origem || "pt-BR", true, completo ? "revisao" : "escrevendo");
+  // Sanitiza TODOS os caps do disco (proteção antivazamento do EPUB que o runner
+  // remontou) → sinaliza EPUB suspeito. NÃO sobe capítulo aqui: só os APROVADOS
+  // vão ao leitor (S2: disco ≥ piso ≠ aprovado), via sincronizarAprovados.
   let sujeiraAposRunner = false; // texto sujo gerado NESTE run → EPUB suspeito
   for (const c of caps) {
-    // Sanitiza+gate ANTES de subir: o leitor lê do Storage, então nada de meta-texto sobe.
     if (await sanitizarArquivoCap(c.file, "escrita")) sujeiraAposRunner = true;
-    const key = storageKey(job.project_id!, "origem", `capitulo-${String(c.numero).padStart(2, "0")}.md`);
-    await uploadFile("manuscritos", key, c.file);
-    const txt = await readText(c.file);
-    const titulo = txt.split("\n").find((l) => l.startsWith("#"))?.replace(/^#+\s*/, "").trim() ?? null;
-    await upsertCapResiliente({ owner: OWNER, edition_id: edicao.id, numero: c.numero, titulo, palavras: countWords(txt), storage_path: key });
   }
+  await sincronizarAprovados(job.project_id!, dir, edicao.id, piso);
   // Reporta a contagem REAL do disco APÓS o run, antes de qualquer branch/throw —
   // assim a UI nunca fica em "0/N" mesmo num run curto que pausa/erra.
   await setProgress(job.id, {
