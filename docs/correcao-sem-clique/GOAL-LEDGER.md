@@ -136,6 +136,48 @@ runner reprova (rc=3, quality_cap) → worker classifica (SG1)
    traduções) entram na MESMA escada; degraus 2–5 só têm preparo de disco para
    capítulos de escrita — para os demais a escada atua por requeue+orçamento.
 
+## Ciclo 2 — 2026-07-14 — Ativação em produção (pela UI, sem terminal)
+
+- **Commits:** `61ce786` (20 arquivos do goal, seletivo — package.json/ajv e
+  iniciativas alheias FORA) + `1c47bed` (fix "cap null em correção" no Dashboard,
+  achado na validação visual). SEM push (push = deploy; aguarda confirmação).
+- **Restart único do worker:** PID 11308 (código antigo) morto às 10:40 UTC; o
+  wrapper da Scheduled Task `AtelierWorker` relançou sozinho em 15s (PID 25996)
+  com `[preflight] skills conferem com manifest 1.0.3`. ÚLTIMO restart manual —
+  o wrapper mantém o processo e o toggle é observado a cada poll (5s).
+- **Religamento 100% pela UI (autenticado):** login por magic link administrativo
+  (generateLink com a service role do worker; sem senha), sessão transplantada ao
+  dev server. Clique em "Ligar produção" (Configurações) às 10:46:52 →
+  `worker_control.enabled=true` no banco → job `330c62c9` **running** às 10:46:54
+  (~2s) → runner retomou o 53abdade no cap-38 (micro-loop de revisão com o `.try`
+  do incidente original). Pausa pela UI é o mesmo caminho (`alternarProducao(false)`;
+  o estado anterior — enabled=false + heartbeat `paused` + fila intocada — era
+  exatamente esse caminho aplicado).
+- **UI validada AUTENTICADA em produção:** Dashboard: cartão do Índice com
+  "Produção global desativada · 38 produzidos · 37 aprovados · 37 sincronizados"
+  antes do clique. Configurações: "Produção pausada: o worker está rodando, mas
+  não processa a fila. Religue para retomar" + Atividade com "Bloqueado por
+  qualidade" nos jobs históricos. Aba Escrita (rodando): badge "Escrevendo
+  (cap 38)", "Escrevendo o capítulo 38 de 60.", contadores 38/37/37 · meta 60,
+  **banner separado** "Fundação com pendência (PROTAGONISTA_INCOERENTE) — a
+  escrita continua; a publicação fica bloqueada até resolver", botão desabilitado
+  "Escrevendo…", "motor: claude-code · opus".
+- **G4:** cap-37 = `f26e5831…` intacto após o religamento.
+- **Desfecho do cap-38 em andamento** (revisão delegada leva minutos; sessão do
+  autor expirou antes): os critérios de observação estão abaixo. O sistema segue
+  autônomo — esse é o comportamento contratado.
+
+### Como observar o desfecho (nenhuma ação necessária)
+
+1. **Aprovado direto (a):** `review/_revcap-38.done` aparece no WORK_DIR;
+   aba Escrita salta para "Escrevendo (cap 39)"; chapters ganha a linha 38.
+2. **Bloqueado recuperável (b):** worker.log mostra "correção automática do
+   cap 38 — degrau N (…), tentativa X/5; nova tentativa ~HH:mm"; job volta a
+   `queued` com `retry_at`; `quality/correcao-ledger.json` criado; UI mostra
+   "Correção automática — cap 38"; o picker retoma sozinho na janela. ZERO cliques.
+3. **Não recuperável (c):** UI mostra "Decisão autoral necessária"/"Bloqueado
+   após circuit breaker" com diagnóstico — comportamento correto, não falha.
+
 ## Ciclo único — 2026-07-14
 
 - Auditoria completa (matriz acima) → implementação → testes → guards re-abençoados
