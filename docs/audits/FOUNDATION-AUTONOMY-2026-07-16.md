@@ -156,6 +156,68 @@ fundação nem reescrita de capítulos aprovados.
    pausado e restaurar somente a cópia byte a byte do baseline autorizado;
 6. confirmar uma única instância do worker antes de qualquer nova tentativa.
 
+## Ativação e homologação autorizadas — 16/07/2026
+
+Autorização explícita recebida e execução realizada de forma sequencial.
+
+### Publicação
+
+- implementação integrada na `master` nos commits `a9694d0`, `193771d`,
+  `bcf0d7f` e `bb9d75c`;
+- patch das skills instalado com backup em
+  `~/.claude/skill-backups/20260716091525`;
+- preflight do worker aprovou manifesto `1.0.5` e seus cinco arquivos;
+- GitHub Pages publicado com sucesso nas execuções `29497852959` e
+  `29499095633`;
+- configuração local devolvida a `LEGACY_RECONCILIATION_MODE=audit` após os
+  dois claims;
+- uma única instância do worker confirmada após cada restart.
+
+### Primeiro Eco
+
+- dry-run listou somente o job vigente `beca0287...`; o anterior permaneceu
+  histórico;
+- a mesma linha foi reivindicada condicionalmente e concluiu como `done`;
+- nenhum gerador de fundação foi chamado: normalizadores e gate atual rodaram
+  sobre os documentos existentes;
+- projeto terminou em `fundacao`, com 90 capítulos planejados;
+- ledger corrigido para `estado=done`, `resultado=approved`;
+- o título público `O Protocolo do Primeiro Eco` foi preservado. A primeira
+  homologação revelou que o Estado interno tentava restaurar o título antigo
+  `O Eco Anterior`; o código foi corrigido e a linha do projeto restaurada por
+  update condicional.
+
+### Índice dos Abduzidos
+
+- novo dry-run isolado listou somente o job `330c62c9...`;
+- detector atual aprovou a spec 49 sem LLM e sem tentativa editorial;
+- a mesma linha foi reivindicada e está `running`, bloqueada exclusivamente por
+  `pc-rodrigo`;
+- processo real do runner/Claude foi observado escrevendo somente o capítulo
+  49, com a spec canônica e proibição explícita de tocar nos anteriores;
+- projeto está `escrevendo`; o capítulo 49 ainda estava em geração na última
+  observação, portanto não foi declarado aprovado antecipadamente;
+- capítulos 1–48 continuaram com o hash agregado
+  `57afc72902fcb97e10888055c0cd559c616cf9ab4a29e3ed402a7918dacb947c`.
+
+### Interface e validação final
+
+- o bundle publicado contém os estados “Reavaliando fundação existente”,
+  “Escrevendo — cap 49”, “spec aprovada pelo detector atual” e a mensagem de
+  preservação dos capítulos anteriores;
+- a tentativa de validação pelo navegador embutido não conseguiu anexar uma
+  aba. Não houve cliques nem mutações por navegador; a evidência ficou restrita
+  ao bundle publicado, banco, processo real, logs e testes automatizados;
+- build, typecheck, testes Python e lint passaram; lint manteve três warnings
+  preexistentes de Fast Refresh e zero erros;
+- a regressão ampliada da branch principal passou 628 testes; os cinco únicos
+  blockers eram o diff-guard da iniciativa paralela de isolamento, exatamente
+  nos arquivos alterados com autorização. O baseline foi regenerado pelo
+  gerador oficial para `1.0.7`, com motivo registrado, e os 13 testes do guard
+  passaram depois disso;
+- não houve DDL, exclusão de job, duplicação de projeto, exceção silenciosa de
+  qualidade ou reescrita dos capítulos protegidos.
+
 ## Validação
 
 - 137 testes direcionados passaram;
