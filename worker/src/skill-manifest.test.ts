@@ -13,7 +13,8 @@ describe("manifest bate com os arquivos versionados do repo", () => {
   const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "skill-patches");
   for (const f of manifestReal.files) {
     it(`hash de ${f.path} corresponde ao manifest ${manifestReal.manifestVersion}`, () => {
-      const atual = createHash("sha256").update(readFileSync(path.join(raiz, ...f.path.split("/")))).digest("hex");
+      const bytes = readFileSync(path.join(raiz, ...f.path.split("/")));
+      const atual = createHash("sha256").update(Buffer.from(bytes.toString("utf8").replace(/\r\n/g, "\n"))).digest("hex");
       expect(atual).toBe(f.sha256);
     });
   }
@@ -31,5 +32,12 @@ describe("skill manifest", () => {
     const r = await verifySkillManifest(manifest, "repo", "installed", async (p) => Buffer.from(p.startsWith(path.join("repo", "skill")) ? "igual" : "diferente"));
     expect(r.ok).toBe(false);
     expect(r.differences[0].reason).toBe("installed-mismatch");
+  });
+  it("considera LF e CRLF equivalentes em arquivos textuais", async () => {
+    const m: SkillManifest = { ...manifest, files: [{ path: "skill/doc.md", sha256: hash("a\nb\n") }] };
+    const r = await verifySkillManifest(m, "repo", "installed", async (p) =>
+      Buffer.from(p.startsWith(path.join("repo", "skill")) ? "a\nb\n" : "a\r\nb\r\n")
+    );
+    expect(r.ok).toBe(true);
   });
 });

@@ -56,7 +56,7 @@ Projetos novos usam esse loop também no preflight da escrita. Livros em andamen
 
 - implementação confinada ao worktree `ATELIER-LIVROS-FOUNDATION-AUTO`;
 - branch principal e projetos reais não foram modificados;
-- manifesto de skills atualizado para `1.0.4`, alinhado aos arquivos versionados;
+- manifesto de skills atualizado para `1.0.5`, alinhado aos arquivos versionados e portável entre LF/CRLF;
 - não houve deploy, reinício do worker, alteração SQL, requeue ou clique de retomada;
 - para ativar posteriormente: revisar o diff, integrar a branch, aplicar o patch versionado da skill/runner pelo procedimento existente, publicar a web e reiniciar o worker de forma controlada;
 - após ativação, “O Índice dos Abduzidos” deve ser retomado por revalidação da spec 49. O resultado esperado é o runner aceitar a spec atual e iniciar o capítulo 49, sem reescrever 1–48.
