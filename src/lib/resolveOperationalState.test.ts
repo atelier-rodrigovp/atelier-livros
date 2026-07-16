@@ -195,4 +195,14 @@ describe("estados da correção automática (SG6 / cenário 18)", () => {
     const running = resolveOperationalState(mk("running", progresso));
     expect(running.mensagem_humana).toContain("detector atual");
   });
+
+  it("após o detector aprovar, mostra escrita do capítulo novo em vez de spec bloqueada", () => {
+    const st = resolveOperationalState(mk("running", {
+      cap_atual: 48,
+      reconciliacao_legada: { resultado: "detector_approved", alvo: 49 },
+    }));
+    expect(st.badge).toBe("Escrevendo — cap 49");
+    expect(st.mensagem_humana).toContain("spec do capítulo 49 foi aprovada");
+    expect(st.mensagem_humana).toContain("37 anteriores permanecem intactos");
+  });
 });

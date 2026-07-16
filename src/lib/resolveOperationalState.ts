@@ -19,8 +19,8 @@ export interface ProgressoEscrita {
   engine?: string;
   provedor?: string;
   modelo?: string;
-  quality_status?: string;
-  quality_stage?: string;
+  quality_status?: string | null;
+  quality_stage?: string | null;
   quality_blockers?: string[];
   quality_categoria?: string; // SG1: recuperavel_qualidade | fundacao_pendente | decisao_autoral | circuit_breaker | ...
   quality_cap?: number | null; // capítulo bloqueado/em correção (do runner/worker)
@@ -53,6 +53,7 @@ export interface ProgressoEscrita {
     tentativa?: number;
     estrategia?: string;
     resultado?: string;
+    alvo?: number | null;
     motivo?: string;
     job_origem?: string;
     job_retomada?: string;
@@ -241,6 +242,19 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
     }
     const t = pg.correcao?.tentativa ? ` (tentativa ${pg.correcao.tentativa}${pg.correcao?.max_tentativas ? `/${pg.correcao.max_tentativas}` : ""})` : "";
     return { situacao: "correcao_automatica", badge: capituloBloqueado ? `Correção automática — cap ${capituloBloqueado}` : "Correção automática", tone: "info", mensagem_humana: `Correção automática em andamento${capituloBloqueado ? ` no capítulo ${capituloBloqueado}` : ""}${t} — nenhum clique é necessário.`, ...base, blocker_humano: humanizarBlocker(pg.quality_blockers, capituloBloqueado), proxima_acao: null, botoes };
+  }
+  if (job.status === "running" && input.workerOnline && pg.reconciliacao_legada?.resultado === "detector_approved") {
+    const alvo = Number(pg.reconciliacao_legada.alvo ?? (Number(pg.cap_atual ?? 0) + 1)) || null;
+    return {
+      situacao: "executando",
+      badge: `Escrevendo — cap ${alvo ?? "?"}`,
+      tone: "info",
+      mensagem_humana: `A spec do capítulo ${alvo ?? "?"} foi aprovada pelo detector atual; escrevendo o novo capítulo enquanto os ${cont.aprovados} anteriores permanecem intactos.`,
+      ...base,
+      blocker_humano: null,
+      proxima_acao: null,
+      botoes,
+    };
   }
   // 1. executando
   if (job.status === "running" && input.workerOnline) {

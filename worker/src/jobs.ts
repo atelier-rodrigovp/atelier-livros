@@ -63,7 +63,7 @@ import { advanceEditionStatus, type EditionStatus } from "./state-machine.js";
 import { classifyRunnerOutcome } from "./runner-outcome.js";
 import { promptEntrevista, validarSaidaEntrevista } from "./entrevista.js";
 import { concluirCorrecoesAprovadas, resumoCorrecaoDoDisco } from "./correcao-fluxo.js";
-import { shouldGenerateFoundation } from "./reconciliacao-legada.js";
+import { markDeterministicDetectorApproved, shouldGenerateFoundation } from "./reconciliacao-legada.js";
 
 export interface Job {
   id: string;
@@ -1014,6 +1014,20 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
     fase: "ESCRITA", cap_atual: capsAntes,
     total: Number(proj.total_capitulos ?? 0), continua: true,
   });
+  const reconciliacaoDeterministica = markDeterministicDetectorApproved(
+    job.payload?.reconciliacao_legada,
+    Number(job.payload?.reconciliacao_legada?.alvo ?? 0) || null
+  );
+  if (reconciliacaoDeterministica) {
+    await setProgress(job.id, {
+      quality_status: null,
+      quality_stage: null,
+      quality_cap: null,
+      quality_categoria: null,
+      etapa: `escrevendo capítulo ${reconciliacaoDeterministica.alvo ?? capsAntes + 1}`,
+      reconciliacao_legada: reconciliacaoDeterministica,
+    });
+  }
 
   // Edição de origem criada JÁ (antes do poller): a persistência incremental dos
   // aprovados precisa dela durante o run e antes de qualquer bloqueio (S3/1.2).

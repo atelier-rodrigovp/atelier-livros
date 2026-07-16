@@ -254,6 +254,7 @@ export function reconciliationPatch(plan: ReconciliationPlan, workerId: string, 
     hash_reconciliado: plan.assessment.hash,
     blockers_signature: blockersSignature,
     tentativa: 0,
+    alvo: plan.assessment.target,
     estrategia: plan.strategy,
     resultado: "queued",
     motivo: plan.assessment.reason,
@@ -282,6 +283,21 @@ export function reconciliationPatch(plan: ReconciliationPlan, workerId: string, 
       quality_categoria: "recuperavel_qualidade",
       reconciliacao_legada: metadata,
     },
+  };
+}
+
+export function markDeterministicDetectorApproved(
+  metadata: Record<string, any> | null | undefined,
+  target: number | null,
+  now = new Date().toISOString()
+): Record<string, any> | null {
+  if (!metadata || metadata.estrategia !== "deterministic_revalidation") return null;
+  return {
+    ...metadata,
+    alvo: target ?? metadata.alvo ?? null,
+    estado: "running",
+    resultado: "detector_approved",
+    detector_aprovado_em: now,
   };
 }
 
