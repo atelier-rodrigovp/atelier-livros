@@ -110,7 +110,8 @@ foi modificado pelo dry-run.
 HEAD da principal e da implementação antes da entrega:
 `62960b95e61764056fa2e22618a50cccb5fbdfcd`.
 
-Índice dos Abduzidos, agregado determinístico `nome relativo + NUL + bytes`:
+Índice dos Abduzidos, agregado determinístico
+`manuscrito/nome relativo + NUL + bytes + NUL`:
 
 - capítulos 1–48: 48 arquivos,
   `57afc72902fcb97e10888055c0cd559c616cf9ab4a29e3ed402a7918dacb947c`;
