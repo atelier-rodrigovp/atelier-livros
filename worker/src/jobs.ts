@@ -40,6 +40,11 @@ import {
 import { normalizarCraftNosAgentes } from "./craft-agentes.js";
 import { exigenciasParaSkill, normalizarExigenciasSkill } from "./exigencias-skill.js";
 import { normalizarLexicoPtbr } from "./lexico-ptbr.js";
+import {
+  executarLoopCorrecaoFundacao,
+  FUNDACAO_CORRECAO_LEDGER,
+  type ResultadoLoopFundacao,
+} from "./fundacao-correcao.js";
 import { hidratarWorkDir } from "./hidratar.js";
 import { coletarTelemetria } from "./telemetria.js";
 import { gerarImagem, providerAtivo, providerLabel } from "./imagegen.js";
@@ -58,6 +63,7 @@ import { advanceEditionStatus, type EditionStatus } from "./state-machine.js";
 import { classifyRunnerOutcome } from "./runner-outcome.js";
 import { promptEntrevista, validarSaidaEntrevista } from "./entrevista.js";
 import { concluirCorrecoesAprovadas, resumoCorrecaoDoDisco } from "./correcao-fluxo.js";
+import { shouldGenerateFoundation } from "./reconciliacao-legada.js";
 
 export interface Job {
   id: string;
@@ -220,8 +226,12 @@ function resumoProgresso(p: Record<string, any>): string | undefined {
   }
 }
 async function setProgress(jobId: string, progresso: Record<string, unknown>) {
-  const resumo = resumoProgresso(progresso as Record<string, any>);
-  const comResumo = resumo ? { ...progresso, resumo } : progresso;
+  // Merge explícito: metadados de reconciliação, correção e rollback não podem
+  // desaparecer quando uma fase posterior atualiza apenas poucos campos.
+  const { data: atual } = await sb.from("jobs").select("progresso").eq("owner", OWNER).eq("id", jobId).maybeSingle();
+  const mesclado = { ...(((atual as any)?.progresso as Record<string, unknown>) ?? {}), ...progresso };
+  const resumo = resumoProgresso(mesclado as Record<string, any>);
+  const comResumo = resumo ? { ...mesclado, resumo } : mesclado;
   // Update idempotente com retry curto; ao esgotar, LOGA e segue (progresso é
   // cosmético — o poller de 20s corrige no tick seguinte; antes era perda muda).
   const { error } = await comRetrySb(
@@ -482,17 +492,59 @@ async function aplicarNormalizadoresFundacao(dir: string, skill: string | null |
   console.log(`[voz-consistencia] ${v.motivo}`);
 }
 
+async function corrigirEAvaliarFundacao(
+  job: Job,
+  dir: string,
+  skill: string | null | undefined,
+  protagonistaNome: string | null | undefined,
+): Promise<ResultadoLoopFundacao> {
+  return executarLoopCorrecaoFundacao({
+    dir,
+    projeto: job.project_id!,
+    avaliar: () => avaliarFundacaoNoDisco(dir, { skill: skill ?? null, protagonistaNome }),
+    corrigir: async (estrategia, blockers) => {
+      const antes = await hashesFundacaoNoDisco(dir);
+      await setProgress(job.id, {
+        fase: "CORRECAO_FUNDACAO",
+        quality_status: "auto_correcao",
+        quality_categoria: estrategia === "normalizadores_deterministicos" ? "mecanico" : "editorial_recuperavel",
+        quality_blockers: blockers,
+        estrategia,
+      });
+      if (estrategia === "normalizadores_deterministicos") {
+        await aplicarNormalizadoresFundacao(dir, skill);
+      } else {
+        const prompt =
+          "Modo headless. Trabalhe SOMENTE nesta pasta e corrija minimamente a fundação existente.\n" +
+          "Não recomece a obra, não escreva capítulos, não altere decisões autorais já registradas e não contorne o gate.\n" +
+          "Resolva de modo coerente entre Biblia-da-Obra.md, Mapa-de-Personagens.md, Estrutura-do-Livro.md, " +
+          "perfil-de-voz.md, ESTADO_LIVRO.json e agentes somente estes blockers medidos:\n- " +
+          blockers.join("\n- ") +
+          "\nPreserve todo conteúdo válido. Grave as correções no disco e encerre sem perguntas e sem /goal.";
+        const r = await runClaude(prompt, dir);
+        if (r.code !== 0) console.warn(`[fundacao-correcao] refino dirigido rc=${r.code}: ${r.err.slice(-300)}`);
+        await aplicarNormalizadoresFundacao(dir, skill);
+      }
+      const depois = await hashesFundacaoNoDisco(dir);
+      return diffFundacao(antes, depois);
+    },
+  });
+}
+
 // ===========================================================================
 // criar_fundacao — skill arquiteto-de-enredo (não interativo) -> fundação no disco
 // ===========================================================================
 async function criarFundacao(job: Job, hb?: Heartbeat) {
   const proj = await getProject(job.project_id!);
   const dir = projDir(job.project_id!);
+  const reconciliacaoLegada = !shouldGenerateFoundation(job.payload);
   await mkdir(path.join(dir, "manuscrito"), { recursive: true });
   await mkdir(path.join(dir, "review"), { recursive: true });
-  await writeFile(path.join(dir, "briefing.md"), renderBriefing(proj), "utf8");
-  await setProgress(job.id, { fase: "ESTRUTURA", etapa: "gerando fundação" });
-  await hb?.({ fase: "ESTRUTURA" });
+  if (!reconciliacaoLegada) await writeFile(path.join(dir, "briefing.md"), renderBriefing(proj), "utf8");
+  await setProgress(job.id, reconciliacaoLegada
+    ? { fase: "RECONCILIACAO_FUNDACAO", etapa: "reavaliando fundação existente" }
+    : { fase: "ESTRUTURA", etapa: "gerando fundação" });
+  await hb?.({ fase: reconciliacaoLegada ? "RECONCILIACAO_FUNDACAO" : "ESTRUTURA" });
 
   const prompt =
     "Você está em modo headless (orquestrador externo). Trabalhe SOMENTE nesta pasta.\n" +
@@ -516,7 +568,9 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
     ", fase_atual='ESCRITA', gerar_epub=true, meta_nota, max_iteracoes_reescrita=4, piso_palavras_cap.\n" +
     "- NÃO dispare /goal e NÃO escreva capítulos.";
 
-  const r = await runClaude(prompt, dir);
+  // Reconciliação legada jamais regenera a fundação. Ela usa os artefatos já
+  // existentes, aplica normalizadores idempotentes e executa o gate atual.
+  const r = reconciliacaoLegada ? { code: 0, out: "", err: "" } : await runClaude(prompt, dir);
   // Verdade do disco
   const okBiblia = await exists(path.join(dir, "Biblia-da-Obra.md"));
   const okEstrutura = await exists(path.join(dir, "Estrutura-do-Livro.md"));
@@ -535,10 +589,9 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
 
   // GATE DA FUNDAÇÃO: presença + parseabilidade + coerência cruzada + craft +
   // voz. Grava Quality State vinculado aos hashes (quality/fundacao.quality.json).
-  const gate = await avaliarFundacaoNoDisco(dir, {
-    skill: proj.skill_escrita ?? null,
-    protagonistaNome: proj.briefing?.protagonista?.nome ?? null,
-  });
+  const gate = await corrigirEAvaliarFundacao(
+    job, dir, proj.skill_escrita, proj.briefing?.protagonista?.nome ?? null
+  );
   for (const w of gate.state.warnings) console.warn(`[fundacao] AVISO: ${w}`);
 
   // Sync: sobe a fundação (e o Quality State dela) ao Storage
@@ -550,13 +603,16 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
   if (await exists(path.join(dir, FUNDACAO_QUALITY_FILE))) {
     await uploadFile("manuscritos", storageKey(job.project_id!, "fundacao", "fundacao.quality.json"), path.join(dir, FUNDACAO_QUALITY_FILE));
   }
+  if (await exists(path.join(dir, FUNDACAO_CORRECAO_LEDGER))) {
+    await uploadFile("manuscritos", storageKey(job.project_id!, "fundacao", "fundacao-correcao-ledger.json"), path.join(dir, FUNDACAO_CORRECAO_LEDGER));
+  }
 
   if (gate.state.status !== "approved") {
     // Artefatos ficam no disco/Storage para refino; o projeto NÃO vira 'fundacao'.
     throw new QualityBlockedError(
       "GATE_FUNDACAO",
-      gate.state.blockers.map((b) => b.code),
-      "fundação reprovada no gate de qualidade — corrija via refinar_fundacao ou decisão autoral"
+      [...gate.state.blockers.map((b) => b.code), ...(gate.categoria === "circuit_breaker" ? ["CIRCUIT_BREAKER_FUNDACAO"] : [])],
+      gate.ledger.diagnostico ?? "fundação reprovada no gate de qualidade"
     );
   }
 
@@ -658,10 +714,9 @@ async function refinarFundacao(job: Job, hb?: Heartbeat) {
   }
 
   // Reavalia o gate da fundação: o Quality State anterior pertence a outros hashes.
-  const gate = await avaliarFundacaoNoDisco(dir, {
-    skill: proj.skill_escrita ?? null,
-    protagonistaNome: proj.briefing?.protagonista?.nome ?? null,
-  });
+  const gate = await corrigirEAvaliarFundacao(
+    job, dir, proj.skill_escrita, proj.briefing?.protagonista?.nome ?? null
+  );
   for (const w of gate.state.warnings) console.warn(`[fundacao] AVISO: ${w}`);
 
   for (const f of ["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md", "ESTADO_LIVRO.json"]) {
@@ -672,12 +727,15 @@ async function refinarFundacao(job: Job, hb?: Heartbeat) {
   if (await exists(path.join(dir, FUNDACAO_QUALITY_FILE))) {
     await uploadFile("manuscritos", storageKey(job.project_id!, "fundacao", "fundacao.quality.json"), path.join(dir, FUNDACAO_QUALITY_FILE));
   }
+  if (await exists(path.join(dir, FUNDACAO_CORRECAO_LEDGER))) {
+    await uploadFile("manuscritos", storageKey(job.project_id!, "fundacao", "fundacao-correcao-ledger.json"), path.join(dir, FUNDACAO_CORRECAO_LEDGER));
+  }
 
   if (gate.state.status !== "approved") {
     throw new QualityBlockedError(
       "GATE_FUNDACAO",
-      gate.state.blockers.map((b) => b.code),
-      "refino deixou a fundação reprovada no gate — novo refino ou decisão autoral necessários"
+      [...gate.state.blockers.map((b) => b.code), ...(gate.categoria === "circuit_breaker" ? ["CIRCUIT_BREAKER_FUNDACAO"] : [])],
+      gate.ledger.diagnostico ?? "refino deixou a fundação reprovada no gate"
     );
   }
 
@@ -890,25 +948,35 @@ async function escreverLivro(job: Job, hb?: Heartbeat) {
   // separada do bloqueio editorial do capítulo — a UI mostra as duas sem misturar.
   let fundacaoInfo: Record<string, unknown> = {};
   {
-    const gate = await avaliarFundacaoNoDisco(dir, {
+    let gate: { state: QualityState; categoria?: string; ledger?: { diagnostico: string | null } } = await avaliarFundacaoNoDisco(dir, {
       skill: proj.skill_escrita ?? null,
       protagonistaNome: proj.briefing?.protagonista?.nome ?? null,
     });
     if (gate.state.status !== "approved") {
-      const codes = gate.state.blockers.map((b) => b.code);
       const capsExistentes = (await chaptersOnDisk(path.join(dir, "manuscrito"), piso)).length;
       if (capsExistentes === 0) {
-        throw new QualityBlockedError(
-          "GATE_FUNDACAO",
-          codes,
-          "escrita não inicia com fundação reprovada — corrija a fundação (refinar_fundacao) ou registre decisão autoral"
+        // Projeto novo: o próprio pipeline tenta corrigir a fundação antes de
+        // bloquear a escrita. Livro em andamento não sofre refino estrutural
+        // implícito: preserva os capítulos e recebe apenas o aviso abaixo.
+        gate = await corrigirEAvaliarFundacao(
+          job, dir, proj.skill_escrita, proj.briefing?.protagonista?.nome ?? null
         );
       }
-      fundacaoInfo = { fundacao_status: "reprovada", fundacao_blockers: codes };
-      console.warn(
-        `[fundacao] AVISO: retomada com fundação reprovada no gate (${codes.join(", ")}) — ` +
-          `livro em andamento (${capsExistentes} caps) continua; resolver antes de publicar`
-      );
+      const codes = gate.state.blockers.map((b) => b.code);
+      if (capsExistentes === 0 && gate.state.status !== "approved") {
+        throw new QualityBlockedError(
+          "GATE_FUNDACAO",
+          [...codes, ...(gate.categoria === "circuit_breaker" ? ["CIRCUIT_BREAKER_FUNDACAO"] : [])],
+          gate.ledger?.diagnostico ?? "escrita não inicia com fundação reprovada"
+        );
+      }
+      if (gate.state.status !== "approved") {
+        fundacaoInfo = { fundacao_status: "reprovada", fundacao_blockers: codes };
+        console.warn(
+          `[fundacao] AVISO: retomada com fundação reprovada no gate (${codes.join(", ")}) — ` +
+            `livro em andamento (${capsExistentes} caps) continua; resolver antes de publicar`
+        );
+      }
     }
   }
   // Espelho do ledger de correção automática (SG3/SG6): a UI acompanha degrau/

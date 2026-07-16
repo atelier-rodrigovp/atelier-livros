@@ -35,9 +35,14 @@ const RE_BLOCKER_FUNDACAO = /PROTAGONISTA_INCOERENTE|FUNDACAO|CRAFT_AUSENTE|CRAF
 
 export function classificarBloqueio(stage: string, blockers: string[]): CategoriaBloqueio {
   if (ESTAGIOS_RECUPERAVEIS.has(stage)) return "recuperavel_qualidade";
-  // Fundação reprovada no início da escrita: corrigir fundação é decisão autoral
-  // (refinar_fundacao ou exceção explícita) — não há degrau automático seguro.
-  if (stage === "GATE_FUNDACAO") return "decisao_autoral";
+  if (stage === "GATE_FUNDACAO") {
+    if (blockers.some((b) => /CIRCUIT_BREAKER_FUNDACAO/.test(b))) return "circuit_breaker";
+    if (blockers.some((b) => /DECISAO_AUTORAL|EXCECAO_AUTORAL|AMBIGUIDADE_AUTORAL/.test(b))) return "decisao_autoral";
+    // Todo caminho novo de criação/refino já executa o loop específico da
+    // fundação antes de lançar. Um GATE_FUNDACAO residual sem marcador é legado:
+    // pausa conservadoramente em vez de cair na escada de capítulos.
+    return "decisao_autoral";
+  }
   if (stage === "PUBLICATION_GATE" || stage === "EPUB_PUBLICATION_GATE") {
     return blockers.some((b) => RE_BLOCKER_FUNDACAO.test(b)) ? "fundacao_pendente" : "decisao_autoral";
   }

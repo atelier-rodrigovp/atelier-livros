@@ -35,8 +35,10 @@ describe("classificarBloqueio (SG1)", () => {
       expect(classificarBloqueio(stage, ["x"])).toBe("recuperavel_qualidade");
     }
   });
-  it("fundação reprovada no início exige decisão autoral", () => {
+  it("fundação recuperável só pausa por decisão explícita ou circuit breaker", () => {
     expect(classificarBloqueio("GATE_FUNDACAO", ["PROTAGONISTA_INCOERENTE"])).toBe("decisao_autoral");
+    expect(classificarBloqueio("GATE_FUNDACAO", ["DECISAO_AUTORAL:TITULO"])).toBe("decisao_autoral");
+    expect(classificarBloqueio("GATE_FUNDACAO", ["CIRCUIT_BREAKER_FUNDACAO"])).toBe("circuit_breaker");
   });
   it("gate de publicação com blocker de fundação é fundacao_pendente (SG7)", () => {
     expect(classificarBloqueio("PUBLICATION_GATE", ["PROTAGONISTA_INCOERENTE: protagonista 'X' ausente"])).toBe("fundacao_pendente");

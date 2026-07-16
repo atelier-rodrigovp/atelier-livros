@@ -138,6 +138,18 @@ describe("estados da correção automática (SG6 / cenário 18)", () => {
     expect(st.diagnostico_tecnico).toContain("Circuit breaker");
   });
 
+  it("circuit breaker de spec aponta o próximo capítulo e preserva os aprovados", () => {
+    const st = resolveOperationalState(mk("paused", {
+      cap_atual: 48, quality_status: "blocked_quality", quality_categoria: "circuit_breaker",
+      quality_stage: "SPEC_CAPITULO", quality_cap: 49, quality_motivo: "fio C ausente",
+      correcao: { ...correcao, ativa: false, capitulo: 49, total_tentativas: 2 },
+    }));
+    expect(st.capitulo_bloqueado).toBe(49);
+    expect(st.mensagem_humana).toContain("planejamento do capítulo 49");
+    expect(st.mensagem_humana).toContain("permanecem intactos");
+    expect(st.botoes.find((b) => b.id === "corrigir")?.label).toBe("Revalidar spec do capítulo 49");
+  });
+
   it("aguardando_decisao: decisão autoral e fundação pendente são distintos do editorial", () => {
     const a = resolveOperationalState(mk("paused", { quality_status: "blocked_quality", quality_categoria: "decisao_autoral", quality_stage: "GATE_FUNDACAO" }));
     expect(a.situacao).toBe("aguardando_decisao");
@@ -169,5 +181,18 @@ describe("estados da correção automática (SG6 / cenário 18)", () => {
     const a = resolveOperationalState(mk("queued", progresso));
     const b = resolveOperationalState(mk("queued", progresso));
     expect(a).toEqual(b);
+  });
+
+  it("reconciliação legada de spec mostra alvo 49 e proteção dos aprovados", () => {
+    const progresso = {
+      cap_atual: 48, quality_status: "auto_correcao", quality_stage: "SPEC_CAPITULO", quality_cap: 49,
+      reconciliacao_legada: { detector_version: "v2", hash_reconciliado: "abc", tentativa: 0 },
+    };
+    const queued = resolveOperationalState(mk("queued", progresso));
+    expect(queued.badge).toContain("49");
+    expect(queued.mensagem_humana).toContain("37 capítulos aprovados permanecem intactos");
+    expect(queued.botoes.map((b) => b.id)).not.toContain("tentar_agora");
+    const running = resolveOperationalState(mk("running", progresso));
+    expect(running.mensagem_humana).toContain("detector atual");
   });
 });

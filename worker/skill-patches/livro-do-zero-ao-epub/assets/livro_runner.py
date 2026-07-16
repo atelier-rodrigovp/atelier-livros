@@ -1241,7 +1241,8 @@ def _avaliar_rotacao_fio(fios, n, exig):
     # max_caps_fio_ausente caps consecutivos -> sinaliza (espelha avaliarRotacaoFio no TS).
     ausente_max = exig.get("max_caps_fio_ausente")
     if ausente_max and ausente_max > 0:
-        prim = [p.split(u"+")[0].strip() for p in seq]
+        tokens = [[x.strip() for x in p.split(u"+") if x.strip()] for p in seq]
+        prim = [xs[0] if xs else u"" for xs in tokens]
         freq = {}
         for p in prim:
             if p:
@@ -1251,7 +1252,9 @@ def _avaliar_rotacao_fio(fios, n, exig):
                 continue
             ausente = 0
             i = n - 1
-            while i >= 0 and prim[i] != fio:
+            # Recorrencia nasce do fio primario, mas co-POV conta como presenca:
+            # "H + R + C" traz C de volta a pagina e deve zerar a ausencia.
+            while i >= 0 and fio not in tokens[i]:
                 ausente += 1
                 i -= 1
             if ausente > ausente_max:

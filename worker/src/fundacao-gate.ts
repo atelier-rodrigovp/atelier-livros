@@ -14,7 +14,7 @@ import {
 import { MARCADOR_CRAFT_LEITURA, MARCADOR_PROPULSAO } from "./craft-agentes.js";
 import { decideQualityState, hashText, type QualityBlocker, type QualityState } from "./quality-state.js";
 
-export const FUNDACAO_DETECTOR_VERSION = "1.0.0";
+export const FUNDACAO_DETECTOR_VERSION = "1.1.0";
 export const FUNDACAO_QUALITY_FILE = path.join("quality", "fundacao.quality.json");
 
 export const ARQUIVOS_FUNDACAO = [
@@ -68,11 +68,42 @@ const agentePath = (a: string) => `.claude/agents/${a}`;
 // arquiteto: "## Capítulo 12", "Capítulo 12 —", "### Cap. 12 — ..." (abreviado).
 // "caps. 1–4" (plural, em cabeçalho de ATO) não conta.
 export function contarCapitulosEstrutura(estrutura: string): number {
-  const nums = new Set<number>();
-  const re = /^#{0,4}\s*cap(?:[ií]tulo)?\.?\s+(\d{1,3})\b/gim;
+  return extrairCapitulosEstrutura(estrutura).numeros.length;
+}
+
+export interface CapitulosEstrutura {
+  numeros: number[];
+  duplicados: number[];
+}
+
+export function extrairCapitulosEstrutura(estrutura: string): CapitulosEstrutura {
+  const cabecalhos: number[] = [];
+  const tabelas: number[] = [];
+  const reCab = /^#{0,4}\s*cap(?:[ií]tulo)?\.?\s+(\d{1,3})\b/gim;
+  const reTabela = /^\|\s*(\d{1,3})\s*\|/gm;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(estrutura))) nums.add(Number(m[1]));
-  return nums.size;
+  while ((m = reCab.exec(estrutura))) cabecalhos.push(Number(m[1]));
+  while ((m = reTabela.exec(estrutura))) tabelas.push(Number(m[1]));
+  const repetidos = (xs: number[]) => xs.filter((n, i) => xs.indexOf(n) !== i);
+  return {
+    numeros: [...new Set([...cabecalhos, ...tabelas])].sort((a, b) => a - b),
+    duplicados: [...new Set([...repetidos(cabecalhos), ...repetidos(tabelas)])].sort((a, b) => a - b),
+  };
+}
+
+export function identidadeCanonicaPessoa(valor: string): string {
+  const identidade = valor.split(/[,;]|\s[—–]\s/, 1)[0].trim();
+  return identidade.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/^(?:dr|dra|sr|sra|padre|frei|prof|profa)\.?\s+/, "")
+    .replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function documentoContemPessoa(documento: string, valor: string): boolean {
+  const nome = identidadeCanonicaPessoa(valor);
+  if (!nome) return false;
+  const normalizado = documento.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  return (` ${normalizado} `).includes(` ${nome} `);
 }
 
 // Linhas de sinopse repetidas na Estrutura (capítulos que só repetem informação).
@@ -145,16 +176,28 @@ export function avaliarFundacaoConteudo(c: ConteudoFundacao, ctx: ContextoFundac
 
   // 3) Estrutura: capítulos declarados batem com o estado
   const estrutura = get("Estrutura-do-Livro.md") ?? "";
-  const capitulosEstrutura = estrutura ? contarCapitulosEstrutura(estrutura) : 0;
+  const capitulosExtraidos = estrutura ? extrairCapitulosEstrutura(estrutura) : { numeros: [], duplicados: [] };
+  const capitulosEstrutura = capitulosExtraidos.numeros.length;
   if (estrutura && capitulosEstrutura === 0) {
-    warnings.push("Estrutura-do-Livro.md sem cabeçalhos de capítulo parseáveis (formato não reconhecido)");
-  } else if (capitulosEstrutura > 0 && totalCapitulosEstado > 0 && capitulosEstrutura !== totalCapitulosEstado) {
-    blockers.push({
-      code: "ESTRUTURA_CAPITULOS_INCOERENTES",
-      message: `Estrutura declara ${capitulosEstrutura} capítulos; ESTADO_LIVRO.json prevê ${totalCapitulosEstado}`,
-      severity: "high",
-      metric: "capitulos", observed: capitulosEstrutura, target: totalCapitulosEstado,
-    });
+    warnings.push("Estrutura-do-Livro.md sem capítulos parseáveis em cabeçalhos ou na primeira coluna de tabela");
+  } else if (capitulosEstrutura > 0 && totalCapitulosEstado > 0) {
+    const esperados = Array.from({ length: totalCapitulosEstado }, (_, i) => i + 1);
+    const presentes = new Set(capitulosExtraidos.numeros);
+    const faltantes = esperados.filter((n) => !presentes.has(n));
+    const foraDaFaixa = capitulosExtraidos.numeros.filter((n) => n < 1 || n > totalCapitulosEstado);
+    if (faltantes.length || foraDaFaixa.length || capitulosExtraidos.duplicados.length) {
+      const detalhes = [
+        faltantes.length ? `faltantes: ${faltantes.join(", ")}` : "",
+        foraDaFaixa.length ? `fora da faixa: ${foraDaFaixa.join(", ")}` : "",
+        capitulosExtraidos.duplicados.length ? `duplicados: ${capitulosExtraidos.duplicados.join(", ")}` : "",
+      ].filter(Boolean).join("; ");
+      blockers.push({
+        code: "ESTRUTURA_CAPITULOS_INCOERENTES",
+        message: `Estrutura incompatível com os capítulos 1–${totalCapitulosEstado} previstos (${detalhes})`,
+        severity: "high",
+        metric: "capitulos", observed: capitulosEstrutura, target: totalCapitulosEstado,
+      });
+    }
   }
 
   // 4) Craft da skill comprovada no perfil e nos agentes
@@ -185,15 +228,15 @@ export function avaliarFundacaoConteudo(c: ConteudoFundacao, ctx: ContextoFundac
   const nome = (ctx.protagonistaNome ?? "").trim();
   if (nome) {
     const mapa = get("Mapa-de-Personagens.md") ?? "";
-    const emBiblia = biblia.toLowerCase().includes(nome.toLowerCase());
-    const emMapa = mapa.toLowerCase().includes(nome.toLowerCase());
+    const emBiblia = documentoContemPessoa(biblia, nome);
+    const emMapa = documentoContemPessoa(mapa, nome);
     if (biblia && mapa && (!emBiblia || !emMapa))
       blockers.push({
         code: "PROTAGONISTA_INCOERENTE",
         message: `protagonista '${nome}' do briefing não aparece em ${!emBiblia ? "Biblia-da-Obra.md" : ""}${!emBiblia && !emMapa ? " e " : ""}${!emMapa ? "Mapa-de-Personagens.md" : ""}`,
         severity: "high",
       });
-    if (estrutura && !estrutura.toLowerCase().includes(nome.toLowerCase()))
+    if (estrutura && !documentoContemPessoa(estrutura, nome))
       warnings.push(`protagonista '${nome}' não aparece na Estrutura-do-Livro.md`);
   }
 
@@ -304,17 +347,33 @@ export async function avaliarFundacaoNoDisco(
 // LEIA-ME. Instala deterministicamente o staging em `.claude/agents/` sem
 // nunca sobrescrever agente existente (idempotente). Sem staging = no-op.
 export async function instalarAgentesDeStaging(dir: string): Promise<string[]> {
-  const staging = path.join(dir, "_agentes-para-instalar");
+  const candidatos = [path.join(dir, "_agentes-para-instalar"), path.join(dir, "agentes")];
+  let staging: string | null = null;
   let arquivos: string[] = [];
-  try { arquivos = (await readdir(staging)).filter((f) => /^livro-[a-z-]+\.md$/.test(f)); } catch { return []; }
-  if (!arquivos.length) return [];
+  for (const candidato of candidatos) {
+    let encontrados: string[] = [];
+    try { encontrados = (await readdir(candidato)).filter((f) => /^livro-[a-z-]+\.md$/.test(f)); } catch { continue; }
+    if (!encontrados.length) continue;
+    if (path.basename(candidato) === "agentes") {
+      const leiaMe = (await lerSeExiste(path.join(candidato, "LEIA-ME-MOVER.md")))
+        ?? (await lerSeExiste(path.join(candidato, "LEIA-ME.md"))) ?? "";
+      const evidencia = /\.claude[\\/]agents/i.test(leiaMe) && /bloque|permiss|negad|denied/i.test(leiaMe);
+      if (!evidencia) continue;
+    }
+    staging = candidato;
+    arquivos = encontrados;
+    break;
+  }
+  if (!staging || !arquivos.length) return [];
   const destino = path.join(dir, ".claude", "agents");
   await mkdir(destino, { recursive: true });
   const instalados: string[] = [];
   for (const f of arquivos) {
+    const conteudo = await readFile(path.join(staging, f), "utf8");
+    if (conteudo.trim().length < 80 || !/^---[\s\S]*?\bmodel\s*:/i.test(conteudo)) continue;
     const alvo = path.join(destino, f);
     if ((await lerSeExiste(alvo)) !== null) continue; // nunca sobrescreve
-    await writeFile(alvo, await readFile(path.join(staging, f), "utf8"), "utf8");
+    await writeFile(alvo, conteudo, "utf8");
     instalados.push(f);
   }
   return instalados;

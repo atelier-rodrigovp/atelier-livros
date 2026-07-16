@@ -209,6 +209,11 @@ describe("FASE 2 — avaliarRotacaoFio: fio recorrente (caçador) ausente demais
     expect(avaliarRotacaoFio(fios, 7, EX).some((m) => /'c' ausente/.test(m))).toBe(false);
   });
 
+  it("fio recorrente que retorna como co-POV também zera a ausência", () => {
+    const fios = ["C", "H", "R", "C", "H", "H", "H", "H + R + C"];
+    expect(avaliarRotacaoFio(fios, 8, EX).some((m) => /'c' ausente/.test(m))).toBe(false);
+  });
+
   it("dan-brown carrega maxCapsFioAusente=3 na fundação", () => {
     expect(exigenciasParaSkill("skill-dan-brown")!.maxCapsFioAusente).toBe(3);
   });

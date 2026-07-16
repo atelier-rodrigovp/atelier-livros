@@ -82,15 +82,17 @@ describe("invalidação de aprovações de capítulo", () => {
 describe("instalação de agentes do staging (sessão headless com .claude bloqueado)", () => {
   it("instala livro-*.md em .claude/agents sem sobrescrever existentes; LEIA-ME é ignorado", async () => {
     await mkdir(path.join(dir, "_agentes-para-instalar"), { recursive: true });
-    await writeFile(path.join(dir, "_agentes-para-instalar", "livro-escritor.md"), "escritor-staging", "utf8");
-    await writeFile(path.join(dir, "_agentes-para-instalar", "livro-revisor.md"), "revisor-staging", "utf8");
+    const escritor = "---\nmodel: opus\n---\n" + "instrução editorial segura e auditável ".repeat(4);
+    const revisor = "---\nmodel: sonnet\n---\n" + "instrução de revisão segura e auditável ".repeat(4);
+    await writeFile(path.join(dir, "_agentes-para-instalar", "livro-escritor.md"), escritor, "utf8");
+    await writeFile(path.join(dir, "_agentes-para-instalar", "livro-revisor.md"), revisor, "utf8");
     await writeFile(path.join(dir, "_agentes-para-instalar", "LEIA-ME.md"), "instruções", "utf8");
     await mkdir(path.join(dir, ".claude", "agents"), { recursive: true });
     await writeFile(path.join(dir, ".claude", "agents", "livro-revisor.md"), "revisor-JA-INSTALADO", "utf8");
 
     const r1 = await instalarAgentesDeStaging(dir);
     expect(r1).toEqual(["livro-escritor.md"]);
-    expect(await readFile(path.join(dir, ".claude", "agents", "livro-escritor.md"), "utf8")).toBe("escritor-staging");
+    expect(await readFile(path.join(dir, ".claude", "agents", "livro-escritor.md"), "utf8")).toBe(escritor);
     // existente preservado; LEIA-ME não instalado
     expect(await readFile(path.join(dir, ".claude", "agents", "livro-revisor.md"), "utf8")).toBe("revisor-JA-INSTALADO");
     await expect(readFile(path.join(dir, ".claude", "agents", "LEIA-ME.md"), "utf8")).rejects.toThrow();
@@ -99,6 +101,22 @@ describe("instalação de agentes do staging (sessão headless com .claude bloqu
   });
 
   it("sem staging é no-op", async () => {
+    expect(await instalarAgentesDeStaging(dir)).toEqual([]);
+  });
+
+  it("aceita agentes/ somente com evidência explícita de bloqueio de .claude/agents", async () => {
+    const conteudo = "---\nmodel: sonnet\n---\n" + "agente válido para instalação determinística ".repeat(4);
+    await mkdir(path.join(dir, "agentes"), { recursive: true });
+    await writeFile(path.join(dir, "agentes", "livro-editor.md"), conteudo, "utf8");
+    expect(await instalarAgentesDeStaging(dir)).toEqual([]);
+    await writeFile(path.join(dir, "agentes", "LEIA-ME-MOVER.md"),
+      "A escrita em .claude/agents foi bloqueada por permissão; mover estes agentes.", "utf8");
+    expect(await instalarAgentesDeStaging(dir)).toEqual(["livro-editor.md"]);
+  });
+
+  it("rejeita agente curto ou sem frontmatter model", async () => {
+    await mkdir(path.join(dir, "_agentes-para-instalar"), { recursive: true });
+    await writeFile(path.join(dir, "_agentes-para-instalar", "livro-editor.md"), "conteúdo inválido", "utf8");
     expect(await instalarAgentesDeStaging(dir)).toEqual([]);
   });
 });

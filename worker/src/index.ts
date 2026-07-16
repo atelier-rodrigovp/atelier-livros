@@ -18,6 +18,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { RUNNER_PATH } from "./lib.js";
 import { claimJobAtomic } from "./claim.js";
+import {
+  assessLegacyArtifacts,
+  FOUNDATION_REQUIRED_FILES,
+  hashNamedContents,
+  planLegacyReconciliation,
+  reconciliationAllowlist,
+  reconciliationMode,
+  reconciliationPatch,
+  type LegacyJob,
+  type LegacyProject,
+} from "./reconciliacao-legada.js";
 
 // SPEC-12: todo console.log/warn/error do worker ganha [ISO] (o log não tinha
 // relógio próprio — instalar ANTES de qualquer log).
@@ -140,6 +151,103 @@ async function processamentoAtivo(): Promise<boolean> {
   return data ? data.enabled !== false : true;
 }
 
+// Jobs pausados por detectores antigos não devem ficar órfãos para sempre. O
+// reconciliador nasce em audit (somente leitura); apply exige configuração
+// explícita e pode ser limitado a projetos específicos. Ele retoma a MESMA linha
+// de job com update condicional, preservando histórico e evitando duplicatas.
+async function reconciliarJobsLegadosStartup(): Promise<void> {
+  const mode = reconciliationMode();
+  if (mode === "off") {
+    console.log("[reconciliação-legada] desabilitada.");
+    return;
+  }
+  const globalEnabled = await processamentoAtivo();
+  const { data: rows, error } = await sb.from("jobs")
+    .select("id,tipo,project_id,status,payload,progresso,erro,created_at,updated_at")
+    .eq("owner", OWNER)
+    .in("tipo", ["criar_fundacao", "escrever_livro"])
+    .in("status", ["paused", "queued", "running"])
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.warn(`[reconciliação-legada] auditoria não executada: ${error.message}`);
+    return;
+  }
+  const jobs = (rows ?? []) as LegacyJob[];
+  const projectIds = [...new Set(jobs.map((j) => j.project_id).filter(Boolean))] as string[];
+  const { data: projectRows, error: projectError } = projectIds.length
+    ? await sb.from("projects").select("id,briefing").eq("owner", OWNER).in("id", projectIds)
+    : { data: [], error: null };
+  if (projectError) {
+    console.warn(`[reconciliação-legada] projetos não puderam ser auditados: ${projectError.message}`);
+    return;
+  }
+
+  const assessments = new Map();
+  for (const job of jobs.filter((j) => j.status === "paused")) {
+    try {
+      const assessment = await assessLegacyArtifacts(job);
+      // Fundação existe tanto no disco quanto no Storage. Divergência impede
+      // retomada automática: não escolhemos silenciosamente uma das verdades.
+      if (assessment.hash && String(job.progresso?.quality_stage ?? "").includes("GATE_FUNDACAO")) {
+        const entries = [] as Array<{ name: string; content: Uint8Array }>;
+        for (const name of FOUNDATION_REQUIRED_FILES) {
+          const { data, error: storageError } = await sb.storage.from("manuscritos")
+            .download(`${OWNER}/${job.project_id}/fundacao/${name}`);
+          if (storageError || !data) { entries.length = 0; break; }
+          entries.push({ name, content: new Uint8Array(await data.arrayBuffer()) });
+        }
+        if (!entries.length || hashNamedContents(entries) !== assessment.hash) {
+          assessment.result = "inconsistent";
+          assessment.reason = "storage_disk_inconsistent";
+        }
+      }
+      assessments.set(job.id, assessment);
+    }
+    catch (e: any) {
+      console.warn(`[reconciliação-legada] job ${job.id}: falha ao ler artefatos: ${String(e?.message ?? e)}`);
+    }
+  }
+  const detectorVersion = `foundation-autonomy/${(manifest as SkillManifest).manifestVersion}`;
+  const decisions = planLegacyReconciliation({
+    jobs,
+    projects: (projectRows ?? []) as LegacyProject[],
+    assessments,
+    detectorVersion,
+    globalEnabled,
+    allowlist: reconciliationAllowlist(),
+  });
+  const eligible = decisions.filter((d) => d.eligible && d.plan).map((d) => d.plan!);
+  console.log(`[reconciliação-legada] modo=${mode}; elegíveis=${eligible.length}; auditados=${decisions.length}.`);
+  for (const decision of decisions) {
+    console.log(`[reconciliação-legada] job=${decision.jobId} projeto=${decision.projectId} elegível=${decision.eligible} motivo=${decision.reason}`);
+  }
+  if (mode !== "apply") return;
+
+  // Fundação antes da escrita: facilita homologação e evita concorrência difícil
+  // de diagnosticar. Cada update ainda revalida ausência de job equivalente ativo.
+  eligible.sort((a, b) => Number(a.stage !== "GATE_FUNDACAO") - Number(b.stage !== "GATE_FUNDACAO"));
+  for (const plan of eligible) {
+    const { data: equivalent } = await sb.from("jobs").select("id")
+      .eq("owner", OWNER).eq("project_id", plan.job.project_id!)
+      .eq("tipo", plan.job.tipo).in("status", ["queued", "running"]).limit(1);
+    if (equivalent?.length) {
+      console.warn(`[reconciliação-legada] job ${plan.job.id}: no-op; equivalente ativo surgiu durante o claim.`);
+      continue;
+    }
+    let update = sb.from("jobs").update(reconciliationPatch(plan, WORKER_ID))
+      .eq("owner", OWNER).eq("id", plan.job.id).eq("status", "paused");
+    if (plan.job.updated_at) update = update.eq("updated_at", plan.job.updated_at);
+    const { data: claimed, error: claimError } = await update.select("id");
+    if (claimError) {
+      console.error(`[reconciliação-legada] job ${plan.job.id}: claim falhou: ${claimError.message}`);
+    } else if (!claimed?.length) {
+      console.log(`[reconciliação-legada] job ${plan.job.id}: no-op idempotente; estado mudou antes do claim.`);
+    } else {
+      console.log(`[reconciliação-legada] job ${plan.job.id}: reencaminhado de forma atômica (${plan.stage}).`);
+    }
+  }
+}
+
 // Pausa SÓ a escrita de livros (economiza tokens sem parar entrevistas/capas/etc).
 // Implementada sem alterar o schema: uma linha de controle em `jobs`
 // (tipo='controle_escrita', status='paused') que nenhum picker reivindica.
@@ -238,6 +346,7 @@ async function loop() {
   // logando ~1×/min); erro de config (URL/credencial) fica visível no mesmo log.
   await aguardarConexao(verificarConexao);
   await recuperarLimiteMax(); // na inicialização: ressuscita jobs mortos por limite do Max
+  await reconciliarJobsLegadosStartup();
   await heartbeat({ estado: "online" });
   console.log(
     `[worker ${WORKER_ID}] conectado. owner=${OWNER} poll=${POLL}ms stale=${STALE_MIN}min`

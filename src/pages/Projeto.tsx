@@ -584,13 +584,23 @@ export default function Projeto() {
             <CardContent className="space-y-3 text-sm">
               {(() => {
                 const jf = jobMaisRecente(jobs, "criar_fundacao");
+                const pg = (jf?.progresso ?? {}) as any;
                 const gerando = jf?.status === "queued" || jf?.status === "running";
-                const pronto = jf?.status === "done" || proj.status !== "rascunho";
+                const reconciliando = pg.fase === "RECONCILIACAO_FUNDACAO" || !!pg.reconciliacao_legada;
+                const emCorrecao = pg.quality_status === "auto_correcao" || pg.fase === "CORRECAO_FUNDACAO" || reconciliando;
+                const temArtefatos = jf?.status === "paused" && pg.quality_stage === "GATE_FUNDACAO";
+                const pronto = jf?.status === "done" || proj.status !== "rascunho" || temArtefatos;
                 if (gerando) {
                   return (
                     <div className="flex flex-col items-center gap-3 py-10 text-center text-muted-foreground">
                       <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                      <p>Gerando a fundação (Bíblia, Estrutura, Mapa de Personagens, agentes)…<br />Os arquivos ficam disponíveis para download ao concluir.</p>
+                      <p>{reconciliando
+                        ? "Reavaliando fundação existente com os detectores atuais…"
+                        : emCorrecao
+                          ? "Corrigindo a fundação automaticamente e reavaliando os mesmos gates…"
+                        : "Gerando a fundação (Bíblia, Estrutura, Mapa de Personagens, agentes)…"}<br />
+                        {emCorrecao ? "Os documentos existentes são preservados; o sistema interrompe o ciclo se não houver progresso seguro." : "Os arquivos ficam disponíveis para download ao concluir."}
+                      </p>
                       <JobStatus job={jf} />
                     </div>
                   );
@@ -631,6 +641,26 @@ export default function Projeto() {
                 const refinando = jr?.status === "queued" || jr?.status === "running";
                 return (
                   <div className="space-y-5">
+                    {jf?.status === "paused" && (
+                      <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+                        <p className="font-medium">
+                          {pg.quality_categoria === "circuit_breaker"
+                            ? "A correção automática não convergiu"
+                            : "Uma decisão autoral é necessária"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {pg.quality_motivo || jf.erro || "O gate preservou os documentos e interrompeu o fluxo sem aprovar por exceção."}
+                        </p>
+                        {!!pg.quality_blockers?.length && (
+                          <details className="text-xs">
+                            <summary className="cursor-pointer font-medium">Ver diagnóstico técnico</summary>
+                            <ul className="mt-2 list-disc space-y-1 pl-5">
+                              {pg.quality_blockers.map((b: string) => <li key={b}>{b}</li>)}
+                            </ul>
+                          </details>
+                        )}
+                      </div>
+                    )}
                     <div className="space-y-2">
                       <p className="text-xs font-medium text-muted-foreground">Documentos</p>
                       <div className="flex flex-wrap gap-2">
@@ -648,7 +678,7 @@ export default function Projeto() {
                     <div className="space-y-2 rounded-lg border p-4">
                       <p className="text-sm font-medium">Melhorar a fundação</p>
                       <p className="text-xs text-muted-foreground">
-                        Diga o que aprofundar — mais personagens (com função e fio próprios),
+                        Se quiser orientar uma mudança autoral, diga o que aprofundar — mais personagens (com função e fio próprios),
                         subtramas, arcos de série/trilogia. A IA reescreve Bíblia/Mapa/Estrutura
                         coerentemente, sem recomeçar do zero.
                       </p>
@@ -712,6 +742,7 @@ export default function Projeto() {
                 const faltam = notaOficial != null ? Math.round((meta - notaOficial) * 10) / 10 : null;
                 const palavras = Number(p.palavras ?? 0);
                 const completo = total > 0 && feitos >= total;
+                const bloqueioSpec = p.quality_stage === "SPEC_CAPITULO";
                 // Rótulo sempre não-destrutivo (continua/refina, nunca "refaz tudo").
                 const rotulo = escrevendo
                   ? "Escrevendo…"
@@ -770,7 +801,9 @@ export default function Projeto() {
                           : st.situacao === "correcao_automatica"
                             ? "Corrigindo…"
                             : st.situacao === "bloqueado_qualidade" || st.situacao === "circuit_breaker"
-                              ? `Corrigir capítulo ${st.capitulo_bloqueado ?? ""}`.trim()
+                              ? bloqueioSpec
+                                ? `Revalidar spec do capítulo ${st.capitulo_bloqueado ?? ""}`.trim()
+                                : `Corrigir capítulo ${st.capitulo_bloqueado ?? ""}`.trim()
                               : rotulo}
                       </Button>
                       {st.engine_info?.modelo ? (
@@ -783,6 +816,30 @@ export default function Projeto() {
                         </span>
                       ) : null}
                     </div>
+                    {st.situacao === "circuit_breaker" && (
+                      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
+                        <p className="font-medium">
+                          {bloqueioSpec
+                            ? `O capítulo ${st.capitulo_bloqueado ?? "seguinte"} ainda não foi escrito: o bloqueio está no planejamento.`
+                            : `O capítulo ${st.capitulo_bloqueado ?? "bloqueado"} precisa de decisão editorial assistida.`}
+                        </p>
+                        <p className="mt-1 text-muted-foreground">
+                          {bloqueioSpec
+                            ? `${sincronizados} capítulos aprovados e sincronizados permanecem intactos. Revalidar executa novamente o detector atual sobre a spec e só então retoma a escrita.`
+                            : "A retomada preserva os capítulos aprovados e trabalha apenas no alvo indicado pelo diagnóstico."}
+                        </p>
+                        {!!p.correcao?.historico?.length && (
+                          <details className="mt-2">
+                            <summary className="cursor-pointer font-medium">Tentativas já realizadas</summary>
+                            <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
+                              {p.correcao.historico.map((h: any) => (
+                                <li key={`${h.tentativa}-${h.degrau}`}>Tentativa {h.tentativa}: {String(h.estrategia).replace(/_/g, " ")} — {h.resultado}</li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
+                      </div>
+                    )}
                     {/* Erro cru do runner NUNCA é mensagem principal (S8): vai para diagnóstico. */}
                     {st.diagnostico_tecnico ? (
                       <details className="text-xs text-muted-foreground">

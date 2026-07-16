@@ -193,6 +193,8 @@ describe("tratarBloqueioQualidade (coração do goal — sem clique)", () => {
     expect(p.quality_motivo).toContain("Circuit breaker");
     expect(p.correcao.historico).toHaveLength(2);
     expect(p.correcao.ativa).toBe(false);
+    expect(p.quality_cap).toBe(38);
+    expect(p.correcao).toMatchObject({ capitulo: 38, estagio: "REVISAO_CAPITULO", total_tentativas: 2 });
   });
 
   it("GATE_FUNDACAO → paused decisao_autoral; PUBLICATION_GATE com fundação → fundacao_pendente (SG7)", async () => {

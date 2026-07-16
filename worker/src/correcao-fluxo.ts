@@ -376,7 +376,15 @@ export async function tratarBloqueioQualidade(ctx: BloqueioContexto): Promise<Re
     }
     await salvarLedger(dir, ledger);
     return patchPausado(ctx, decisao.categoria, decisao.motivo, {
-      correcao: { ...(resumirLedger(ledger) ?? {}), ativa: false, historico: diagnostico },
+      quality_cap: capitulo,
+      correcao: {
+        ...(resumirLedger(ledger) ?? {}),
+        ativa: false,
+        capitulo,
+        estagio: ctx.stage,
+        total_tentativas: tentativas.length,
+        historico: diagnostico,
+      },
     });
   }
 

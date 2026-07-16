@@ -46,6 +46,17 @@ export interface ProgressoEscrita {
   // SG7: pendência de FUNDAÇÃO (não bloqueia a escrita; bloqueia a publicação).
   fundacao_status?: string;
   fundacao_blockers?: string[];
+  reconciliacao_legada?: {
+    estado?: string;
+    detector_version?: string;
+    hash_reconciliado?: string;
+    tentativa?: number;
+    estrategia?: string;
+    resultado?: string;
+    motivo?: string;
+    job_origem?: string;
+    job_retomada?: string;
+  } | null;
 }
 
 export interface ChapterRow {
@@ -181,6 +192,7 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
   const retry = pg.retry_at ? Date.parse(pg.retry_at) : NaN;
   const retryFuturo = !Number.isNaN(retry) && retry > now;
   const emCorrecaoAuto = pg.quality_status === "auto_correcao" || pg.correcao?.ativa === true;
+  const reconciliacaoLegada = !!pg.reconciliacao_legada;
   const capituloBloqueado =
     pg.quality_status === "blocked_quality" || emCorrecaoAuto
       ? (Number(pg.quality_cap ?? pg.correcao?.capitulo ?? pg.cap_atual ?? 0) || null)
@@ -224,6 +236,9 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
   // 1a. correção automática RODANDO agora (o job foi reivindicado pelo worker).
   if (job.status === "running" && input.workerOnline && emCorrecaoAuto) {
     add("ver_diagnostico", "Ver diagnóstico");
+    if (reconciliacaoLegada && pg.quality_stage === "SPEC_CAPITULO") {
+      return { situacao: "correcao_automatica", badge: `Revalidando spec — cap ${capituloBloqueado ?? "?"}`, tone: "info", mensagem_humana: `Revalidando a spec do capítulo ${capituloBloqueado ?? "?"} com o detector atual; os capítulos já aprovados permanecem intactos.`, ...base, blocker_humano: humanizarBlocker(pg.quality_blockers, capituloBloqueado), proxima_acao: null, botoes };
+    }
     const t = pg.correcao?.tentativa ? ` (tentativa ${pg.correcao.tentativa}${pg.correcao?.max_tentativas ? `/${pg.correcao.max_tentativas}` : ""})` : "";
     return { situacao: "correcao_automatica", badge: capituloBloqueado ? `Correção automática — cap ${capituloBloqueado}` : "Correção automática", tone: "info", mensagem_humana: `Correção automática em andamento${capituloBloqueado ? ` no capítulo ${capituloBloqueado}` : ""}${t} — nenhum clique é necessário.`, ...base, blocker_humano: humanizarBlocker(pg.quality_blockers, capituloBloqueado), proxima_acao: null, botoes };
   }
@@ -242,8 +257,23 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
   if (job.status === "queued" && emCorrecaoAuto && !globalDesativada) {
     const h = horaCurta(pg.correcao?.retry_at ?? pg.retry_at);
     const t = pg.correcao?.tentativa ? `tentativa ${pg.correcao.tentativa}${pg.correcao?.max_tentativas ? `/${pg.correcao.max_tentativas}` : ""}` : "próxima tentativa";
-    add("tentar_agora", "Tentar agora"); // ação EXCEPCIONAL: a ausência de clique não impede o fluxo
+    if (!reconciliacaoLegada) add("tentar_agora", "Tentar agora"); // reconciliação já é automática
     add("ver_diagnostico", "Ver diagnóstico");
+    if (reconciliacaoLegada) {
+      const spec = pg.quality_stage === "SPEC_CAPITULO";
+      return {
+        situacao: "aguardando_correcao",
+        badge: spec ? `Revalidando spec — cap ${capituloBloqueado ?? "?"}` : "Reavaliando bloqueio existente",
+        tone: "info",
+        mensagem_humana: spec
+          ? `A spec do capítulo ${capituloBloqueado ?? "?"} será revalidada pelo detector atual; os ${cont.aprovados} capítulos aprovados permanecem intactos.`
+          : "O bloqueio existente será reavaliado automaticamente, sem repetir trabalho já aprovado.",
+        ...base,
+        blocker_humano: humanizarBlocker(pg.quality_blockers, capituloBloqueado),
+        proxima_acao: null,
+        botoes,
+      };
+    }
     return {
       situacao: "aguardando_correcao",
       badge: capituloBloqueado ? `Correção automática — cap ${capituloBloqueado}` : "Correção automática",
@@ -267,16 +297,21 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
   // 4a. circuit breaker (SG1-f): a engine tentou o orçamento inteiro e parou com
   // diagnóstico — aqui a decisão é humana de verdade.
   if (job.status === "paused" && pg.quality_categoria === "circuit_breaker") {
-    add("corrigir", `Corrigir capítulo ${capituloBloqueado ?? ""}`.trim());
+    const spec = pg.quality_stage === "SPEC_CAPITULO";
+    add("corrigir", spec ? `Revalidar spec do capítulo ${capituloBloqueado ?? ""}`.trim() : `Corrigir capítulo ${capituloBloqueado ?? ""}`.trim());
     add("ver_diagnostico", "Ver diagnóstico");
     return {
       situacao: "circuit_breaker",
       badge: "Bloqueado após circuit breaker",
       tone: "danger",
-      mensagem_humana: `A correção automática do capítulo ${capituloBloqueado ?? "?"} não convergiu após ${pg.correcao?.total_tentativas ?? "várias"} tentativa(s) — decisão humana necessária (diagnóstico completo disponível).`,
+      mensagem_humana: spec
+        ? `O planejamento do capítulo ${capituloBloqueado ?? "?"} não passou após ${pg.correcao?.total_tentativas ?? "várias"} tentativa(s); os capítulos já aprovados permanecem intactos.`
+        : `A correção automática do capítulo ${capituloBloqueado ?? "?"} não convergiu após ${pg.correcao?.total_tentativas ?? "várias"} tentativa(s) — decisão humana necessária (diagnóstico completo disponível).`,
       ...base,
       blocker_humano: humanizarBlocker(pg.quality_blockers, capituloBloqueado),
-      proxima_acao: `Revisar o diagnóstico e decidir o capítulo ${capituloBloqueado ?? ""}`.trim(),
+      proxima_acao: spec
+        ? `Revalidar o planejamento do capítulo ${capituloBloqueado ?? ""}`.trim()
+        : `Revisar o diagnóstico e decidir o capítulo ${capituloBloqueado ?? ""}`.trim(),
       botoes,
     };
   }

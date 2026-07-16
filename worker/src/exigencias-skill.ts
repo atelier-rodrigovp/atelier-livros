@@ -113,14 +113,17 @@ export function avaliarRotacaoFio(
   // primário sozinho). Um fio primário que já apareceu ≥2× é um FIO recorrente; se some por mais
   // de maxCapsFioAusente caps consecutivos, sinaliza (o caçador/ironia dramática não pode evaporar).
   if (ex.maxCapsFioAusente && ex.maxCapsFioAusente > 0) {
-    const primario = (f: string) => f.split("+")[0].trim();
+    const tokens = (f: string) => f.split("+").map((x) => x.trim()).filter(Boolean);
+    const primario = (f: string) => tokens(f)[0] ?? "";
     const prim = seq.map(primario);
     const freq = new Map<string, number>();
     for (const p of prim) if (p) freq.set(p, (freq.get(p) ?? 0) + 1);
     for (const [fio, c] of freq) {
       if (c < 2) continue; // não recorrente (apoio/one-off) → não se exige recorrência
       let ausente = 0;
-      for (let i = n - 1; i >= 0 && prim[i] !== fio; i--) ausente++;
+      // Recorrência nasce do fio primário, mas uma aparição como co-POV também
+      // interrompe a ausência: "H + R + C" traz C de volta à página de fato.
+      for (let i = n - 1; i >= 0 && !tokens(seq[i]).includes(fio); i--) ausente++;
       if (ausente > ex.maxCapsFioAusente)
         out.push(`fio recorrente '${fio}' ausente há ${ausente} caps (máx ${ex.maxCapsFioAusente} — fio de ironia dramática/caçador não pode sumir tanto)`);
     }

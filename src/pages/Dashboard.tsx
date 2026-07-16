@@ -51,17 +51,19 @@ export default function Dashboard() {
   const { online } = useWorkerStatus(15_000);
   const [projects, setProjects] = useState<Project[]>([]);
   const [estados, setEstados] = useState<Record<string, OperationalState>>({});
+  const [jobsFundacao, setJobsFundacao] = useState<Record<string, Job>>({});
   const [capas, setCapas] = useState<Record<string, string>>({});
 
   const carregar = useCallback(async () => {
     // Resolvedor único (S7): busca jobs de escrita + chapters (com hash/quality) +
     // pausa de produção; cada projeto vira UMA OperationalState — mesma fonte da
     // página de projeto e da observabilidade (paridade).
-    const [{ data: projs }, { data: eds }, { data: chs }, { data: jobsEscrita }, { data: arts }, { data: ctrl }] = await Promise.all([
+    const [{ data: projs }, { data: eds }, { data: chs }, { data: jobsOperacionais }, { data: arts }, { data: ctrl }] = await Promise.all([
       supabase.from("projects").select("*").order("created_at", { ascending: false }),
       supabase.from("editions").select("id,project_id,is_origem"),
       supabase.from("chapters").select("edition_id,numero,text_sha256,quality_status"),
-      supabase.from("jobs").select("id,project_id,tipo,status,erro,progresso,created_at").eq("tipo", "escrever_livro"),
+      supabase.from("jobs").select("id,project_id,tipo,status,erro,progresso,created_at")
+        .in("tipo", ["escrever_livro", "criar_fundacao", "refinar_fundacao"]),
       supabase.from("artifacts").select("edition_id,storage_path,url_publica").eq("tipo", "capa"),
       supabase.from("worker_control").select("enabled").maybeSingle(),
     ]);
@@ -84,11 +86,18 @@ export default function Dashboard() {
       if (!pid || origemEd[pid] !== c.edition_id) continue;
       (chsPorProj[pid] ??= []).push({ numero: c.numero, text_sha256: c.text_sha256, quality_status: c.quality_status });
     }
-    // jobs de escrita por projeto.
+    // Jobs que governam o estado operacional: fundação e escrita.
     const jobsPorProj: Record<string, Job[]> = {};
-    for (const j of (jobsEscrita as Job[]) ?? []) {
+    for (const j of (jobsOperacionais as Job[]) ?? []) {
       if (j.project_id) (jobsPorProj[j.project_id] ??= []).push(j);
     }
+    const fundacaoPorProj: Record<string, Job> = {};
+    for (const j of (jobsOperacionais as Job[]) ?? []) {
+      if (!j.project_id || (j.tipo !== "criar_fundacao" && j.tipo !== "refinar_fundacao")) continue;
+      const atual = fundacaoPorProj[j.project_id];
+      if (!atual || String(j.created_at) > String(atual.created_at)) fundacaoPorProj[j.project_id] = j;
+    }
+    setJobsFundacao(fundacaoPorProj);
     const est: Record<string, OperationalState> = {};
     for (const p of projList) {
       est[p.id] = resolveOperationalState(
@@ -125,13 +134,27 @@ export default function Dashboard() {
   // senão, o ciclo de vida do projeto. Mesma OperationalState das outras telas.
   const statusDe = useCallback(
     (p: Project): Derivado => {
+      const jf = jobsFundacao[p.id];
+      const pg = (jf?.progresso ?? {}) as any;
+      if (p.status === "rascunho" && jf) {
+        if ((jf.status === "running" || jf.status === "queued") && (pg.fase === "RECONCILIACAO_FUNDACAO" || pg.reconciliacao_legada))
+          return { label: "Reavaliando fundação existente", variant: "warning", pulse: jf.status === "running" };
+        if (jf.status === "running" && pg.quality_status === "auto_correcao")
+          return { label: "Corrigindo fundação", variant: "warning", pulse: true };
+        if (jf.status === "running" || jf.status === "queued")
+          return { label: "Gerando fundação", variant: "warning", pulse: jf.status === "running" };
+        if (jf.status === "paused" && pg.quality_categoria === "circuit_breaker")
+          return { label: "Fundação: diagnóstico disponível", variant: "destructive", pulse: false };
+        if (jf.status === "paused")
+          return { label: "Decisão autoral necessária", variant: "warning", pulse: false };
+      }
       const st = estados[p.id];
       if (st && escritaGovernaCartao(st.situacao)) {
         return { label: st.badge, variant: toneToVariant(st.tone), pulse: st.situacao === "executando" };
       }
       return { ...projectStatusBadge(p.status), pulse: false };
     },
-    [estados]
+    [estados, jobsFundacao]
   );
 
   async function excluir(p: Project) {

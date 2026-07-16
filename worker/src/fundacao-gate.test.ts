@@ -7,6 +7,8 @@ import {
   avaliarFundacaoConteudo,
   consistenciaVozAutomatica,
   contarCapitulosEstrutura,
+  extrairCapitulosEstrutura,
+  identidadeCanonicaPessoa,
   qualityStateFundacao,
   sinopsesDuplicadas,
   textoAgregadoFundacao,
@@ -120,6 +122,17 @@ describe("gate da fundação — pós-condições", () => {
     expect(av.blockers.map((b) => b.code)).toContain("PROTAGONISTA_INCOERENTE");
   });
 
+  it("usa a identidade canônica quando o briefing traz a biografia inteira", () => {
+    const c = fundacaoValida();
+    c.arquivos["Biblia-da-Obra.md"] += `\n${MARCADOR_VOZ_CONSISTENCIA} alinhado`;
+    const av = avaliarFundacaoConteudo(c, {
+      ...ctx,
+      protagonistaNome: "Dra. Marta, faroleira de 42 anos; carrega a culpa pelo naufrágio",
+    });
+    expect(av.blockers.map((b) => b.code)).not.toContain("PROTAGONISTA_INCOERENTE");
+    expect(identidadeCanonicaPessoa("Dra. Marta, faroleira")).toBe("marta");
+  });
+
   it("rubrica anti-genérico sinaliza sinopses duplicadas e ausência de viradas", () => {
     const dupLinha = "A protagonista investiga mais um caso e nada muda na trama principal desta vez.";
     const estrutura = "## Capítulo 1\n" + dupLinha + "\n## Capítulo 2\n" + dupLinha + "\n";
@@ -179,6 +192,20 @@ describe("contagem de capítulos da Estrutura", () => {
   });
   it("texto sem capítulos retorna 0", () => {
     expect(contarCapitulosEstrutura("nada aqui")).toBe(0);
+  });
+  it("conta uma tabela real de 90 linhas pela primeira coluna", () => {
+    const tabela = "| Capítulo | Evento |\n|---:|---|\n" +
+      Array.from({ length: 90 }, (_, i) => `| ${i + 1} | Evento ${i + 1} |`).join("\n");
+    expect(contarCapitulosEstrutura(tabela)).toBe(90);
+  });
+  it("expõe lacunas, duplicatas e números fora da faixa ao gate", () => {
+    const extraidos = extrairCapitulosEstrutura("| 1 | A |\n| 2 | B |\n| 2 | C |\n| 4 | D |\n| 7 | X |");
+    expect(extraidos).toEqual({ numeros: [1, 2, 4, 7], duplicados: [2] });
+    const c = fundacaoValida();
+    c.arquivos["Estrutura-do-Livro.md"] = "| 1 | A |\n| 2 | B |\n| 2 | C |\n| 4 | D |\n| 13 | X |";
+    const av = avaliarFundacaoConteudo(c, ctx);
+    expect(av.blockers.find((b) => b.code === "ESTRUTURA_CAPITULOS_INCOERENTES")?.message)
+      .toContain("faltantes");
   });
 });
 
