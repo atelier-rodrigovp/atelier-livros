@@ -22,6 +22,7 @@ import {
   assessLegacyArtifacts,
   FOUNDATION_REQUIRED_FILES,
   hashNamedContents,
+  finalizeReconciliationData,
   planLegacyReconciliation,
   reconciliationAllowlist,
   reconciliationMode,
@@ -370,7 +371,15 @@ async function processarJob(job: Job) {
   keepalive.unref?.();
   try {
     await executarJob(job, heartbeat);
-    await finalizar(job.id, { status: "done", erro: null, locked_by: null, locked_at: null });
+    const { data: current } = job.payload?.reconciliacao_legada
+      ? await sb.from("jobs").select("payload,progresso").eq("owner", OWNER).eq("id", job.id).single()
+      : { data: null };
+    const reconciliation = finalizeReconciliationData(
+      (current as any)?.payload ?? job.payload,
+      (current as any)?.progresso,
+      "approved"
+    );
+    await finalizar(job.id, { status: "done", erro: null, ...reconciliation, locked_by: null, locked_at: null });
     console.log(`[job ${job.id}] done`);
   } catch (e: any) {
     if (e instanceof QualityBlockedError || e?.name === "QualityBlockedError") {

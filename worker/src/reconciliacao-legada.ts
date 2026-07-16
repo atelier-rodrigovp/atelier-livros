@@ -285,6 +285,26 @@ export function reconciliationPatch(plan: ReconciliationPlan, workerId: string, 
   };
 }
 
+export function finalizeReconciliationData(
+  payload: Record<string, any> | null | undefined,
+  progress: Record<string, any> | null | undefined,
+  result: "approved" | "paused" | "error",
+  now = new Date().toISOString()
+): { payload?: Record<string, any>; progresso?: Record<string, any> } {
+  const metadata = progress?.reconciliacao_legada ?? payload?.reconciliacao_legada;
+  if (!metadata) return {};
+  const completed = {
+    ...metadata,
+    estado: result === "approved" ? "done" : result,
+    resultado: result,
+    concluido_em: now,
+  };
+  return {
+    payload: { ...(payload ?? {}), reconciliacao_legada: completed },
+    progresso: { ...(progress ?? {}), reconciliacao_legada: completed },
+  };
+}
+
 export async function listTryTargets(dir: string, stage: LegacyStage): Promise<number[]> {
   const sub = stage === "SPEC_CAPITULO" ? "specs" : "review";
   const regex = stage === "SPEC_CAPITULO" ? /^_spec-(\d+)\.try$/ : /^_revcap-(\d+)\.try$/;

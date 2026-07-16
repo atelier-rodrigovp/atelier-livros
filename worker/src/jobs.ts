@@ -619,7 +619,9 @@ async function criarFundacao(job: Job, hb?: Heartbeat) {
   // Edição de origem + status do projeto. Projeto EFÊMERO de auditoria
   // (título AUDIT-*) nunca perde a marcação — o título gerado vira sufixo
   // (a limpeza e as guardas do harness dependem do prefixo).
-  let tituloFinal = state?.titulo || proj.titulo;
+  // Reconciliação preserva a identidade editorial já apresentada ao autor.
+  // O título interno do ESTADO pode ser antigo e não deve renomear o projeto.
+  let tituloFinal = reconciliacaoLegada ? proj.titulo : (state?.titulo || proj.titulo);
   if (typeof proj.titulo === "string" && proj.titulo.startsWith("AUDIT-") && !String(tituloFinal).startsWith("AUDIT-")) {
     tituloFinal = `${proj.titulo.split(" — ")[0]} — ${tituloFinal}`;
   }

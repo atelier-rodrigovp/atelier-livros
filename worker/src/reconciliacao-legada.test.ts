@@ -3,6 +3,7 @@ import {
   planLegacyReconciliation,
   reconciliationMode,
   reconciliationPatch,
+  finalizeReconciliationData,
   shouldGenerateFoundation,
   targetFromState,
   type ArtifactAssessment,
@@ -98,5 +99,12 @@ describe("reconciliação legada", () => {
   it("fundação legada nunca passa pelo gerador", () => {
     expect(shouldGenerateFoundation({})).toBe(true);
     expect(shouldGenerateFoundation({ reconciliacao_legada: { detector_version: "v2" } })).toBe(false);
+  });
+
+  it("conclusão fecha o ledger no payload e no progresso", () => {
+    const initial = { reconciliacao_legada: { estado: "queued", resultado: "queued", job_origem: "j1" } };
+    const done = finalizeReconciliationData(initial, initial, "approved", "2026-07-16T12:00:00Z");
+    expect(done.payload?.reconciliacao_legada).toMatchObject({ estado: "done", resultado: "approved" });
+    expect(done.progresso?.reconciliacao_legada.concluido_em).toBe("2026-07-16T12:00:00Z");
   });
 });
