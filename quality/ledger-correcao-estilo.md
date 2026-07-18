@@ -98,3 +98,67 @@ Cota MAX: **disponível** (sonda ao vivo `claude -p` retornou PONG, exit 0) — 
 
 ## Orçamento (honestidade)
 Gerações: cap-37 5 passadas (pilot diagnóstico + rascunho + 3 micro-loops) — EXCEDEU o teto por-capítulo de 3; acoplado à revisita de fatia-1 (melhoria do detector), não re-prompt cego, mas registro o overshoot. cap-38 2, cap-05 2, hoover 1. Total ~10-11 (teto 12). Parei ao atingir o teto; não gerei mais para fechar a sanfona residual de 38/05.
+
+## IMPLANTAÇÃO EM PRODUÇÃO (2026-07-17/18)
+
+1. **Baseline engine-isolation regenerado** com motivo no GOAL-LEDGER: v1.0.7→1.0.8 (no branch) e →1.0.9 (pós-merge, o checkout re-normalizou fim-de-linha em 3 arquivos). 4 diff-guards → verdes.
+2. **Suítes verdes:** worker 56 files/595 passed/3 skip/0 failed; front 63 files/672 passed/3 skip/0 failed; gate de vazamento exit 0.
+3. **Branch empurrada:** `origin/estilo-danbrown-correcao` @ fb4004a (commit limpo, sem arquivos da engine-zero-custo).
+4. **Reconciliação + merge:** master não avançou desde a base (merge-base = master HEAD); arquivos da engine-zero-custo são UNTRACKED e master não os tem → SEM risco de conflito. Merge fast-forward em master local (fb4004a). `origin/master` deixado em fde4186 (não empurrado — o engine vai a produção pelo worker LOCAL; frontend intocado; commit já preservado no origin via a branch; autor faz `git push origin master` quando quiser).
+5. **Worker reiniciado e vivo:** matei 2 workers obsoletos (código pré-merge), reiniciei a Task `AtelierWorker` → boot fresco PID 53364 com o código mesclado. Log: preflight OK (skills≡manifest 1.0.7), reconciliação-legada modo=audit elegíveis=0 (sem ação destrutiva; jobs de 53abdade marcados não-elegíveis), `conectado poll=5000ms` (heartbeat ativo, sem erro de credencial). Estável 15s+ pós-boot.
+6. **Intocados:** banco Supabase (nenhuma escrita), capítulos canônicos + ESTADO_LIVRO.json, sandbox `bench-estilo/`.
+
+Detectores permanecem em SINAL. Follow-ups registrados: sanfona residual cap-38/05; gate anti-duplicação (bug do editor no cap-37 bench); promoção de detectores adiada.
+
+---
+
+# Correção de estilo HOOVER-McFadden (execução de AUDITORIA-HOOVER.md) — 2026-07-18
+
+**Contraste crítico com o dan-brown (o erro NÃO cometido):** a correção dan-brown mira TRANSPARÊNCIA (piso declarativo, interioridade mínima, metáfora rara). Isso MATARIA o hoover, onde interioridade contínua, 1ª pessoa emocional e metáfora sentimental são FEATURE. O único inimigo comum (e único alvo aqui): aforismo/máxima (gnômico), personificação de abstração, frase-sanfona e repetição de assinatura. Interioridade e calor NÃO são alvo.
+
+## Auditoria (`AUDITORIA-HOOVER.md`)
+Causa MISTA, dominante INFRA. A skill hoover LOCAL já é anti-ornamento ("sem staccato vazio", "metáfora com extrema parcimônia", "NUNCA a cadência de VÉSPER") — inocentada. A doença vem de: CR1 lente aforística injetada pelo arquiteto no `perfil-de-voz.md` (`cae6a074:75` "a beleza é sempre a superfície de algo enterrado" → cap-01 gera "a beleza é sempre a casca de algum estrago"); CR2 prior do modelo-base (hoover importado já tem gnômico 5/cap sem pipeline); CR4 **achado central**: a infra de transparência dan-brown foi para produção skill-agnóstica e passou a aplicar ao revisor E aos sinais do hoover um piso declarativo + teto de interioridade + teto de metáfora — penalizando a alma do gênero (pipe-01/02 disparam decl menor que 50%, dial menor que 15%, metáfora). Baseline determinístico: gnômico 4-5/cap (alvo <=2) em todo capítulo.
+
+## Correção (fatias)
+- **`craft-agentes.ts`** — revisor skill-aware. Novo `ADENDO_TRANSPARENCIA_INTIMISTA` (marcador `transp-intimista`) para skills em `SKILLS_INTIMISTAS={hoover-mcfadden}`: mantém os 4 alvos de ornamento, TROCA o "Piso de transparência" por cláusula de PROTEÇÃO (interioridade livre, 1ª pessoa emocional feature, metáfora isolada feature, só a CADEIA é defeito; sem piso de declarativa/diálogo). `garantirPropulsaoRevisor(c, skill)` faz TROCA idempotente (default<->intimista). Threadado de `jobs.ts:487` -> `normalizarCraftNosAgentes(dir, skill)`. **Dan-brown byte-idêntico** (fora do mapa) — provado em teste (`garantirPropulsaoRevisor(REV,"skill-dan-brown") === default`).
+- **`maneirismo.ts`** — hoover em `ORC_TRANSPARENCIA_POR_SKILL` (SINAL, `bloqueia:false`) com flags `pisoDeclarativas:false, pisoDialogo:false, metaforaDensidade:false`. `OrcamentoTransparencia` ganhou as 3 flags opcionais (ausentes = comportamento default dan-brown). `diagnosticarTransparencia` respeita: hoover suprime declarativas/diálogo e só sinaliza metáfora em CADEIA. Regressão dan-brown provada: `diagnosticarTransparencia(cap37,"skill-dan-brown").linhas` === default (6 linhas idênticas); hoover = 4 linhas (3 eixos suprimidos).
+- **Espelho Python** `livro_runner.py::_sinais_transparencia(texto, skill=...)` — mesma lógica (`_SKILLS_INTIMISTAS`); call site (revisor) passa `_skill_projeto(projeto)`. Idioma do special-case hoover que já existia (`_streak_guarda:1457`). Paridade TS<->Python confirmada por smoke (declarativas/metáfora-isolada suprimidas p/ hoover; gnômico/sanfona seguem medindo).
+- **Skill patch** `skill-patches/hoover-mcfadden/references/voz-e-oficio.md` — nomeia os 3 tiques na seção "Padrões a evitar" + nota "corte o aforismo, não o coração" (interioridade/1ª pessoa/metáfora sentimental são feature; sem piso de declarativa/diálogo). NÃO tocou interioridade/metáfora/calor.
+- **Anti-repetição cross-capítulo** — confirmada UNIVERSAL (roda em `_recontagem_cap` p/ toda skill); empírico nos 3 caps bench = **0 repetição verbatim**.
+- **Detectores permanecem em SINAL** (`bloqueia:false`) — promoção a bloqueio exige protocolo LLM com zero FP (D1/D3 têm FP alto, reconfirmado no benchmark hoover: régua gnômico 4 vs LLM 1).
+
+## Regressão (baseline vs pós-mudança)
+| Verificação | Resultado |
+|---|---|
+| `npx vitest run` (worker) | **602 passed / 3 skipped / 4 failed** — os 4 = diff-guards `engine-isolation` (jobs.ts, craft-agentes.ts, livro_runner.py, manifest.json — arquivos que a correção edita; decisão cross-iniciativa do autor, não forçada). Sem regressão de lógica. maneirismo.ts NÃO está no baseline (não dispara guard). |
+| `npm test` (front) | **679 passed / 3 skipped / 4 failed** — mesmos 4 diff-guards. |
+| `skill-manifest.test.ts` | **8/8** (manifest 1.0.7->1.0.8; hash normalizado dos 2 arquivos editados; arquiteto preservado). |
+| Python `test_gate_spec` / `test_runner_limite` | **TODOS OK**. |
+| `gate_manuscrito.py` (53abdade dan-brown) | **GATE OK — exit 0** (zero regressão de vazamento). |
+| Regressão dan-brown (detectores) | sinais dan-brown byte-idênticos ao default (cap-37: 6 linhas iguais). Metas dan-brown intactas. |
+| Testes novos hoover | craft-agentes 14->20, transparencia 42->47 (injeção/idempotência/troca intimista + supressão de eixos protegidos + gnômico segue sinalizando). |
+
+## Benchmark A/B (sandbox `<WORK_DIR>/bench-hoover/`, cadeia real; canônicos/banco intactos)
+Fundação re-normalizada (revisor virou intimista: `transp-intimista:1, Piso de transparência:0`). Skill+runner corrigidos instalados via `instalar-skills.ps1` (backup `~/.claude/skill-backups/20260718131701`). Cota MAX: sonda PONG exit 0.
+
+**Contagem LLM autoritativa (semântica, exclusões do audit — a régua superconta gnômico/sanfona em prosa limpa):**
+| cap | gnômico narr (<=2) | personif (<=1-2) | sanfona (<=1) | veredito |
+|---|---|---|---|---|
+| **01** base->final | 5 -> **~1** ok | 1 -> **0** ok | 1 -> **1** ok | **PASSA 3/3** |
+| **02** base->final | 4 -> **2** ok | 1 -> **0** ok | 0 -> **0** ok | **PASSA 3/3** (o mais limpo) |
+| **03** (novo) final | — -> **~2** ok | — -> **1** ok | — -> **1** ok | **PASSA 3/3** |
+
+Trajetória: aforismo-lente "a beleza é sempre a casca de algum estrago" ELIMINADO; gnômico 5->1 (cap-01, após rodada dirigida com lista exata), 4->2 (cap-02); personificação zerada nos corrigidos; metáfora em cadeia eliminada. Régua determinística (tendência): gnômico régua cap-01 5->4, cap-03 3->2; sanfona régua 17->13 / 11->10 / 4 (maioria FP de enumeração); metáf cadeia cap-01 0.
+
+**Anti-dano (interioridade/calor PRESERVADOS — verificado por LLM com trecho-prova):**
+- cap-01 (aprofundado): *"Nunca chorei essa mulher. Não se chora uma data. Chorei foi outra dor, de menina — a ideia de ter sido largada... E agora tremo."* — a cirurgiã-da-alma que racionaliza e vaza, intacta.
+- cap-02: *"Rio. Não devia... O riso me trai antes da cabeça."* / *"estou aliviada de não estar mais sozinha com o buraco."*
+- Veredito LLM: "cortou ornamento SEM matar o calor; chegou a aprofundar a interioridade". `interioridadeSemEvento` estát% caiu (41->31.8 / 30.3->22.6) = interioridade ANCORADA em evento (efeito desejado do `ADENDO_INTERIORIDADE`), não perda de calor — confirmado na leitura.
+
+**Ressalva honesta:** "Não se chora uma data" (cap-01) e 2 máximas de cap-03 foram PRESERVADAS como carga emocional / voz de personagem (decisão do autor) — no hoover a fronteira entre "gnômico-de-IA" e "compressão-de-voz da narradora contida" é mais fina que no dan-brown. Todos <=2, meta atingida. Orçamento: 8 gerações (3 escritor + 3 micro-loop + 2 dirigidos), teto 12.
+
+## Modelo-por-fatia
+Opus 4.8 (orquestrador — Fable esgotado, degradação registrada): auditoria, desenho das cotas/flags, redação dos blocos, diagnóstico causal, veredito. Cadeia de escrita MAX OAuth (escritor opus via Task + revisor/editor): geração e micro-loops do benchmark. Opus (subagente): protocolo LLM (contagem semântica + anti-dano). Sonnet (implícito na cadeia): revisor/editor do micro-loop.
+
+## Aplicado local
+Skill+runner instalados (backup 20260718131701); worker reiniciado; canônicos (cae6a074, 53abdade), banco Supabase e fila de jobs INTOCADOS; sandbox isolado em `bench-hoover/`. Push/merge remoto deixado para o autor (veredito de gosto final é dele — trechos lado a lado entregues).

@@ -287,3 +287,58 @@ describe("orcTransparenciaParaSkill", () => {
     expect(orcTransparenciaParaSkill("skill-fora-do-mapa").bloqueia).toBe(false);
   });
 });
+
+// ===========================================================================
+// AUDITORIA-HOOVER (CR4) — transparência skill-aware: hoover protege os eixos
+// interioridade/metáfora (piso declarativa off, piso diálogo off, metáfora só cadeia),
+// mantendo os 4 alvos de ornamento (gnômico/personificação/sanfona/adjetivo).
+// ===========================================================================
+describe("diagnosticarTransparencia — hoover-mcfadden (eixos protegidos)", () => {
+  it("orcTransparenciaParaSkill(hoover) = SINAL com eixos protegidos desligados", () => {
+    const o = orcTransparenciaParaSkill("hoover-mcfadden");
+    expect(o.bloqueia).toBe(false);
+    expect(o.pisoDeclarativas).toBe(false);
+    expect(o.pisoDialogo).toBe(false);
+    expect(o.metaforaDensidade).toBe(false);
+  });
+
+  // Texto interiorizado: 24 frases com subordinada inicial (nenhuma declarativa simples)
+  // => percentDeclarativasSimples.abaixo = true.
+  const INTERIOR = Array.from({ length: 24 }, (_, i) =>
+    `Quando ele entrou na sala eu senti o frio subir pela espinha numa onda ${i}.`).join(" ");
+
+  it("piso de declarativas: default SINALIZA; hoover NÃO", () => {
+    expect(percentDeclarativasSimples(INTERIOR).abaixo).toBe(true); // pré-condição
+    const def = diagnosticarTransparencia(INTERIOR).linhas.join(" || ");
+    const hoo = diagnosticarTransparencia(INTERIOR, "hoover-mcfadden").linhas.join(" || ");
+    expect(def).toMatch(/frases declarativas simples/);
+    expect(hoo).not.toMatch(/frases declarativas simples/);
+  });
+
+  // Metáfora ISOLADA (1 "como se" em texto curto: por300 > 1, cadeias = 0).
+  const META_ISOLADA = "Fiquei parada na porta como se o chão pudesse ceder a qualquer instante.";
+  it("metáfora isolada: default SINALIZA; hoover NÃO (só cadeia é defeito)", () => {
+    const m = contarMetaforaElaborada(META_ISOLADA);
+    expect(m.acima).toBe(true);       // densidade > 1
+    expect(m.cadeias).toBe(0);        // isolada
+    const def = diagnosticarTransparencia(META_ISOLADA).linhas.join(" || ");
+    const hoo = diagnosticarTransparencia(META_ISOLADA, "hoover-mcfadden").linhas.join(" || ");
+    expect(def).toMatch(/metafora elaborada/);
+    expect(hoo).not.toMatch(/metafora elaborada/);
+  });
+
+  // CADEIA de metáforas (3 gatilhos próximos): hoover AINDA sinaliza (é defeito no gênero).
+  const META_CADEIA = "O medo era como uma corda esticada, como quem segura o fôlego, como se o ar tivesse acabado.";
+  it("cadeia de metáfora: hoover SINALIZA (só a cadeia é defeito)", () => {
+    expect(contarMetaforaElaborada(META_CADEIA).cadeias).toBeGreaterThan(0); // pré-condição
+    const hoo = diagnosticarTransparencia(META_CADEIA, "hoover-mcfadden").linhas.join(" || ");
+    expect(hoo).toMatch(/metafora elaborada/);
+  });
+
+  it("os 4 alvos de ornamento seguem sinalizando no hoover (gnômico)", () => {
+    const t = "A beleza é sempre a casca de algum estrago. Guardar é uma forma de lembrar. " +
+              "Um homem que lida com a terra e não quer levar a terra consigo é sempre um mentiroso.";
+    const hoo = diagnosticarTransparencia(t, "hoover-mcfadden").linhas.join(" || ");
+    expect(hoo).toMatch(/fecho gnomico\/maxima/);
+  });
+});

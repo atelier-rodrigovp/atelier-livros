@@ -484,7 +484,7 @@ async function aplicarNormalizadoresFundacao(dir: string, skill: string | null |
   }
   // Escritor lê a craft direto + revisor reprova "competente e chato".
   {
-    const a = await normalizarCraftNosAgentes(path.join(dir, ".claude", "agents"));
+    const a = await normalizarCraftNosAgentes(path.join(dir, ".claude", "agents"), skill);
     if (a.escritor) console.log("[craft] livro-escritor: leitura de craft por capítulo injetada");
     if (a.revisor) console.log("[craft] livro-revisor: veredito de propulsão injetado");
   }

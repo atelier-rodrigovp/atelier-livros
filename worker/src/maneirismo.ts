@@ -1006,6 +1006,13 @@ export interface OrcamentoTransparencia {
   sanfona: number;
   declarativasMinPct: number;
   bloqueia: boolean;          // false = tudo sinal (default de toda skill)
+  // AUDITORIA-HOOVER (CR4): eixos PROTEGIDOS nas skills intimistas. Ausentes/true =
+  // comportamento dan-brown (emite os sinais). false = NÃO emite o sinal (a
+  // interioridade/metáfora emocional é feature, não defeito). Só a CADEIA de metáfora
+  // continua a sinalizar quando `metaforaDensidade:false`.
+  pisoDeclarativas?: boolean; // default true (emite "declarativas <piso%")
+  pisoDialogo?: boolean;      // default true (emite "diálogo <15%" / "interioridade contínua")
+  metaforaDensidade?: boolean;// default true (emite por densidade>1 OU cadeia); false = só cadeia
 }
 export const SINAL_TRANSPARENCIA: OrcamentoTransparencia = {
   gnomico: LIMIAR_GNOMICO, personificacaoPor1000: LIMIAR_PERSONIFICACAO_1000,
@@ -1013,7 +1020,17 @@ export const SINAL_TRANSPARENCIA: OrcamentoTransparencia = {
 };
 // Promoção POR SKILL (fatia 5 do plano): só entra aqui skill validada no
 // benchmark com zero FP nos capítulos-controle. Vazio = nenhum bloqueio.
-export const ORC_TRANSPARENCIA_POR_SKILL: Record<string, OrcamentoTransparencia> = {};
+// hoover-mcfadden (AUDITORIA-HOOVER.md): SINAL (bloqueia:false) dos 4 alvos de
+// ornamento (gnômico/personificação/sanfona/adjetivo), MAS com os eixos protegidos
+// DESLIGADOS — sem piso de declarativa, sem piso de diálogo, metáfora só sinaliza em
+// CADEIA. A voz emocional em 1ª pessoa (interioridade/metáfora sentimental) é feature.
+export const ORC_TRANSPARENCIA_POR_SKILL: Record<string, OrcamentoTransparencia> = {
+  "hoover-mcfadden": {
+    gnomico: LIMIAR_GNOMICO, personificacaoPor1000: LIMIAR_PERSONIFICACAO_1000,
+    sanfona: LIMIAR_SANFONA, declarativasMinPct: PISO_DECLARATIVAS_PCT, bloqueia: false,
+    pisoDeclarativas: false, pisoDialogo: false, metaforaDensidade: false,
+  },
+};
 
 export function orcTransparenciaParaSkill(skill?: string | null): OrcamentoTransparencia {
   return (skill && ORC_TRANSPARENCIA_POR_SKILL[skill]) || SINAL_TRANSPARENCIA;
@@ -1054,13 +1071,16 @@ export function diagnosticarTransparencia(
     linhas.push(`frase-sanfona ${sanfona.n}x (alvo <= ${orc.sanfona}; ex.: ${sanfona.exemplos[0] ?? ""})`);
   if (adjetivoAvaliativo.n > 1)
     linhas.push(`adjetivo avaliativo em objeto ${adjetivoAvaliativo.n}x (ex.: ${adjetivoAvaliativo.exemplos[0] ?? ""})`);
-  if (declarativas.abaixo)
+  if (orc.pisoDeclarativas !== false && declarativas.abaixo)
     linhas.push(`frases declarativas simples ${declarativas.pct}% (piso ${orc.declarativasMinPct}%)`);
-  if (dialogo.abaixo)
+  if (orc.pisoDialogo !== false && dialogo.abaixo)
     linhas.push(doisOuMaisEmCena
       ? `dialogo ${dialogo.dialogoPct}% das palavras (piso ${PISO_DIALOGO_PCT}% com 2+ em cena)`
       : `interioridade continua ${dialogo.maxInterioridadeSeguida} frases seguidas (teto ${TETO_INTERIORIDADE_RUN})`);
-  if (metafora.acima)
+  // Metáfora: default sinaliza por densidade OU cadeia; nas skills intimistas
+  // (metaforaDensidade:false) só a CADEIA é defeito — a metáfora sentimental isolada fica.
+  const metaforaSinaliza = orc.metaforaDensidade === false ? metafora.cadeias > 0 : metafora.acima;
+  if (metaforaSinaliza)
     linhas.push(`metafora elaborada ${metafora.n}x (${metafora.por300}/300 palavras; cadeias ${metafora.cadeias})`);
 
   const ofensores = orc.bloqueia

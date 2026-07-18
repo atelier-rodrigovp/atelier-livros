@@ -740,7 +740,7 @@ def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
     # declarativas, dialogo, metafora). SO SINAL — alimenta o revisor, nao bloqueia,
     # nao entra no gate. Passado como kwarg do .format (os excertos podem conter
     # chaves literais, mas o valor de um kwarg nao e reparseado pelo format).
-    _sinais_tr = _sinais_transparencia(txt_cap)
+    _sinais_tr = _sinais_transparencia(txt_cap, skill=_skill_projeto(projeto))
     bloco_transp = ("SINAIS DE TRANSPARENCIA (deterministicos, consultivos — julgue na "
                     "leitura; o veredito e seu): " + " || ".join(_sinais_tr) + ". "
                     ) if _sinais_tr else ""
@@ -2196,12 +2196,22 @@ def contar_metafora_elaborada(texto):
             "acima": por300 > 1 or cadeias > 0}
 
 
-def _sinais_transparencia(texto, dois_ou_mais_em_cena=True):
+# Skills de voz intimista (AUDITORIA-HOOVER.md, CR4): os 4 alvos de ornamento
+# (gnomico/personificacao/sanfona/adjetivo) seguem em SINAL, MAS os eixos PROTEGIDOS
+# ficam desligados — sem piso de declarativa, sem piso de dialogo, metafora so em
+# CADEIA. Espelha maneirismo.ts::ORC_TRANSPARENCIA_POR_SKILL. Data-driven.
+_SKILLS_INTIMISTAS = {"hoover-mcfadden"}
+
+
+def _sinais_transparencia(texto, dois_ou_mais_em_cena=True, skill=""):
     """Espelho de maneirismo.ts::diagnosticarTransparencia(...).linhas — MANTER EM
     SINCRONIA. Devolve a lista de linhas formatadas (vazia se nada digno de nota).
-    SO SINAL: alimenta o prompt do revisor; nao bloqueia nada. Limiares fixos do
+    SO SINAL: alimenta o prompt do revisor; nao bloqueia nada. Limiares do
     SINAL_TRANSPARENCIA (gnomico 2, personificacao 1.5/1000, sanfona 1, piso
-    declarativas 50%); a promocao a gate por skill do TS nao existe aqui."""
+    declarativas 50%). Nas skills intimistas (hoover), os eixos protegidos
+    (declarativas/dialogo/metafora-densidade) NAO emitem sinal — interioridade e
+    metafora emocional sao feature; so a CADEIA de metafora continua a sinalizar."""
+    intimista = skill in _SKILLS_INTIMISTAS
     gnomico = contar_gnomico(texto)
     personificacao = contar_personificacao(texto)
     sanfona = contar_sanfona(texto)
@@ -2220,14 +2230,15 @@ def _sinais_transparencia(texto, dois_ou_mais_em_cena=True):
         linhas.append(u"frase-sanfona {}x (alvo <= 1; ex.: {})".format(sanfona["n"], (sanfona["exemplos"] or [""])[0]))
     if adjetivo["n"] > 1:
         linhas.append(u"adjetivo avaliativo em objeto {}x (ex.: {})".format(adjetivo["n"], (adjetivo["exemplos"] or [""])[0]))
-    if declarativas["abaixo"]:
+    if not intimista and declarativas["abaixo"]:
         linhas.append(u"frases declarativas simples {}% (piso 50%)".format(declarativas["pct"]))
-    if dialogo["abaixo"]:
+    if not intimista and dialogo["abaixo"]:
         linhas.append(
             u"dialogo {}% das palavras (piso 15% com 2+ em cena)".format(dialogo["dialogoPct"])
             if dois_ou_mais_em_cena else
             u"interioridade continua {} frases seguidas (teto 3)".format(dialogo["maxInterioridadeSeguida"]))
-    if metafora["acima"]:
+    metafora_sinaliza = (metafora["cadeias"] > 0) if intimista else metafora["acima"]
+    if metafora_sinaliza:
         linhas.append(u"metafora elaborada {}x ({}/300 palavras; cadeias {})".format(
             metafora["n"], metafora["por300"], metafora["cadeias"]))
     return linhas

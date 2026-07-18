@@ -136,6 +136,60 @@ describe("FASE 2 — interioridade-sem-evento como reprovação (skill-agnóstic
   });
 });
 
+describe("AUDITORIA-HOOVER (CR4) — transparência skill-aware (intimista protege interioridade/metáfora)", () => {
+  const REV = "---\nname: livro-revisor\nmodel: sonnet\n---\n## Checklist\n- [ ] PdV.\n";
+  it("skill default (dan-brown): bloco tem o Piso de transparência e NÃO a proteção intimista", () => {
+    const t = garantirPropulsaoRevisor(REV).texto;
+    expect(t).toMatch(/Piso de transparência/);
+    expect(t).not.toMatch(/transp-intimista/);
+    expect(t).not.toMatch(/Corte o aforismo, não o coração|NÃO existe\s*\n?\s*piso de frase declarativa/);
+  });
+  it("skill hoover: bloco protege interioridade/metáfora e mantém os 4 alvos", () => {
+    const t = garantirPropulsaoRevisor(REV, "hoover-mcfadden").texto;
+    expect(t).toContain(MARCADOR_PROPULSAO);
+    expect(t).toMatch(/transp-intimista/);                 // variante intimista
+    expect(t).toMatch(/voz INTIMISTA em 1ª pessoa/);
+    expect(t).toMatch(/PROTEGIDO — NÃO penalize/);
+    expect(t).toMatch(/NÃO existe\s*\n?\s*piso de frase declarativa nem piso de diálogo/);
+    expect(t).toMatch(/só a CADEIA de 2\+ metáforas/);
+    // os 4 alvos de ornamento continuam
+    expect(t).toMatch(/Fecho gnômico\/máxima/);
+    expect(t).toMatch(/Personificação de ABSTRAÇÃO/);
+    expect(t).toMatch(/Frase-sanfona/);
+    // e NÃO o piso dan-brown
+    expect(t).not.toMatch(/Piso de transparência/);
+  });
+  it("hoover idempotente (marcador 1×, 2ª aplicação = no-op)", () => {
+    const um = garantirPropulsaoRevisor(REV, "hoover-mcfadden").texto;
+    const dois = garantirPropulsaoRevisor(um, "hoover-mcfadden");
+    expect(dois.mudou).toBe(false);
+    expect(contar(dois.texto, MARCADOR_PROPULSAO)).toBe(1);
+    expect(contar(dois.texto, "transp-intimista")).toBe(1);
+  });
+  it("TROCA: bloco default já injetado + skill hoover ⇒ vira intimista sem duplicar; idempotente após", () => {
+    const base = garantirPropulsaoRevisor(REV).texto; // default (dan-brown)
+    expect(base).toMatch(/Piso de transparência/);
+    const r = garantirPropulsaoRevisor(base, "hoover-mcfadden");
+    expect(r.mudou).toBe(true);
+    expect(r.texto).toMatch(/transp-intimista/);
+    expect(r.texto).not.toMatch(/Piso de transparência/);
+    expect(contar(r.texto, MARCADOR_PROPULSAO)).toBe(1);
+    expect(garantirPropulsaoRevisor(r.texto, "hoover-mcfadden").mudou).toBe(false); // no-op após troca
+  });
+  it("TROCA reversa: bloco intimista + skill não-intimista ⇒ volta ao default", () => {
+    const inti = garantirPropulsaoRevisor(REV, "hoover-mcfadden").texto;
+    const r = garantirPropulsaoRevisor(inti, "skill-dan-brown");
+    expect(r.mudou).toBe(true);
+    expect(r.texto).not.toMatch(/transp-intimista/);
+    expect(r.texto).toMatch(/Piso de transparência/);
+    expect(contar(r.texto, MARCADOR_PROPULSAO)).toBe(1);
+  });
+  it("dan-brown NÃO regride: skill não-intimista = bloco idêntico ao default", () => {
+    expect(garantirPropulsaoRevisor(REV, "skill-dan-brown").texto)
+      .toBe(garantirPropulsaoRevisor(REV).texto);
+  });
+});
+
 describe("FASE 2 — reforços de revisor: variedade de gancho + ancoragem física (skill-agnóstico)", () => {
   it("injeção nova traz variedade de gancho (consultivo) e ancoragem física na interioridade", () => {
     const t = garantirPropulsaoRevisor("# rev\n").texto;
