@@ -26,6 +26,11 @@ export function classificarBlocker(codeOuMsg: string): CategoriaBlocker {
   if (/(molde|cadencia|cadência|antitese|antítese|anafora|anáfora|fragmento|staccato|italico|itálico|retoric|epigrama|clipe de negacao|clipe de negação|repeticao cross|repetição cross|simile|símile|aposto)/.test(s)) {
     return "lexical_prosa";
   }
+  // Tiques de transparência (auditoria de estilo): defeitos DE FRASE — correção
+  // mínima é o editor focado, não revisão narrativa. Ficam em lexical_prosa.
+  if (/(gnomic|gnômic|maxima|máxima|aforism|personificac|personificaç|sanfona|reformulac|reformulaç|adjetivo avaliativo|declarativas simples|transparenc|transparênc)/.test(s)) {
+    return "lexical_prosa";
+  }
   return "narrativo";
 }
 

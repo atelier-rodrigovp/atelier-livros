@@ -61,15 +61,16 @@ In `worker/src/jobs.ts`:
   1. `normalizarModelosAgentes()` (line 481) — ensures writer=opus, reviewer=sonnet, editor=haiku
   2. `normalizarVozRegra4()` (line 485) — injects rhythm quota (Rule 4 ceilings: fragment ≤1–2, italics ≤2–3, rhetoric ≤1–2, no "coisa" >1/ch) + guard comments over model paragraphs
   3. `normalizarCraftSkill()` (line 494) — injects skill-specific craft block (motor + rules as positive targets) into `perfil-de-voz.md`
-  4. `normalizarCraftNosAgentes()` (line 501) — **CRITICAL:** injects `<!-- CRAFT-LEITURA v1 -->` into writer agent (read craft DIRECTLY, not digest); injects `<!-- PROPULSAO v1 -->` into reviewer agent (verdict: "is this alive?" not just defect lists)
+  4. `normalizarCraftNosAgentes()` (line 501) — **CRITICAL:** injects `<!-- CRAFT-LEITURA v1 -->` into writer agent (read craft DIRECTLY, not digest); injects `<!-- PROPULSAO v1 -->` into reviewer agent. The PROPULSAO verdict is now **dual-axis** (`ADENDO_TRANSPARENCIA`): "is it alive? **AND is it transparent?**" — opacity (gnomic aphorism, abstraction personification, frase-sanfona, evaluative adjective on objects, sub-50% declarative) reproves with the same weight as a dead chapter (see AUDITORIA-ESTILO-DANBROWN.md).
   5. `normalizarExigenciasSkill()` (line 507) — injects structural specs per skill (dan-brown fios + dossier, hoover clocks + narrator, romantasy POV rotation + cost scalar)
+  6. `desornamentarModelosPerfil()` (`modelos-perfil.ts`) — flags §2 model paragraphs that carry ornament tics (gnomic/personification/sanfona/metaphor/eco-negation) with `<!-- MODELO-FLAG -->`; **never rewrites prose** (uncertain provenance = author's call).
 
 ### What Each Normalizer Does
 
 **`craft-agentes.ts`**
 - `normalizarCraftNosAgentes()`: Modifies `.claude/agents/livro-escritor.md` and `livro-revisor.md`
   - Writer: adds `<!-- CRAFT-LEITURA v1 -->` block that says "read craft from skill references directly (voz-e-oficio.md, metamodelo-*.md), not just digest; digest = facts only"
-  - Reviewer: adds `<!-- PROPULSAO v1 -->` block with verdict question: "is this alive? does it sing? or is it competent-but-dead?" (repoves hollow competence, not just checklist items)
+  - Reviewer: adds `<!-- PROPULSAO v1 -->` block with a **dual-axis** verdict: (1) "is it alive?" — reproves competent-but-dead chapters; (2) `ADENDO_TRANSPARENCIA` "is it transparent?" — reproves opacity (gnomic aphorism ≤2/ch, abstraction personification ≤2/ch, frase-sanfona ≤1/ch, evaluative adjective on physical objects, majority-declarative floor). Opacity and deadness weigh equally; "alive" is proven by event + cut, not by rhetorical load.
 
 **`craft-skill.ts`**
 - `normalizarCraftSkill()`: Modifies `perfil-de-voz.md`
@@ -100,7 +101,27 @@ npx tsx worker/scripts/normalizar-voz-regra4.ts [<project_id>]
 npx tsx worker/scripts/aplicar-craft-skill.ts [<project_id>]
 npx tsx worker/scripts/consertar-craft-agentes.ts [<project_id>]
 # (exigencias-skill is checked at runtime; no standalone sweep)
+npx tsx worker/scripts/desornamentar-perfis.ts [<project_id>]   # flags ornamented §2 model paragraphs
 ```
+
+## Transparency Detectors (AUDITORIA-ESTILO-DANBROWN.md)
+
+`maneirismo.ts` (mirrored in `livro_runner.py::_sinais_transparencia`) adds the axis the
+old gates missed — "cheap tics vs. propulsion" never measured **transparency vs. ornament**.
+Detectors: `contarGnomico` (aphorism/máxima), `contarPersonificacao` (abstraction/body-agent),
+`contarSanfona` (reformulation chains), `contarAdjetivoAvaliativo` (moral adjective on objects),
+`percentDeclarativasSimples` (floor), `sinalDialogoInterioridade`, `contarMetaforaElaborada`;
+`diagnosticarTransparencia(texto, skill)` aggregates them.
+
+- **Mode = SIGNAL for every skill.** They feed the reviewer prompt (`SINAIS DE TRANSPARENCIA`
+  block) and the `ADENDO_TRANSPARENCIA` verdict; they do **not** deterministically block.
+- **Promotion to a hard gate is per-skill** via `ORC_TRANSPARENCIA_POR_SKILL` (empty = all
+  signal). Only a skill validated in the A/B benchmark with zero false-positives on control
+  chapters gets `bloqueia:true` cotas. **Dan-brown cotas stay dan-brown-only** — other skills
+  never get the hard block from this change.
+- **Retention (`_reter_pre_edicao`)**: before any agent rewrite (revcap/gate/desman/correcao),
+  the runner copies `capitulo-NN.md` to `capitulos-em-revisao/capitulo-NN.pre-<stage>-<seq>.md`
+  (last 3 per chapter+stage). Closes the audit's H3 gap (pre-correction versions were destroyed).
 
 ## Quality Gates per Chapter
 

@@ -56,6 +56,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import unicodedata
 
@@ -266,9 +267,21 @@ def _bloco_correcao(projeto, n):
     if not diretiva:
         return ""
     blockers = [str(b) for b in (inst.get("blockers") or [])][:8]
-    return ("INSTRUCAO DE CORRECAO AUTOMATICA (tentativa {} da escada): {} BLOCKERS DO GATE "
+    blockers_txt = " || ".join(blockers) or "(ver pendencias do gate)"
+    # Blocker de transparencia (auditoria de estilo): a correcao e SIMPLIFICAR, nunca
+    # ornamentar — anexa a diretiva especifica para nao cair no vetor errado.
+    _RE_TRANSP = re.compile(r"gnomic|gnômic|maxima|máxima|aforism|personificac|"
+                            r"sanfona|reformulac|adjetivo avaliativo|declarativas|transparenc",
+                            re.IGNORECASE)
+    extra = ""
+    if _RE_TRANSP.search(blockers_txt):
+        extra = ("SIMPLIFICACAO (transparencia): corte a maxima/aforismo, desfaca a "
+                 "frase-sanfona, troque a personificacao de abstracao por agente humano + "
+                 "verbo concreto, tire o adjetivo moral do objeto; prefira a frase "
+                 "declarativa simples. NAO empilhe apostos nem alongue o periodo. ")
+    return ("INSTRUCAO DE CORRECAO AUTOMATICA (tentativa {} da escada): {} {}BLOCKERS DO GATE "
             "(a guarda de aceitacao RECONTA e reprova se persistirem): {}. ").format(
-        inst.get("tentativa", "?"), diretiva, " || ".join(blockers) or "(ver pendencias do gate)")
+        inst.get("tentativa", "?"), diretiva, extra, blockers_txt)
 
 
 def _parada_limpa_apos_cap(projeto, state, piso, args):
@@ -700,8 +713,9 @@ def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
     bloco_correcao = _bloco_correcao(projeto, n)
     if cads:
         bloco_cad = ("contagem REAL deste capitulo, ACIMA do orcamento -> exija que o "
-                     "editor VARIE O RITMO (funda frases curtas coladas, encadeie na "
-                     "revelacao, quebre anafora/clipe), nao so corte: " +
+                     "editor VARIE O RITMO com frases medias declarativas (SVO) entre as "
+                     "curtas; alongar no maximo UMA frase na revelacao SEM empilhar apostos "
+                     "(a frase-sanfona e defeito, nao respiracao); quebre anafora/clipe: " +
                      "; ".join("{} {}x (alvo <= {})".format(nm, c, a) for nm, c, a in cads))
     else:
         bloco_cad = "dentro do orcamento de tiques contados; mas NAO confie so na lista (veja o item holistico)."
@@ -721,6 +735,15 @@ def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
     bloco_prop = ("PARA O VEREDITO DE PROPULSAO (item h), delegue a um subagente em OPUS via "
                   "Task (escritor/juiz) — julgamento de craft caro, mais fino.\n   "
                   if getattr(args, "revisor_craft_opus", False) else "")
+    # SINAIS DE TRANSPARENCIA (espelho de maneirismo.ts::diagnosticarTransparencia):
+    # ornamento caro (gnomico, personificacao, sanfona, adjetivo avaliativo, piso de
+    # declarativas, dialogo, metafora). SO SINAL — alimenta o revisor, nao bloqueia,
+    # nao entra no gate. Passado como kwarg do .format (os excertos podem conter
+    # chaves literais, mas o valor de um kwarg nao e reparseado pelo format).
+    _sinais_tr = _sinais_transparencia(txt_cap)
+    bloco_transp = ("SINAIS DE TRANSPARENCIA (deterministicos, consultivos — julgue na "
+                    "leitura; o veredito e seu): " + " || ".join(_sinais_tr) + ". "
+                    ) if _sinais_tr else ""
     # Fix C: DELEGA a revisao (nao raciocina inline). O criterio de critica (checklist
     # a-h + VEREDITO DE PROPULSAO) JA VIVE no agente `livro-revisor`, que le a spec, a
     # Biblia/Mapa, o estado-narrativo e a craft (voz-e-oficio+metamodelo) no PROPRIO
@@ -738,13 +761,15 @@ def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
         "(fair-play, cota de tiques, info-dump, interioridade-com-custo, relogio, "
         "coincidencia, nao-reexposicao, corte-no-pico, exposicao dramatizada). Some a isso "
         "a EVIDENCIA REAL deste capitulo (contagens do detector, NAO recompute): {bloco_correcao}{bloco_gate}{bloco_cad} "
-        "{bloco_inter} {bloco_prop}{bloco_beats}"
+        "{bloco_inter} {bloco_prop}{bloco_transp}{bloco_beats}"
         "Devolva uma LISTA de ate {maxed} EDICOES PONTUAIS (trecho -> correcao) que INJETAM "
-        "propulsao (dramatize, corte no pico, encadeie a caca as pistas) e VARIAM o ritmo "
-        "(FUNDA colados, quebre anafora/clipe), nao so cortam tique. NAO e recontacao nem o "
-        "review book-wide.\n"
+        "propulsao (dramatize, corte no pico, encadeie a caca as pistas), VARIAM o ritmo "
+        "(frases medias declarativas entre as curtas; quebre anafora/clipe) e DEVOLVEM "
+        "TRANSPARENCIA (corte a maxima/aforismo, desfaca a frase-sanfona, prefira a "
+        "declarativa), nao so cortam tique. NAO e recontacao nem o review book-wide.\n"
         "2) Task -> `livro-editor` (haiku): aplique as edicoes no {arq}; troque TODA 'coisa' "
-        "generica pelo referente concreto; FUNDA as frases curtas coladas (nao so corte); "
+        "generica pelo referente concreto; VARIE o ritmo com frases medias declarativas "
+        "entre as curtas (NAO funda tudo num periodo longo; a sanfona e defeito); "
         "ELEVE no maximo 1 movimento (drama/tensao/subtexto) sem contrariar a spec; PRESERVE "
         "sentido e voz. CONTINUIDADE (obrigatorio): EDITE o LEDGER EXISTENTE "
         "estado/estado-narrativo.md - NAO crie arquivo novo, NAO escreva noutro lugar; "
@@ -755,7 +780,8 @@ def prompt_revisao_capitulo(projeto, n, args, piso, total=None):
         "Tasks acima e confirme que {arq} foi regravado.\n"
     ).format(arq=arq, n=n, maxed=maxed, piso=piso, bloco_correcao=bloco_correcao,
              bloco_gate=bloco_gate, bloco_cad=bloco_cad,
-             bloco_inter=bloco_inter, bloco_prop=bloco_prop, bloco_beats=_beats_recentes(projeto, n),
+             bloco_inter=bloco_inter, bloco_prop=bloco_prop, bloco_transp=bloco_transp,
+             bloco_beats=_beats_recentes(projeto, n),
              bloco_spec_proativa=bloco_spec_proativa, n_passo_final=n_passo_final)
 
 
@@ -1855,6 +1881,402 @@ def interioridade_sem_evento(texto, min_frases=10):
     return (len(fr) >= min_frases and ep > 0.6 and dp < 0.06, round(ep * 100), round(dp * 100))
 
 
+# ============================================================================
+# TRANSPARENCIA — espelho de maneirismo.ts::diagnosticarTransparencia
+# (AUDITORIA-ESTILO-DANBROWN.md, 2026-07-17). MANTER EM SINCRONIA com o TS.
+# Mede o ornamento CARO que passava limpo (gnomico, personificacao, sanfona,
+# adjetivo avaliativo, piso de declarativas, dialogo, metafora). TODOS em modo
+# SINAL: alimentam o prompt do revisor; NAO bloqueiam, NAO entram no
+# _recontagem_cap nem em nenhum gate. Regex adaptado ao motor Python (`re` nao
+# tem \p{L}; usa-se [A-Za-zÀ-ÿ] como o resto do runner). Sinal-FORTE
+# deliberadamente inclusivo: a precisao final vem do revisor.
+# ============================================================================
+_NAO_LETRA_T = u"(?<![A-Za-zÀ-ÿ0-9_])"
+_FIM_LETRA_T = u"(?![A-Za-zÀ-ÿ0-9_])"
+_LETRA_T = u"[A-Za-zÀ-ÿ]"
+
+# Copula/existencial e nome proprio (espelham _RE_COP_GNOMICA / _RE_NOME_PROPRIO do TS).
+_RE_COP_GNOMICA_T = re.compile(u"\\b(é|era|foi|seria|são|eram|está|estava|estavam|houve|havia|vira|virava|significa|significava)\\b", re.I | re.U)
+_RE_NOME_PROPRIO_T = re.compile(u"\\b[A-ZÁÉÍÓÚÂÊÔÃÕ][a-záéíóúâêôãõ]{2,}")
+
+# --- D1: GNOMICO AMPLIADO -----------------------------------------------------
+_RE_MAXIMA_FORMA = re.compile(
+    _NAO_LETRA_T + u"(é|era|são|eram|foi)\\s+(?:só\\s+|sempre\\s+)?"
+    u"(?:uma?\\s+|[oa]\\s+|minha\\s+|meu\\s+|sua\\s+|seu\\s+)?"
+    u"(forma|maneira|jeito|modo|métrica|questão|arte|hábito|categoria|luxo|ofício)s?\\s+de" + _FIM_LETRA_T,
+    re.I | re.U)
+_RE_SUJEITO_GENERICO = re.compile(
+    u"^(homens|mulheres|gente|pessoas|quem|tod[oa]\\s+" + _LETRA_T + u"+|um\\s+homem|uma\\s+mulher|um\\s+alvo|uma\\s+ferramenta)\\s+que\\s+" + _LETRA_T,
+    re.I | re.U)
+_RE_PLURAL_PRESENTE = re.compile(
+    u"^(?:[oa]s\\s+)?" + _LETRA_T + _LETRA_T + u"+(?:es|ns|is|s)\\s+(?:n[ãa]o\\s+|nunca\\s+|s[óo]\\s+)?(" + _LETRA_T + u"+[ae]m)(?![A-Za-zÀ-ÿ0-9_])",
+    re.I | re.U)
+_RE_VERBO_PASSADO_3PL = re.compile(u"(aram|eram|iram|avam|iam)$", re.I | re.U)
+_RE_INFINITIVO_SUJEITO = re.compile(
+    u"^(?:e\\s+|mas\\s+)?" + _LETRA_T + u"+(?:ar|er|ir)\\s+(?:" + _LETRA_T + u"+\\s+){0,2}?(é|era|não\\s+(?:é|era))\\b",
+    re.I | re.U)
+_RE_E_SEMPRE = re.compile(_NAO_LETRA_T + u"(é|são|era|eram)\\s+sempre\\s", re.I | re.U)
+_RE_MAIS_DO_QUE = re.compile(u"^é\\s+mais\\s+" + _LETRA_T + u"+\\s+[^.!?]{0,40}\\s+do\\s+que\\b", re.I | re.U)
+_RE_IMPESSOAL_MAXIMA = re.compile(u"^n[ãa]o\\s+se\\s+" + _LETRA_T + u"+[aei](m?)\\s", re.I | re.U)
+_RE_DEITICO = re.compile(
+    _NAO_LETRA_T + u"(aqui|agora|hoje|ontem|amanh[ãa]|neste|nesta|desse|dessa|deste|desta|aquele|aquela|este|esta)" + _FIM_LETRA_T,
+    re.I | re.U)
+_ABSTRATOS_T = (
+    u"raz[ãa]o|medo|sil[êe]ncio|mem[óo]ria|lembran[çc]a|d[úu]vida|certeza|culpa|p[âa]nico|instinto|"
+    u"l[óo]gica|esperan[çc]a|verdade|mentira|solid[ãa]o|pressa|paci[êe]ncia|ambi[çc][ãa]o|cidade|noite|"
+    u"manh[ãa]|madrugada|escurid[ãa]o|disciplina|rotina|h[áa]bito|hist[óo]ria|passado|futuro|dist[âa]ncia|"
+    u"beleza|dor|raiva|fome|cansa[çc]o|aus[êe]ncia|piedade|f[ée]|intui[çc][ãa]o|paranoia|programa|sistema|"
+    u"m[áa]quina|lista|casa|papel|terra")
+_ABSTRATOS_GNOMICO_EXTRA = (
+    u"lealdade|desempenho|amor|ódio|coragem|covardia|guardar|lembrar|esquecer|esperar|explicar|"
+    u"acreditar|confiar")
+_RE_ABSTR_COP = re.compile(
+    u"^(?:[oa]s?\\s+)?(" + _ABSTRATOS_T + u"|" + _ABSTRATOS_GNOMICO_EXTRA + u")\\s+(?:" + _LETRA_T + u"+\\s+){0,2}?(é|são|era|eram)\\s",
+    re.I | re.U)
+
+
+def _segmentos_maxima(s):
+    out = [s]
+    for parte in re.split(u"[:—–]", s)[1:]:
+        p = parte.strip()
+        if p:
+            out.append(p)
+    return out
+
+
+def _tem_nome_proprio_interno(seg):
+    # Nome proprio fora da 1a palavra = referente concreto (a 1a sempre e maiuscula).
+    sem_primeira = re.sub(u"^\\s*[A-Za-zÀ-ÿ0-9’'\\-]+\\s*", "", seg, flags=re.U)
+    return bool(_RE_NOME_PROPRIO_T.search(sem_primeira))
+
+
+def _eh_maxima(seg_bruto):
+    if re.search(u"\\?[\"'”’»)\\]]*\\s*$", seg_bruto, re.U):
+        return False  # pergunta nao e maxima
+    seg = re.sub(u"^[\\s,;]+", "", seg_bruto, flags=re.U)
+    seg = re.sub(u"[.!?…\\s]+$", "", seg, flags=re.U)
+    nw = _palavras_frase(seg)
+    if nw < 3 or nw > 22:
+        return False
+    if re.search(r"\d", seg) or _tem_nome_proprio_interno(seg) or _RE_DEITICO.search(seg):
+        return False
+    nu = _sem_abertura(seg)
+    if _RE_MAXIMA_FORMA.search(nu):
+        return True
+    if _RE_SUJEITO_GENERICO.search(nu) and nw <= 18:
+        return True
+    if _RE_INFINITIVO_SUJEITO.search(nu):
+        return True
+    if _RE_E_SEMPRE.search(nu):
+        return True
+    if _RE_MAIS_DO_QUE.search(nu):
+        return True
+    if _RE_IMPESSOAL_MAXIMA.search(nu) and nw <= 12:
+        return True
+    plu = _RE_PLURAL_PRESENTE.search(nu)
+    if plu and nw <= 12 and not _RE_VERBO_PASSADO_3PL.search(plu.group(1)):
+        return True
+    if _RE_ABSTR_COP.search(nu) and nw <= 16:
+        return True
+    return False
+
+
+def _contar_causal_gnomico(texto):
+    """Espelha maneirismo.ts::contarCausalGnomico. So D1 usa (dedup)."""
+    t = _sem_headings(texto or "")
+    exemplos = []
+    for sent in re.split(u"(?<=[.!?])\\s+", t, flags=re.U):
+        s = re.sub(r"\s+", " ", sent).strip()
+        if re.match(u"^[—\\-]", s, re.U):
+            continue  # dialogo: fala nao e narracao aforistica
+        idx = s.lower().rfind("porque")
+        if idx < 0:
+            continue
+        cl = s[idx + len("porque"):]
+        cl = re.sub(u"^[\\s,]+", "", cl, flags=re.U)
+        cl = re.sub(u"[\\s.,;:—\\-]+$", "", cl, flags=re.U)
+        nw = len([w for w in re.split(r"\s+", cl) if w])
+        if nw == 0 or nw > 14:
+            continue
+        if not _RE_COP_GNOMICA_T.search(cl):
+            continue
+        if _RE_NOME_PROPRIO_T.search(cl):
+            continue
+        if re.search(r"\d", cl):
+            continue
+        exemplos.append(("porque " + cl)[:90])
+    return exemplos
+
+
+def contar_gnomico(texto):
+    """Fecho gnomico/maxima (narracao + dialogo). Espelha contarGnomico do TS."""
+    exemplos = []
+    narracao, dialogo = 0, 0
+    fr, narr = _frases_rotuladas(_sem_headings(texto or ""))
+    for i, f in enumerate(fr):
+        s = re.sub(r"\s+", " ", f).strip()
+        hit = next((seg for seg in _segmentos_maxima(s) if _eh_maxima(seg)), None)
+        if not hit:
+            continue
+        if narr[i]:
+            narracao += 1
+        else:
+            dialogo += 1
+        exemplos.append(hit.strip()[:90])
+    causal = _contar_causal_gnomico(texto)
+    causal_novos = [ex for ex in causal if not any(ex[7:40] in e for e in exemplos)]
+    n = len(exemplos) + len(causal_novos)
+    return {"n": n, "exemplos": (exemplos + causal_novos)[:6], "acima": n > 2}
+
+
+# --- D2: PERSONIFICACAO de abstracao / corpo-agente ---------------------------
+_CORPO_T = u"m[ãa]os?|mand[íi]bula|corpo|cabe[çc]a|olhos|dedos?|pulso|est[ôo]mago|garganta|pele|reflexo|ombros?|joelhos?|p[ée]s?"
+_V_AGENTE_T = (
+    u"decid|soub|sab|escolh|recus|insist|mentiu|mente|mentia|respond|pergunt|esper|aprend|entend|negoci|"
+    u"vot|convoc|devor|cortej|tra[íi]|desist|promet|cobr|exig|aceit|compr|vend|ensin|obedec|comand|arquiv|"
+    u"julg|perdo|castig|conden|resist|pediu|ped|guard|acredit|fingi|fing|desmen|denunci|entreg|conspir|"
+    u"vigi|trabalh|serv|dorm|acord|respir|fez|faz|fazia|mud|vir[oa]|volt|segu|encolh|permiti|concord|"
+    u"discord|hesit|teim|obrig|convenc|abandon|persegu|acus|absolv")
+_RE_PERSONIFICACAO = re.compile(
+    _NAO_LETRA_T + u"(?:o|a|os|as|sua|seu|minha|meu|aquela?|essa?|esta?|própri[oa])\\s+(?:" + _LETRA_T + u"+\\s+)?"
+    u"(" + _ABSTRATOS_T + u"|" + _CORPO_T + u")(?:,\\s+[^,.!?]{1,25},)?\\s+(?:que\\s+)?(?:" + _LETRA_T + u"+\\s+){0,3}?"
+    u"(?:se\\s+|j[áa]\\s+|n[ãa]o\\s+|nunca\\s+|vai\\s+|ia\\s+)?(" + _V_AGENTE_T + u")[A-Za-zÀ-ÿ]*" + _FIM_LETRA_T,
+    re.I | re.U)
+_IDIOMATISMOS_T = [
+    re.compile(u"peg(ou|a|ava)\\s+fogo", re.I | re.U), re.compile(u"conta\\s+(n[ãa]o\\s+)?fecha", re.I | re.U),
+    re.compile(u"tempo\\s+pass", re.I | re.U), re.compile(u"cora[çc][ãa]o\\s+(bat|dispar|acele)", re.I | re.U),
+    re.compile(u"cabe[çc]a\\s+do[íi]", re.I | re.U), re.compile(u"est[ôo]mago\\s+ronc", re.I | re.U),
+    re.compile(u"casa\\s+ca[íi]", re.I | re.U), re.compile(u"porta\\s+(abriu|fechou|bateu)", re.I | re.U),
+]
+_RE_METAFORA_PALAVRA = re.compile(u"[A-Za-zÀ-ÿ0-9’'\\-]+", re.U)
+
+
+def contar_personificacao(texto):
+    """Espelha contarPersonificacao do TS. So narracao (fala e voz do personagem)."""
+    exemplos = []
+    fr, narr = _frases_rotuladas(_sem_headings(texto or ""))
+    for i, f in enumerate(fr):
+        if not narr[i]:
+            continue
+        s = re.sub(r"\s+", " ", f)
+        m = _RE_PERSONIFICACAO.search(s)
+        if not m:
+            continue
+        antes = s[:m.start()]
+        if re.search(u"\\bcomo\\s+(se|quem)?\\s*$", antes, re.I | re.U):
+            continue  # simile explicito -> D7
+        if any(rx.search(m.group(0)) or rx.search(s) for rx in _IDIOMATISMOS_T):
+            continue
+        exemplos.append(s.strip()[:100])
+    palavras = len(_RE_METAFORA_PALAVRA.findall(_sem_headings(texto or "")))
+    por1000 = round((len(exemplos) / palavras) * 10000) / 10 if palavras else 0
+    return {"n": len(exemplos), "por1000": por1000, "exemplos": exemplos[:6], "acima": por1000 > 1.5}
+
+
+# --- D3: FRASE-SANFONA --------------------------------------------------------
+def _eh_enumeracao(s):
+    meio = re.split(u"[—–]", s)[0]
+    seg = [x.strip() for x in meio.split(",") if x.strip()]
+    if len(seg) < 3:
+        return False
+    curtos = [x for x in seg[1:] if _palavras_frase(x) <= 3 and not _RE_COP_GNOMICA_T.search(x)]
+    return len(curtos) >= len(seg) - 2
+
+
+def contar_sanfona(texto):
+    """Espelha contarSanfona do TS (escada 'de que', dupla-negacao, aposto denso)."""
+    exemplos = []
+    for f in dividir_frases(_sem_headings(texto or "")):
+        if _eh_dialogo(f):
+            continue
+        s = re.sub(r"\s+", " ", f)
+        travessoes = len(re.findall(u"[—–]", s))
+        virgulas = len(re.findall(u",", s))
+        escada_de_que = len(re.findall(u"\\bde que\\b", s, re.I | re.U)) >= 2
+        negacoes = len(re.findall(u"(?<![A-Za-zÀ-ÿ0-9_])n[ãa]o\\s+[A-Za-zÀ-ÿ]+", s, re.I | re.U))
+        neg_reformula = negacoes >= 2 and bool(
+            re.search(u"(?<![A-Za-zÀ-ÿ0-9_])n[ãa]o\\s+[^,;—–]{2,40}[,;—–]\\s*(mas|e sim|s[óo]|é)\\b", s, re.I | re.U))
+        aposto_denso = (travessoes >= 2 or virgulas >= 3) and not _eh_enumeracao(s) and _palavras_frase(s) >= 18
+        if escada_de_que or neg_reformula or (aposto_denso and (negacoes >= 1 or _RE_COP_GNOMICA_T.search(s))):
+            exemplos.append(s.strip()[:110])
+    return {"n": len(exemplos), "exemplos": exemplos[:5], "acima": len(exemplos) > 1}
+
+
+# --- D4: ADJETIVO AVALIATIVO em objeto fisico ---------------------------------
+_ADJ_AVALIATIVO_T = (
+    u"honest[oa]s?|decentes?|est[úu]pid[oa]s?|educad[oa]s?|generos[oa]s?|cru[ée]is|cruel|arrogantes?|"
+    u"t[íi]mid[oa]s?|pacientes?|impacientes?|entediad[oa]s?|traiçoeir[oa]s?|obedientes?|teimos[oa]s?|"
+    u"humildes?|orgulhos[oa]s?|covardes?|corajos[oa]s?|sincer[oa]s?|mentiros[oa]s?|leais?|ingênu[oa]s?|c[úu]mplices?")
+_OBJETO_FISICO_T = (
+    u"luz|facho|porta|mesa|corredor|pr[ée]dio|parede|papel|m[áa]quina|rel[óo]gio|estrada|cadeira|janela|copo|"
+    u"telefone|carro|n[úu]mero|letra|n[óo]dulo|cicatriz|l[âa]mpada|muro|pedra|ch[ãa]o|cimento|a[çc]o|vidro|tela|"
+    u"pasta|arquivo|formul[áa]rio|caneta|l[âa]mina|caixa|cofre|mapa|foto|quadro|livro|bloco|gaveta|escada|rampa|"
+    u"vaga|cerca|port[ãa]o")
+_RE_ADJ_OBJ_POS = re.compile(_NAO_LETRA_T + u"(" + _OBJETO_FISICO_T + u")\\s+(?:" + _LETRA_T + u"+\\s+)?(?:e\\s+)?(" + _ADJ_AVALIATIVO_T + u")" + _FIM_LETRA_T, re.I | re.U)
+_RE_ADJ_OBJ_PRE = re.compile(_NAO_LETRA_T + u"(" + _ADJ_AVALIATIVO_T + u")\\s+(" + _OBJETO_FISICO_T + u")" + _FIM_LETRA_T, re.I | re.U)
+_RE_ADJ_OBJ_COP = re.compile(_NAO_LETRA_T + u"(" + _OBJETO_FISICO_T + u")[^.!?]{0,20}\\s(era|é|s[ãa]o|eram|parecia|estava)\\s+(?:" + _LETRA_T + u"+\\s+)?(" + _ADJ_AVALIATIVO_T + u")" + _FIM_LETRA_T, re.I | re.U)
+
+
+def contar_adjetivo_avaliativo(texto):
+    exemplos = []
+    for f in dividir_frases(_sem_headings(texto or "")):
+        s = re.sub(r"\s+", " ", f)
+        if _RE_ADJ_OBJ_POS.search(s) or _RE_ADJ_OBJ_PRE.search(s) or _RE_ADJ_OBJ_COP.search(s):
+            exemplos.append(s.strip()[:100])
+    return {"n": len(exemplos), "exemplos": exemplos[:5]}
+
+
+# --- D5: PISO de frases declarativas simples ----------------------------------
+_RE_SUBORD_INICIAL = re.compile(u"^(quando|embora|enquanto|se|porque|como\\s+se|apesar|ainda\\s+que|mesmo\\s+que)\\b", re.I | re.U)
+
+
+def percent_declarativas_simples(texto):
+    fr = dividir_frases(_sem_headings(texto or ""))
+    if not fr:
+        return {"pct": 0, "frases": 0, "abaixo": False}
+    simples = 0
+    for f in fr:
+        s = _sem_abertura(f)
+        interno = s[1:]  # travessao de fala inicial ja removido
+        if re.search(u"[?!][\"'”’»)\\]]*$", f, re.U):
+            continue
+        if re.search(u"[—–;]", interno):
+            continue
+        if len(re.findall(u",", s)) > 1:
+            continue
+        if _palavras_frase(f) > 15:
+            continue
+        if _RE_SUBORD_INICIAL.search(s):
+            continue
+        simples += 1
+    pct = round((simples / len(fr)) * 1000) / 10
+    return {"pct": pct, "frases": len(fr), "abaixo": len(fr) >= 20 and pct < 50}
+
+
+# --- D6: DIALOGO / interioridade continua -------------------------------------
+def sinal_dialogo_interioridade(texto, dois_ou_mais_em_cena=True):
+    t = _sem_headings(texto or "")
+    palavras_fala, palavras_total = 0, 0
+    for par in re.split(u"\n{2,}", t):
+        n = len(_RE_METAFORA_PALAVRA.findall(par))
+        palavras_total += n
+        if re.match(u"^[\\s>]*[—–]", par, re.U):
+            palavras_fala += n
+    dialogo_pct = round((palavras_fala / palavras_total) * 1000) / 10 if palavras_total else 0
+    fr, narr = _frases_rotuladas(t)
+    run, max_run = 0, 0
+    for i, f in enumerate(fr):
+        if narr[i] and _RE_ESTATICO.search(f):
+            run += 1
+            max_run = max(max_run, run)
+        else:
+            run = 0
+    if dois_ou_mais_em_cena:
+        abaixo = dialogo_pct < 15 and palavras_total > 600
+    else:
+        abaixo = max_run > 3
+    return {"dialogoPct": dialogo_pct, "maxInterioridadeSeguida": max_run, "abaixo": abaixo}
+
+
+# --- D7: METAFORA ELABORADA ---------------------------------------------------
+_RE_METAFORA = re.compile(u"(?<![A-Za-zÀ-ÿ0-9_])(como\\s+se|como\\s+quem|feito\\s+[A-Za-zÀ-ÿ]|igual\\s+a\\s|como\\s+uma?\\s)", re.I | re.U)
+
+
+def contar_metafora_elaborada(texto):
+    t = _sem_headings(texto or "")
+    posicoes = []
+    exemplos = []
+    for m in _RE_METAFORA.finditer(t):
+        posicoes.append(len(_RE_METAFORA_PALAVRA.findall(t[:m.start()])))
+        exemplos.append(re.sub(r"\s+", " ", t[m.start():m.start() + 80]).strip())
+    palavras = len(_RE_METAFORA_PALAVRA.findall(t))
+    cadeias = sum(1 for i in range(1, len(posicoes)) if posicoes[i] - posicoes[i - 1] < 300)
+    por300 = round((len(posicoes) / palavras) * 300 * 100) / 100 if palavras else 0
+    return {"n": len(posicoes), "por300": por300, "cadeias": cadeias, "exemplos": exemplos[:5],
+            "acima": por300 > 1 or cadeias > 0}
+
+
+def _sinais_transparencia(texto, dois_ou_mais_em_cena=True):
+    """Espelho de maneirismo.ts::diagnosticarTransparencia(...).linhas — MANTER EM
+    SINCRONIA. Devolve a lista de linhas formatadas (vazia se nada digno de nota).
+    SO SINAL: alimenta o prompt do revisor; nao bloqueia nada. Limiares fixos do
+    SINAL_TRANSPARENCIA (gnomico 2, personificacao 1.5/1000, sanfona 1, piso
+    declarativas 50%); a promocao a gate por skill do TS nao existe aqui."""
+    gnomico = contar_gnomico(texto)
+    personificacao = contar_personificacao(texto)
+    sanfona = contar_sanfona(texto)
+    adjetivo = contar_adjetivo_avaliativo(texto)
+    declarativas = percent_declarativas_simples(texto)
+    dialogo = sinal_dialogo_interioridade(texto, dois_ou_mais_em_cena)
+    metafora = contar_metafora_elaborada(texto)
+
+    linhas = []
+    if gnomico["n"] > 2:
+        linhas.append(u"fecho gnomico/maxima {}x (alvo <= 2; ex.: {})".format(gnomico["n"], (gnomico["exemplos"] or [""])[0]))
+    if personificacao["por1000"] > 1.5:
+        linhas.append(u"personificacao de abstracao {}x ({}/1000; ex.: {})".format(
+            personificacao["n"], personificacao["por1000"], (personificacao["exemplos"] or [""])[0]))
+    if sanfona["n"] > 1:
+        linhas.append(u"frase-sanfona {}x (alvo <= 1; ex.: {})".format(sanfona["n"], (sanfona["exemplos"] or [""])[0]))
+    if adjetivo["n"] > 1:
+        linhas.append(u"adjetivo avaliativo em objeto {}x (ex.: {})".format(adjetivo["n"], (adjetivo["exemplos"] or [""])[0]))
+    if declarativas["abaixo"]:
+        linhas.append(u"frases declarativas simples {}% (piso 50%)".format(declarativas["pct"]))
+    if dialogo["abaixo"]:
+        linhas.append(
+            u"dialogo {}% das palavras (piso 15% com 2+ em cena)".format(dialogo["dialogoPct"])
+            if dois_ou_mais_em_cena else
+            u"interioridade continua {} frases seguidas (teto 3)".format(dialogo["maxInterioridadeSeguida"]))
+    if metafora["acima"]:
+        linhas.append(u"metafora elaborada {}x ({}/300 palavras; cadeias {})".format(
+            metafora["n"], metafora["por300"], metafora["cadeias"]))
+    return linhas
+
+
+# ============================================================================
+# RETENCAO DE VERSOES PRE-EDICAO (auditoria H3): antes de uma reescrita/edicao
+# por agente destruir o capitulo, guarda uma copia. Retencao best-effort — NUNCA
+# derruba o fluxo (try/except com log).
+# ============================================================================
+DIR_CAPS_REVISAO = "capitulos-em-revisao"
+
+
+def _reter_pre_edicao(projeto, n, estagio):
+    """Copia manuscrito/capitulo-NN.md -> capitulos-em-revisao/capitulo-NN.pre-<estagio>-<seq>.md
+    (seq = proximo inteiro livre). Mantem so as 3 copias mais recentes por
+    (capitulo, estagio), apagando as mais antigas DESSE padrao. Falha na retencao
+    nunca pode derrubar o fluxo."""
+    try:
+        origem = os.path.join(projeto, nome_cap(n))
+        if not os.path.exists(origem):
+            return
+        destino_dir = os.path.join(projeto, DIR_CAPS_REVISAO)
+        os.makedirs(destino_dir, exist_ok=True)
+        prefixo = "capitulo-{:02d}.pre-{}-".format(int(n), estagio)
+        re_seq = re.compile("^" + re.escape(prefixo) + r"(\d+)\.md$")
+        existentes = []
+        for nome in os.listdir(destino_dir):
+            m = re_seq.match(nome)
+            if m:
+                existentes.append((int(m.group(1)), nome))
+        seq = (max(s for s, _ in existentes) + 1) if existentes else 1
+        alvo_nome = "{}{}.md".format(prefixo, seq)
+        shutil.copy2(origem, os.path.join(destino_dir, alvo_nome))
+        # Mantem so as 3 copias mais recentes (maior seq) DESTE padrao.
+        todas = sorted(existentes + [(seq, alvo_nome)])
+        for s, nome in todas[:-3]:
+            try:
+                os.remove(os.path.join(destino_dir, nome))
+            except OSError:
+                pass
+        log(projeto, "RETENCAO cap {}: copia pre-{} salva ({}).".format(n, estagio, alvo_nome))
+    except Exception as e:
+        try:
+            log(projeto, "RETENCAO cap {} (pre-{}) falhou, nao bloqueia: {}".format(n, estagio, e))
+        except Exception:
+            pass
+
+
 def _ocorrencias_exatas(txt, nomes_estourados):
     """(linha, regra, trecho) de CADA ocorrencia dos moldes/muletas estourados —
     a instrucao de correcao aponta as frases exatas, nao so contagens
@@ -1955,9 +2377,11 @@ def gate_maneirismo_capitulo(projeto, n, args):
             "INSTRUCAO PARA O livro-escritor — os itens abaixo estao SOBRE-REPRESENTADOS "
             "neste capitulo (contagem real). Reduza CADA UM ao alvo. Para MULETAS (ex.: "
             "'coisa'), TROQUE pela coisa concreta a que se refere (objeto, ideia, gesto). "
-            "Para MOLDES, desadense o tique com sintaxe variada. Para CADENCIA (ritmo), "
-            "VARIE o comprimento das frases — FUNDA as frases curtas coladas numa frase "
-            "mais longa onde for revelacao, quebre a anafora, corte o clipe de negacao "
+            "Para MOLDES, desadense o tique com sintaxe variada — prefira a frase "
+            "declarativa simples, NAO a subordinacao empilhada. Para CADENCIA (ritmo), "
+            "VARIE o comprimento das frases com frases MEDIAS DECLARATIVAS entre as curtas "
+            "(alongue no maximo UMA frase na revelacao, SEM empilhar apostos: a frase-sanfona "
+            "e defeito), quebre a anafora, corte o clipe de negacao "
             "repetido; nunca dois fragmentos colados (Regra 4). Para REPETICAO CROSS-CAP, "
             "REESCREVA o trecho com imagem/sintaxe nova (frase-assinatura reciclada de "
             "capitulo anterior). E uma EDICAO DIRIGIDA, nao reescrita: PRESERVE sentido, "
@@ -1969,6 +2393,8 @@ def gate_maneirismo_capitulo(projeto, n, args):
             prompt += ("OCORRENCIAS EXATAS de moldes/muletas (o contador marca EXATAMENTE "
                        "estas — edite SOMENTE estes trechos; NAO altere os demais "
                        "paragrafos):\n" + bloco_ocorr)
+        # H3: guarda a versao atual antes da edicao dirigida delegada ao livro-escritor.
+        _reter_pre_edicao(projeto, n, "gate")
         run_claude(projeto, prompt, args)
         # A chamada do agente nao prova correcao: rele o arquivo e reconta tudo.
         txt, offs, muls, cads, reps = _recontagem_cap(projeto, n)
@@ -2110,7 +2536,7 @@ def diagnostico_book_wide(projeto, total):
     # book-wide; conta por capitulo e lista os que estouram o orcamento de ritmo.
     for i, cap in enumerate(caps, 1):
         for nome, cnt, alvo in cadencia_acima(cap, _skill_projeto(projeto)):
-            acima.append("CADENCIA cap {}: {} {}x -> <= {} (VARIE o ritmo: funda frases curtas, encadeie na revelacao; nao so corte)".format(i, nome, cnt, alvo))
+            acima.append("CADENCIA cap {}: {} {}x -> <= {} (VARIE o ritmo com frases medias declarativas entre as curtas; NAO funda tudo num periodo longo; nao so corte)".format(i, nome, cnt, alvo))
     return acima, "\n".join(relatorio)
 
 
@@ -2124,7 +2550,8 @@ def prompt_desmaneirismo(projeto, state, piso):
         "SOBRE-REPRESENTADOS no manuscrito consolidado (contagem REAL do detector). "
         "Reduza CADA UM ao alvo, DESADENSANDO o tique: delegue ao subagente "
         "`livro-revisor` (ou `livro-escritor`) em opus via Task, que reescreve a "
-        "construcao repetida com sintaxe variada, PRESERVANDO sentido, fatos e voz. "
+        "construcao repetida preferindo a frase declarativa simples (NAO a subordinacao "
+        "empilhada nem a frase-sanfona), PRESERVANDO sentido, fatos e voz. "
         "NAO reescreva cena a toa; so desfaca a repeticao. Edite os capitulo-NN.md "
         "afetados (cada um deve continuar com >= {piso} palavras) e NAO deixe "
         "meta-texto/comentario. Encerre a passada quando reduzir os moldes.\n"
@@ -2302,6 +2729,22 @@ def executar(projeto, args):
             prompt = PROMPT_EPUB
         else:
             prompt = PREAMBULO
+
+        # H3 (retencao pre-edicao): antes de qualquer dispatch que REESCREVE capitulo
+        # (o agente edita o arquivo via Task), guarda a versao atual. Best-effort:
+        # _reter_pre_edicao engole erro, entao nunca derruba o fluxo.
+        #  - micro-loop de revisao por capitulo -> estagio "revcap" (ou "correcao"
+        #    quando ha instrucao da escada de correcao automatica para o capitulo);
+        #  - DESMANEIRISMO -> reescreve um subconjunto book-wide desconhecido a priori;
+        #    retem todos os capitulos existentes (retencao ja limita a 3 por estagio).
+        if fase == "ESCRITA" and revisando_cap is not None:
+            _estagio_ret = ("correcao" if os.path.exists(_correcao_instrucao_path(projeto, revisando_cap))
+                            else "revcap")
+            _reter_pre_edicao(projeto, revisando_cap, _estagio_ret)
+        elif fase == "DESMANEIRISMO":
+            for _cap_ret in range(1, _i(state.get("total_capitulos_previstos")) + 1):
+                if existe(projeto, nome_cap(_cap_ret)):
+                    _reter_pre_edicao(projeto, _cap_ret, "desman")
 
         modelo_fase = modelo_da_fase(fase, args)
         log(projeto, "--- Executando fase {} (modelo={}, assinatura antes: {}) ---".format(fase, modelo_fase or "default", sig_before))

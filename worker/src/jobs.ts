@@ -27,6 +27,7 @@ import {
 import { normalizarModelosAgentes } from "./modelos-agentes.js";
 import { normalizarVozRegra4 } from "./voz-regra4.js";
 import { normalizarCraftSkill } from "./craft-skill.js";
+import { desornamentarModelosPerfil } from "./modelos-perfil.js";
 import {
   avaliarFundacaoNoDisco,
   diffFundacao,
@@ -474,6 +475,12 @@ async function aplicarNormalizadoresFundacao(dir: string, skill: string | null |
     const c = await normalizarCraftSkill(dir, skill);
     if (c.mudou) console.log(`[craft] resumo da skill '${c.skill}' injetado no perfil-de-voz.md`);
     else if (!c.reconhecida && skill) console.warn(`[craft] skill '${skill}' sem bloco de craft — perfil segue sem resumo`);
+  }
+  // Modelos §2 do perfil com tique de ornamento ⇒ MODELO-FLAG (CR1 da auditoria
+  // de estilo; proveniência incerta nunca é reescrita — decisão do autor).
+  {
+    const f = await desornamentarModelosPerfil(dir);
+    if (f.mudou) console.warn(`[modelos-perfil] ${f.arquivo}: tiques nos parágrafos-modelo (${f.flags.join(", ")}) — flag injetado`);
   }
   // Escritor lê a craft direto + revisor reprova "competente e chato".
   {

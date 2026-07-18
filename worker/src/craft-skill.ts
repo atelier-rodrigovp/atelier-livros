@@ -35,7 +35,7 @@ export const CRAFT_POR_SKILL: Record<string, string> = {
 1. **Fair-play honesto:** a câmera está na cabeça do POV; tudo o que ele percebe/pensa AGORA, o leitor percebe agora. **Proibido o falso gancho** (esconder do leitor o que o POV já sabe).
 2. **Exposição dramatizada:** toda informação entra **a serviço de um problema da cena agora** — por conflito, descoberta ou perda. Zero palestra/info-dump.
 3. **Interioridade COM CUSTO:** cada personagem central tem ferida, contradição e custo. Pergunte sempre **"o que isto custou ao POV por dentro?"** — mas o custo aparece em AÇÃO/ESCOLHA, não em sensação sobre sensação.
-4. **Prosa fresca, ritmo variado:** varie o comprimento da frase de propósito; revelação respira em frase longa. Cota: ≤2–3 itálicos, ≤1–2 perguntas retóricas, ≤1–2 fragmentos (nunca dois colados). Mate o clichê.
+4. **Prosa transparente, ritmo variado:** maioria de frases declarativas simples (o leitor lê ATRAVÉS da frase para o evento); varie o comprimento de propósito. A revelação pode alongar UMA frase — **sem empilhar apostos nem reformular a mesma percepção** (a frase-sanfona é defeito). Narrador invisível: sem máxima/aforismo, sem personificação de abstração, sem adjetivo moral em objeto. Metáfora ≈≤1/página, nunca em cadeia. Cota: ≤2–3 itálicos, ≤1–2 perguntas retóricas, ≤1–2 fragmentos (nunca dois colados). Mate o clichê — a alternativa default não é imagem nova, é frase direta sem imagem.
 5. **Sem coincidência:** causalidade, não conveniência — toda revelação tem pista plantada antes; salvação vem de habilidade/objeto pré-estabelecido.
 
 > Teste por capítulo: algo ACONTECE (evento/virada/pista), corta no pico, termina em gancho honesto. Se o capítulo só descreve/sente sem avançar a caça, está fora da craft.`,
@@ -189,11 +189,28 @@ Uma imagem forte vale mais que três; troque a muleta pelo referente concreto (o
 // Injeta o bloco de craft da skill no fim do perfil, se a skill for conhecida e o bloco
 // ainda não existir. Skill desconhecida / "nenhuma" → no-op (não inventa craft).
 // Reconhece o bloco v1 e faz UPGRADE in-place (v1 → v2 + orçamento), sem duplicar.
+// Upgrades in-place de CONTEÚDO do bloco já injetado (auditoria de estilo, CR4):
+// a Regra 4 de dan-brown deixou de pedir "revelação respira em frase longa"
+// (indutor de sanfona) e passou a pedir prosa transparente. Match por conteúdo ⇒
+// idempotente (a string antiga some após a troca), sem bump de marcador.
+const _UPGRADES_CRAFT_CONTEUDO: [string, string][] = [
+  [
+    "4. **Prosa fresca, ritmo variado:** varie o comprimento da frase de propósito; revelação respira em frase longa. Cota: ≤2–3 itálicos, ≤1–2 perguntas retóricas, ≤1–2 fragmentos (nunca dois colados). Mate o clichê.",
+    "4. **Prosa transparente, ritmo variado:** maioria de frases declarativas simples (o leitor lê ATRAVÉS da frase para o evento); varie o comprimento de propósito. A revelação pode alongar UMA frase — **sem empilhar apostos nem reformular a mesma percepção** (a frase-sanfona é defeito). Narrador invisível: sem máxima/aforismo, sem personificação de abstração, sem adjetivo moral em objeto. Metáfora ≈≤1/página, nunca em cadeia. Cota: ≤2–3 itálicos, ≤1–2 perguntas retóricas, ≤1–2 fragmentos (nunca dois colados). Mate o clichê — a alternativa default não é imagem nova, é frase direta sem imagem.",
+  ],
+];
+
 export function garantirCraftNoPerfil(conteudo: string, skill: string | null | undefined): { texto: string; mudou: boolean } {
   const corpo = skill ? CRAFT_POR_SKILL[skill] : undefined;
   if (!corpo) return { texto: conteudo ?? "", mudou: false };
   const t = conteudo ?? "";
-  if (t.includes(MARCADOR_CRAFT_V2)) return { texto: t, mudou: false };
+  if (t.includes(MARCADOR_CRAFT_V2)) {
+    let texto = t, mudou = false;
+    for (const [antiga, nova] of _UPGRADES_CRAFT_CONTEUDO) {
+      if (texto.includes(antiga)) { texto = texto.replace(antiga, nova); mudou = true; }
+    }
+    return { texto, mudou };
+  }
   const orcamento = blocoOrcamentoPagina(skill!);
   if (t.includes(MARCADOR_CRAFT)) {
     // upgrade v1 → v2: soma o orçamento ao bloco existente (fecho como âncora).
