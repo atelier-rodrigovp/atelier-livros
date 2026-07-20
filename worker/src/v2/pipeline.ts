@@ -233,6 +233,12 @@ export async function escreverCapitulo(
       tarefa: tarefaArquitetoCena(capitulo, deps.contrato.contrato),
       parse: (t) => {
         const spec = extrairJson(t) as SceneSpec;
+        // Boilerplate é responsabilidade do código, não do modelo: normaliza
+        // schema/capítulo deterministicamente antes de validar o conteúdo.
+        if (spec && typeof spec === "object") {
+          if (!spec.schema) spec.schema = "scene-spec/v1";
+          if (spec.capitulo == null) spec.capitulo = capitulo;
+        }
         const v = validarSpec(spec, deps.contrato.contrato);
         if (!v.ok) throw new Error(`ficha inválida: ${v.erros.join("; ")}`);
         return spec;

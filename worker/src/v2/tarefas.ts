@@ -61,6 +61,7 @@ export function tarefaRevisor(capitulo: number, resumoSinais: string, contrato: 
     `## SINAIS MEDIDOS (medições determinísticas reais — disponha cada um)`,
     resumoSinais,
     `Para cada sinal medido acima, inclua um item em "sinais" com disposicao: "violacao_confirmada" (o sinal é defeito real AQUI), "excecao_valida" (a cena justifica; explique), "falso_positivo" (o detector errou; explique) ou "necessita_decisao_humana".`,
+    `"necessita_decisao_humana" é RARO: reserve para escolha genuinamente autoral (voz, exceção de contrato, rumo da trama). Defeito de ofício corrigível (tique, cota estourada, cena morta) é "violacao_confirmada" + entrada em "correcoes" + veredito "reprovado" — a correção dirigida resolve sem parar a produção.`,
     `REGRAS DO VEREDITO:`,
     `- "aprovado" exige evidência POSITIVA em "evidencias" (o que está vivo e funciona, localizado) — ausência de defeito não basta.`,
     `- Qualquer "violacao_confirmada" exige entrada correspondente em "correcoes" e veredito "reprovado".`,
