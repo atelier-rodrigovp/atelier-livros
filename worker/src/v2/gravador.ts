@@ -57,10 +57,17 @@ export class Gravador {
   // -------------------------------------------------------------------------
 
   async iniciarRun(
-    dados: Omit<RunRegistro, "status" | "started_at" | "attempt"> & { attempt?: number }
+    dados: Omit<RunRegistro, "status" | "started_at" | "attempt" | "project_id" | "engine_version"> & {
+      attempt?: number;
+      project_id?: string | null;
+      engine_version?: string;
+    }
   ): Promise<string> {
     const run: RunRegistro = {
       ...dados,
+      // O Gravador já conhece o projeto e a versão da engine — o chamador não repete.
+      project_id: dados.project_id !== undefined ? dados.project_id : this.projectId,
+      engine_version: dados.engine_version ?? this.engineVersion,
       attempt: dados.attempt ?? 1,
       status: "running",
       started_at: this.agora(),

@@ -1,0 +1,165 @@
+{
+  "schema": "skill-contract/v1",
+  "id": "dan-brown",
+  "versao": "1.0.0",
+  "nome": "Dan Brown — thriller de enigma e conspiração",
+  "familia_editorial": "thriller_enigma",
+  "motor_narrativo": "pergunta → obstáculo → revelação → corte",
+  "unidade_dramatica": "cena com virada",
+  "pov": {
+    "pessoa": "terceira_multipla",
+    "rotacao": {
+      "fios_min": 2,
+      "fios_max": 4,
+      "max_caps_mesmo_fio": 3,
+      "max_caps_mesmo_fio_absoluto": 5,
+      "janela": 10,
+      "max_caps_fio_ausente": 3
+    }
+  },
+  "temporalidade": "relógio comprimido (12–48h): Dia/Hora corrente avança em todo capítulo; ameaça contínua e visível na cena",
+  "faixa_palavras": { "min": 1300, "alvo": 1700, "max": 2200 },
+  "ritmo": {
+    "descricao": "capítulo curto e propulsivo; UMA virada; corte no pico com troca de fio; cadência longa de Regra 4 (frase declarativa domina, fragmento é raro e pontual)",
+    "cadencia": {
+      "curta": 4,
+      "enfase": 3,
+      "colados": 1,
+      "staccatoFrac": 0.35,
+      "minFrases": 8,
+      "clipeNeg": 1,
+      "anafora": 1,
+      "epigrama": 1,
+      "fragEnfase": 2,
+      "fragColados": 0,
+      "italico": 3,
+      "retorica": 2
+    }
+  },
+  "acao_interioridade": {
+    "relacao": "acao_dominante",
+    "descricao": "Interioridade funcional e rasa DE PROPÓSITO ('Langdon sentiu um arrepio') — o motor é EXTERNO: pergunta → obstáculo → revelação → corte. O custo interno aparece em ação/escolha, nunca em sensação sobre sensação. Prosa transparente é feature, não 'prosa de manual'."
+  },
+  "politica_exposicao": "exposição dramatizada: toda informação entra a serviço de um problema da cena agora — por conflito, descoberta ou perda; zero palestra/info-dump; o conhecimento do especialista RESOLVE o problema sob pressão",
+  "politica_dialogo": {
+    "descricao": "informação e conflito passam por diálogo e ação; capítulo sem nenhum diálogo é sinal de miolo contemplativo (a auditoria achou 3 capítulos com 0% de diálogo aprovados)"
+  },
+  "politica_metafora": {
+    "descricao": "restritiva: metáfora elaborada ≈≤1 por página, nunca em cadeia; a alternativa default ao clichê não é imagem nova, é frase direta sem imagem"
+  },
+  "tipos_gancho": [
+    "revelacao_parcial",
+    "perigo_iminente",
+    "pergunta_suspensa",
+    "virada",
+    "relogio_apertando"
+  ],
+  "regras": [
+    {
+      "id": "fecho-concreto-gnomico",
+      "texto": "Feche beats em imagem concreta, ação ou consequência; o fecho gnômico (máxima/aforismo geral) fica em no máximo 2 por capítulo — vale também para fala de personagem que só fala em epigrama.",
+      "tipo": "cota",
+      "cota": { "max": 2, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
+    },
+    {
+      "id": "agente-humano-personificacao",
+      "texto": "Prefira agente humano + verbo concreto; personificação de abstração ('a razão decidiu') fica em no máximo 2 por capítulo, nunca duas na mesma página.",
+      "tipo": "cota",
+      "cota": { "max": 2, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
+    },
+    {
+      "id": "uma-vez-sanfona",
+      "texto": "Diga cada percepção UMA vez, a melhor; a frase-sanfona (mesma percepção reformulada em apostos encadeados) fica em no máximo 1 por capítulo.",
+      "tipo": "cota",
+      "cota": { "max": 1, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
+    },
+    {
+      "id": "piso-declarativas",
+      "texto": "Maioria de frases declarativas simples (SVO, sem subordinação dupla): pelo menos 50% das frases do capítulo — o leitor lê ATRAVÉS da frase para o evento.",
+      "tipo": "cota",
+      "cota": { "min": 50, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
+    },
+    {
+      "id": "fair-play-honesto",
+      "texto": "A câmera está na cabeça do POV: tudo o que ele percebe/pensa AGORA, o leitor percebe agora. Falso gancho (sonegar o que o POV já sabe) é proibido.",
+      "tipo": "alvo_positivo",
+      "papeis": ["arquiteto_cena", "escritor", "revisor_literario"]
+    },
+    {
+      "id": "exposicao-dramatizada",
+      "texto": "Toda informação entra a serviço de um problema da cena agora — por conflito, descoberta ou perda. Zero palestra ou info-dump.",
+      "tipo": "alvo_positivo",
+      "papeis": ["arquiteto_cena", "escritor"]
+    },
+    {
+      "id": "corte-no-pico",
+      "texto": "Corte no PICO (antes da resolução) com TROCA de fio; o capítulo termina em gancho honesto.",
+      "tipo": "alvo_positivo",
+      "papeis": ["arquiteto_cena", "escritor", "editor_estrutural"]
+    },
+    {
+      "id": "relogio-avanca",
+      "texto": "Dia/Hora corrente avança em todo capítulo — o relógio comprimido é canônico e a ameaça fica visível na cena.",
+      "tipo": "alvo_positivo",
+      "papeis": ["arquiteto_cena", "escritor", "auditor_factual"]
+    },
+    {
+      "id": "fato-vs-dossie",
+      "texto": "Todo fato do mundo real usado no capítulo consta em dossie-factual.md como VERIFICADO, ou está marcado como hipótese na prosa — o dossiê é a única fonte de 'real' do livro.",
+      "tipo": "alvo_positivo",
+      "papeis": ["escritor", "auditor_factual", "revisor_literario"]
+    },
+    {
+      "id": "sem-coincidencia",
+      "texto": "Causalidade, não conveniência: toda revelação tem pista plantada antes; a salvação vem de habilidade ou objeto pré-estabelecido.",
+      "tipo": "alvo_positivo",
+      "papeis": ["arquiteto_enredo", "arquiteto_cena", "revisor_literario"]
+    },
+    {
+      "id": "rotacao-de-fios",
+      "texto": "Alterne os fios de POV da matriz: nunca 4 capítulos seguidos no mesmo fio sem justificativa (teto duro 5); fio recorrente não some por mais de 3 capítulos; nos últimos 10, nenhum fio acima de 65%.",
+      "tipo": "alvo_positivo",
+      "papeis": ["arquiteto_cena", "editor_estrutural"]
+    },
+    {
+      "id": "narrador-invisivel",
+      "texto": "O narrador não opina nem decora: sem máxima do narrador, sem adjetivo moral/estético em objeto físico ('facho honesto'), metáfora nunca em cadeia.",
+      "tipo": "proibicao",
+      "papeis": ["escritor", "revisor_literario"]
+    },
+    {
+      "id": "interioridade-funcional",
+      "texto": "Interioridade funcional e rasa de propósito: 1–2 linhas por beat, coladas a estímulo externo; o custo aparece em ação e escolha — o motor do capítulo é externo.",
+      "tipo": "alvo_positivo",
+      "papeis": ["escritor", "revisor_literario"]
+    }
+  ],
+  "testes_positivos": [
+    "transparência: a maioria das frases é declarativa simples e a prosa mostra o evento em vez de se admirar",
+    "gancho EXTERNO ao fim de cada capítulo (evento/perigo/pergunta), não estado de espírito",
+    "revelação por cena: cada capítulo entrega pista ou revelação que muda o problema (escada de enigmas)",
+    "corte no pico com troca de fio — montagem paralela viva, sem miolo linear",
+    "conhecimento do especialista resolve problema sob pressão, nunca erudição decorativa"
+  ],
+  "sinais_negativos": [
+    "fecho gnômico acima da cota (prosa se admirando)",
+    "personificação de abstração",
+    "frase-sanfona",
+    "adjetivo avaliativo em objeto físico",
+    "interioridade-sem-evento (capítulo bem escrito e morto)",
+    "miolo linear: mesmo fio por muitos capítulos",
+    "info-dump / palestra",
+    "coincidência salvadora"
+  ],
+  "excecoes": [],
+  "estruturas_exigidas": {
+    "docs": ["dossie-factual.md"],
+    "campos_spec": ["Fio de POV", "Dia/Hora", "Decisão/Ação", "Modo", "Novidade"]
+  },
+  "referencias": ["references/voz-e-oficio.md", "references/metamodelo-thriller.md"],
+  "modelos_positivos": []
+}
