@@ -60,15 +60,36 @@ export function gatePovImpossivel(texto: string, contrato: SkillContract): Resul
   return { gate: "pov_impossivel", passou, evidencia };
 }
 
-/** Menção literal de conhecimento proibido pela ficha (gatilho determinístico; o auditor factual confirma). */
+/**
+ * Menção literal de conhecimento proibido pela ficha (gatilho determinístico; o auditor
+ * factual confirma o caso semântico). Regra anti-falso-positivo (achado do canário 1):
+ * - anos puros (\d{4}) NUNCA são termo proibido (quase sempre são contexto compartilhado);
+ * - termo que também aparece no vocabulário VISÍVEL da própria ficha (fatos, objetivo,
+ *   informação nova etc.) é legítimo — o proibido é o *conteúdo* ("o motivo"), não a palavra.
+ * Detector com falso positivo não pode bloquear (lição permanente da auditoria de estilo).
+ */
 export function gateConhecimentoProibido(texto: string, ficha: SceneSpec): ResultadoGate {
+  const vocabularioVisivel = [
+    ficha.objetivo,
+    ficha.obstaculo,
+    ficha.acao_fisica,
+    ficha.informacao_nova,
+    ficha.virada,
+    ficha.mudanca_estado,
+    ficha.local,
+    ficha.tempo,
+    ficha.gancho?.descricao ?? "",
+    ...(ficha.fatos_obrigatorios ?? []),
+    ...Object.values(ficha.campos_skill ?? {}),
+  ].join(" ");
   const hits: string[] = [];
   for (const proibido of ficha.conhecimentos_proibidos) {
-    // Extrai termos-chave (palavras capitalizadas/números) da declaração de proibição.
-    const termos = (proibido.match(/\b[A-ZÁÉÍÓÚÂÊÔ][\wáéíóúâêôãõç-]{3,}\b|\b\d{4}\b/g) ?? [])
-      .filter((termo) => !/^(Marina|Ela|Ele|Não|Nada|Ninguém|Quem|Quando|Onde)$/.test(termo));
+    // Só nomes próprios distintivos (capitalizados); nunca anos/números puros.
+    const termos = (proibido.match(/\b[A-ZÁÉÍÓÚÂÊÔ][\wáéíóúâêôãõç-]{3,}\b/g) ?? [])
+      .filter((termo) => !/^(Marina|Ela|Ele|Não|Nada|Ninguém|Quem|Quando|Onde|Motivo|Porque)$/.test(termo));
     for (const termo of termos) {
       const re = new RegExp(`\\b${termo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g");
+      if (re.test(vocabularioVisivel)) continue; // vocabulário compartilhado da ficha: legítimo
       if (re.test(texto)) hits.push(`"${termo}" (de: ${proibido.slice(0, 60)})`);
     }
   }

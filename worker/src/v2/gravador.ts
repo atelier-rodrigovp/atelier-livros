@@ -234,7 +234,7 @@ export class Gravador {
     const verdict = review.verdict; // "aprovado" | "aprovado_com_excecao"
     const chave = String(cap);
     await this.mutarEstado((doc) => {
-      const existente = doc.capitulos[chave];
+      const { bloqueio: _antigo, ...existente } = doc.capitulos[chave] ?? {};
       doc.capitulos[chave] = {
         ...existente,
         status: verdict,
@@ -242,6 +242,8 @@ export class Gravador {
         review_id: review.id,
         aprovacao: { review_id: review.id, text_hash: review.text_hash, em: this.agora() },
       };
+      // Aprovação com evidência supera bloqueios anteriores DESTE capítulo (retomada limpa).
+      doc.bloqueios = doc.bloqueios.filter((b) => b.alvo !== `capitulo:${cap}`);
     });
   }
 

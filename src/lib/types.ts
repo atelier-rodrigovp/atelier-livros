@@ -50,6 +50,7 @@ export const JOB_TIPOS = [
   "importar_vendas",
   "gerar_post_social",
   "aceitar_excecao_qualidade",
+  "laboratorio_v2",
 ] as const;
 export type JobTipo = (typeof JOB_TIPOS)[number];
 

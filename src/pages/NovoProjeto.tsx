@@ -15,6 +15,65 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import contratoDanBrown from "../../worker/skills-v2/dan-brown/contrato.json";
+import contratoHoover from "../../worker/skills-v2/hoover-mcfadden/contrato.json";
+import contratoRomantasy from "../../worker/skills-v2/romantasy/contrato.json";
+
+// Comparação de estilos (contratos das skills V2), em linguagem simples.
+const CONTRATOS = [contratoDanBrown, contratoHoover, contratoRomantasy];
+const FAMILIA_SIMPLES: Record<string, string> = {
+  thriller_enigma: "Thriller de enigma e conspiração",
+  suspense_intimista: "Suspense intimista em primeira pessoa",
+  romantasy: "Fantasia romântica (romantasy)",
+};
+const RELACAO_SIMPLES: Record<string, string> = {
+  acao_dominante: "A ação comanda — a emoção aparece em escolhas e gestos, curta e certeira.",
+  interioridade_dominante: "O sentimento comanda — a narradora vive tudo por dentro, na primeira pessoa.",
+  equilibrio: "Emoção e ação andam juntas — o desejo corre por baixo de cada cena.",
+};
+
+function ComparadorEstilos() {
+  return (
+    <details className="rounded-xl border bg-card">
+      <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium">
+        Comparar estilos de escrita
+      </summary>
+      <div className="grid grid-cols-1 gap-4 border-t p-4 sm:grid-cols-3">
+        {CONTRATOS.map((c) => (
+          <div key={c.id} className="space-y-2.5 rounded-lg border p-3 text-sm">
+            <p className="font-serif font-semibold leading-snug">{c.nome}</p>
+            <p className="text-xs text-muted-foreground">
+              {FAMILIA_SIMPLES[c.familia_editorial] ?? c.familia_editorial}
+            </p>
+            <div>
+              <p className="text-xs font-medium">Motor da história</p>
+              <p className="text-xs text-muted-foreground">{c.motor_narrativo}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium">Ação × emoção</p>
+              <p className="text-xs text-muted-foreground">
+                {RELACAO_SIMPLES[c.acao_interioridade.relacao] ?? c.acao_interioridade.relacao}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium">O que esse estilo garante</p>
+              <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                {c.testes_positivos.slice(0, 2).map((t, i) => (
+                  <li key={i}>{t}</li>
+                ))}
+              </ul>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Capítulos de {c.faixa_palavras.min.toLocaleString("pt-BR")} a{" "}
+              {c.faixa_palavras.max.toLocaleString("pt-BR")} palavras (alvo{" "}
+              {c.faixa_palavras.alvo.toLocaleString("pt-BR")}).
+            </p>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
 
 interface Pergunta {
   campo: string;
@@ -257,6 +316,7 @@ export default function NovoProjeto() {
             </form>
           </CardContent>
         </Card>
+        <ComparadorEstilos />
       </div>
     );
   }

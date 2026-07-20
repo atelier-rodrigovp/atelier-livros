@@ -65,14 +65,20 @@ function parseFundacao(texto: string): FundacaoCanario {
   return r.valor;
 }
 
-async function rodarCanario(skillId: string, totalCaps: number): Promise<Record<string, unknown>> {
+async function rodarCanario(skillId: string, totalCaps: number, dirExistente?: string): Promise<Record<string, unknown>> {
   const contrato = carregarContrato(skillId);
   const brief = BRIEFINGS[skillId];
   if (!brief) throw new Error(`sem briefing para ${skillId}`);
 
-  const projectId = randomUUID();
   const WORK_DIR = process.env.WORK_DIR!;
-  const dirProjeto = path.join(WORK_DIR, `canario-v2-${skillId}-${projectId.slice(0, 8)}`);
+  let projectId = randomUUID();
+  let dirProjeto = dirExistente ?? path.join(WORK_DIR, `canario-v2-${skillId}-${projectId.slice(0, 8)}`);
+  if (dirExistente) {
+    // Retomada: reaproveita o projeto (estado canônico decide o que falta).
+    const bruto = await fs.readFile(path.join(dirExistente, "engine-v2", "estado.json"), "utf8");
+    projectId = (JSON.parse(bruto) as { project_id: string }).project_id;
+    console.log(`retomando projeto ${projectId} em ${dirExistente}`);
+  }
   await fs.mkdir(dirProjeto, { recursive: true });
 
   const { persistencia, migracaoPendente } = await criarPersistencia({ dirProjeto });
@@ -82,6 +88,20 @@ async function rodarCanario(skillId: string, totalCaps: number): Promise<Record<
 
   console.log(`\n=== CANÁRIO ${skillId} (${contrato.contrato.versao}) — ${brief.titulo}`);
   console.log(`dir: ${dirProjeto} · persistência: ${migracaoPendente ? "disco (DDL pendente)" : "supabase"}`);
+
+  // --- Retomada: fundação já existe no disco? ---
+  const perfilPathExistente = path.join(dirProjeto, "perfil-de-voz.md");
+  let perfilExistente = "";
+  try { perfilExistente = await fs.readFile(perfilPathExistente, "utf8"); } catch { /* primeira execução */ }
+  if (dirExistente && perfilExistente.trim()) {
+    const estruturaBruta = JSON.parse(await fs.readFile(path.join(dirProjeto, "estrutura.json"), "utf8")) as { estrutura: FundacaoCanario["estrutura"]; fios: string[]; promessa: string };
+    console.log(`fundação reaproveitada · fios: ${estruturaBruta.fios.join(", ")}`);
+    return continuarCapitulos(skillId, totalCaps, {
+      contrato, brief, projectId, dirProjeto, persistencia, gravador, provedor, mapa, migracaoPendente,
+      fundacao: { perfil_voz: perfilExistente, estrutura: estruturaBruta.estrutura, fios: estruturaBruta.fios, promessa_editorial: estruturaBruta.promessa },
+      fundacaoRunId: "retomada",
+    });
+  }
 
   // --- Fundação (arquiteto_enredo) ---
   const pacoteFundacao = compilarPacote({
@@ -124,27 +144,62 @@ async function rodarCanario(skillId: string, totalCaps: number): Promise<Record<
   await gravador.mudarFase("escrita");
   console.log(`fundação ok · fios: ${fundacao.valor.fios.join(", ")}`);
 
-  // --- Capítulos ---
+  return continuarCapitulos(skillId, totalCaps, {
+    contrato, brief, projectId, dirProjeto, persistencia, gravador, provedor, mapa, migracaoPendente,
+    fundacao: fundacao.valor,
+    fundacaoRunId: fundacao.runId,
+  });
+}
+
+interface CtxCanario {
+  contrato: ReturnType<typeof carregarContrato>;
+  brief: { titulo: string; premissa: string };
+  projectId: string;
+  dirProjeto: string;
+  persistencia: Awaited<ReturnType<typeof criarPersistencia>>["persistencia"];
+  gravador: Gravador;
+  provedor: ProvedorClaudeCli;
+  mapa: ReturnType<typeof mapaModelosDoAmbiente>;
+  migracaoPendente: boolean;
+  fundacao: FundacaoCanario;
+  fundacaoRunId: string;
+}
+
+async function continuarCapitulos(skillId: string, totalCaps: number, ctx: CtxCanario): Promise<Record<string, unknown>> {
+  const { contrato, brief, projectId, dirProjeto, persistencia, gravador, provedor, mapa, migracaoPendente, fundacao } = ctx;
   const deps: DepsPipeline = {
     gravador,
     persistencia,
     provedor,
     mapa,
     contrato,
-    perfil: { texto: fundacao.valor.perfil_voz, skillId: contrato.contrato.id, hash: estado.doc.fundacao.docs["perfil-de-voz.md"], validado: true },
+    perfil: {
+      texto: fundacao.perfil_voz,
+      skillId: contrato.contrato.id,
+      hash: createHash("sha256").update(fundacao.perfil_voz, "utf8").digest("hex"),
+      validado: true,
+    },
     dirManuscrito: path.join(dirProjeto, "manuscrito"),
     projectId,
     instrucoesAutor: [
       {
-        texto: `Estrutura aprovada: ${fundacao.valor.estrutura.map((e) => `cap ${e.capitulo} [${e.fio}] ${e.resumo_estrutural}`).join(" · ")}`,
+        texto: `Estrutura aprovada: ${fundacao.estrutura.map((e) => `cap ${e.capitulo} [${e.fio}] ${e.resumo_estrutural}`).join(" · ")}`,
         camada: "decisao_autor",
         fonte: "canario:estrutura",
       },
     ],
   };
 
+  // Estado FRESCO decide o que falta (retomada: capítulos aprovados são pulados).
+  const estadoAtual = await gravador.carregarEstado();
   const resultados: Record<string, unknown>[] = [];
   for (let n = 1; n <= totalCaps; n++) {
+    const cap = estadoAtual.doc.capitulos[String(n)];
+    if (cap && (cap.status === "aprovado" || cap.status === "aprovado_com_excecao")) {
+      console.log(`— capítulo ${n}/${totalCaps}: já aprovado (retomada), pulando`);
+      resultados.push({ capitulo: n, status: cap.status, textHash: cap.text_hash, retomado: true });
+      continue;
+    }
     console.log(`— capítulo ${n}/${totalCaps}…`);
     const anteriores: { numero: number; trecho: string }[] = [];
     const trechos: { titulo: string; texto: string; fonte: string }[] = [];
@@ -159,7 +214,7 @@ async function rodarCanario(skillId: string, totalCaps: number): Promise<Record<
     const r = await escreverCapitulo(deps, n, { anteriores, trechosAnteriores: trechos });
     console.log(`   → ${r.status}${r.problemas.length ? ` (${r.problemas[0]})` : ""} · runs: ${r.runs.length}`);
     resultados.push({ capitulo: n, status: r.status, textHash: r.textHash, reviewId: r.reviewId, runs: r.runs.length, problemas: r.problemas, gatesFalhos: r.gatesFalhos });
-    if (r.status !== "aprovado" && r.status !== "aprovado_com_excecao") break; // falha é retomável: re-rodar o script continua do estado
+    if (r.status !== "aprovado" && r.status !== "aprovado_com_excecao") break; // falha é retomável: re-rodar com --dir continua do estado
   }
 
   const relatorio = {
@@ -168,7 +223,7 @@ async function rodarCanario(skillId: string, totalCaps: number): Promise<Record<
     titulo: brief.titulo,
     dirProjeto,
     migracaoPendente,
-    fundacao: { fios: fundacao.valor.fios, promessa: fundacao.valor.promessa_editorial, runId: fundacao.runId },
+    fundacao: { fios: fundacao.fios, promessa: fundacao.promessa_editorial, runId: ctx.fundacaoRunId },
     capitulos: resultados,
     executadoEm: new Date().toISOString(),
   };
@@ -183,11 +238,14 @@ async function main() {
   const arg = process.argv[2] ?? "todos";
   const capsIdx = process.argv.indexOf("--caps");
   const totalCaps = capsIdx > 0 ? Number(process.argv[capsIdx + 1]) || 2 : 2;
+  const dirIdx = process.argv.indexOf("--dir");
+  const dirExistente = dirIdx > 0 ? process.argv[dirIdx + 1] : undefined;
   const skills = arg === "todos" ? ["dan-brown", "hoover-mcfadden", "romantasy"] : [arg];
+  if (dirExistente && skills.length > 1) throw new Error("--dir só com uma skill");
   const todos: Record<string, unknown>[] = [];
   for (const s of skills) {
     try {
-      todos.push(await rodarCanario(s, totalCaps));
+      todos.push(await rodarCanario(s, totalCaps, dirExistente));
     } catch (e) {
       console.error(`CANÁRIO ${s} FALHOU:`, e instanceof Error ? e.message : e);
       todos.push({ skill: s, erro: e instanceof Error ? e.message : String(e) });

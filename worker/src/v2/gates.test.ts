@@ -86,6 +86,30 @@ describe("gates universais", () => {
     expect(gateConhecimentoProibido("Ela leu o rodapé sem entender.", ficha).passou).toBe(true);
   });
 
+  it("conhecimento proibido: ano puro e vocabulário da própria ficha não bloqueiam (regressão canário 1)", () => {
+    const ficha = {
+      schema: "scene-spec/v1",
+      capitulo: 1,
+      objetivo: "decifrar o inventário de Alcobaça",
+      obstaculo: "",
+      acao_fisica: "",
+      informacao_nova: "o inventário de 1834 tem três terços",
+      virada: "",
+      mudanca_estado: "",
+      local: "",
+      tempo: "",
+      gancho: { tipo: "x", descricao: "" },
+      conhecimentos_proibidos: ["Motivo pelo qual o inventário foi suprimido em 1834", "Marina não conhece o Prior de Alcobaça ainda"],
+      fatos_obrigatorios: ["o inventário de 1834 existe"],
+      fios_avancados: [],
+      fios_ausentes: [],
+    } as unknown as SceneSpec;
+    // "1834" e "Alcobaça" aparecem no vocabulário visível da ficha → legítimos.
+    expect(gateConhecimentoProibido("Ela estudou o inventário de 1834 em Alcobaça a noite inteira.", ficha).passou).toBe(true);
+    // "Prior" é distintivo e NÃO está no vocabulário visível → bloqueia.
+    expect(gateConhecimentoProibido("O Prior a esperava na porta.", ficha).passou).toBe(false);
+  });
+
   it("validarSaidaJson: JSON válido passa, inválido vira gate fora_do_schema", () => {
     const ok = validarSaidaJson('```json\n{"a":1}\n```', (o) => o as { a: number });
     expect(ok.ok).toBe(true);
