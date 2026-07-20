@@ -54,10 +54,14 @@ export function sinaisGhostwriting(campo: string, valor: string): string[] {
   }
   // Ornamento literário: metáfora elaborada, gnômico, personificação — ficha não decora.
   // Desdobra verbo de cognição ("ela entende que <máxima>") para pegar máxima embutida.
+  // Erros citam o TRECHO detectado: o retry do papel precisa saber o que remover.
   const desdobrado = v.replace(/\b(ela|ele|[A-ZÁÉÍÓÚ]\w+)\s+(entende|percebe|sabe|descobre|conclui|aprende)\s+que\s+(\p{L})/giu, (_m, _s, _v, l: string) => String(l).toUpperCase());
-  if (contarMetaforaElaborada(v).n > 0) motivos.push(`${campo}: metáfora pronta`);
-  if (contarGnomico(v).n > 0 || contarGnomico(desdobrado).n > 0) motivos.push(`${campo}: aforismo/máxima pronta`);
-  if (contarPersonificacao(v).n > 0) motivos.push(`${campo}: personificação de abstração`);
+  const met = contarMetaforaElaborada(v);
+  if (met.n > 0) motivos.push(`${campo}: metáfora pronta — remova/troque por fato seco: ${JSON.stringify(met.exemplos[0] ?? v.slice(0, 60))}`);
+  const gno = contarGnomico(v).n > 0 ? contarGnomico(v) : contarGnomico(desdobrado);
+  if (gno.n > 0) motivos.push(`${campo}: aforismo/máxima pronta — remova: ${JSON.stringify(gno.exemplos[0] ?? "")}`);
+  const per = contarPersonificacao(v);
+  if (per.n > 0) motivos.push(`${campo}: personificação de abstração — remova: ${JSON.stringify(per.exemplos[0] ?? "")}`);
   return motivos;
 }
 

@@ -230,6 +230,8 @@ export async function escreverCapitulo(
       papel: "arquiteto_cena",
       alvo: `spec:${capitulo}`,
       pacote: comp.pacote!,
+      // Anti-ghostwriting é rígido de propósito; 3 tentativas com erro citando o trecho.
+      maxTentativas: 3,
       tarefa: tarefaArquitetoCena(capitulo, deps.contrato.contrato),
       parse: (t) => {
         const spec = extrairJson(t) as SceneSpec;
