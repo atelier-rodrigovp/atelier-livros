@@ -181,6 +181,7 @@ async function continuarCapitulos(skillId: string, totalCaps: number, ctx: CtxCa
     },
     dirManuscrito: path.join(dirProjeto, "manuscrito"),
     projectId,
+    maxCorrecoes: 4, // paridade com a escada V1 (orçamento 5); anti-loop continua protegendo
     instrucoesAutor: [
       {
         texto: `Estrutura aprovada: ${fundacao.estrutura.map((e) => `cap ${e.capitulo} [${e.fio}] ${e.resumo_estrutural}`).join(" · ")}`,

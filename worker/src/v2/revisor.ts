@@ -95,8 +95,17 @@ export function conferirParecer(parecer: Parecer, sinaisMedidos: SinalMedido[]):
     if (verdict !== "necessita_decisao_humana") verdict = "reprovado";
   }
 
-  if (parecer.sinais.some((s) => s.disposicao === "necessita_decisao_humana")) {
-    verdict = "necessita_decisao_humana";
+  // Escalação a decisão humana só por sinal FORA DA COTA (ou pelo próprio verdict
+  // do revisor). Sinal dentro da cota do contrato disposto como "decisão humana"
+  // vira anotação — cota é do contrato; dentro dela, produção não para.
+  const foraDaCota = new Set(sinaisMedidos.filter((m) => m.fora_da_cota).map((m) => m.sinal));
+  for (const s of parecer.sinais) {
+    if (s.disposicao !== "necessita_decisao_humana") continue;
+    if (foraDaCota.has(s.sinal)) {
+      verdict = "necessita_decisao_humana";
+    } else {
+      problemas.push(`anotação (sem pausa): ${s.sinal} dentro da cota disposto como decisão humana — ${s.evidencia.slice(0, 80)}`);
+    }
   }
 
   return { ok: problemas.length === 0, problemas, verdictEfetivo: verdict };
