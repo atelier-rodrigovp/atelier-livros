@@ -69,6 +69,18 @@ export function tarefaRevisor(capitulo: number, resumoSinais: string, contrato: 
   ].join("\n");
 }
 
+/** Arquiteto de enredo: fundação mínima (perfil de voz + estrutura), sem semear ornamento. */
+export function tarefaArquitetoEnredo(briefing: { titulo: string; premissa: string; totalCapitulos: number }, contrato: SkillContract): string {
+  return [
+    `Monte a fundação mínima do livro "${briefing.titulo}" (${briefing.totalCapitulos} capítulos) para a skill do pacote.`,
+    `Premissa do autor: ${briefing.premissa}`,
+    `Responda APENAS JSON: { "perfil_voz": string, "estrutura": [{"capitulo": number, "fio": string, "resumo_estrutural": string}], "fios": [string], "promessa_editorial": string }.`,
+    `- "perfil_voz": descrição de voz em markdown curto (≤300 palavras) coerente com o contrato (${contrato.familia_editorial}; ${contrato.acao_interioridade.relacao}). PROIBIDO incluir parágrafos-modelo, aforismos ou frases de exemplo — a fundação não semeia ornamento (o perfil descreve, não demonstra).`,
+    `- "estrutura": um item por capítulo; "resumo_estrutural" aponta objetivo/virada em ≤25 palavras, sem prosa.`,
+    `- "fios": nomes dos fios narrativos${contrato.pov.rotacao ? ` (entre ${contrato.pov.rotacao.fios_min} e ${contrato.pov.rotacao.fios_max})` : ""}.`,
+  ].join("\n");
+}
+
 /** Auditor factual: contradições comprovadas, conhecimento indevido, POV. */
 export function tarefaAuditorFactual(capitulo: number): string {
   return [

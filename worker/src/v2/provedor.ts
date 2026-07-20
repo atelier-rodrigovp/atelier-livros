@@ -3,6 +3,7 @@
 // Provedor primário: claude CLI (plano MAX). A interface permite religar provedores hosted
 // no futuro sem tocar o núcleo (decisão D3).
 
+import { spawn } from "node:child_process";
 import type { ClasseCapacidade, Papel } from "./tipos.js";
 
 export interface ChamadaModelo {
@@ -39,24 +40,52 @@ export class ErroProvedor extends Error {
 /**
  * Provedor via claude CLI não-interativo (`claude -p`).
  * Papéis V2 são chamadas puras de texto: o modelo NUNCA usa ferramentas nem toca disco
- * (o gravador determinístico é quem persiste). Por isso não passamos permission-mode
- * de edição — o prompt é autocontido e a saída volta no stdout.
+ * (o gravador determinístico é quem persiste). O prompt vai por STDIN — argv no Windows
+ * estoura ~32k chars e o CLI espera stdin quando spawnado sem TTY.
  */
 export class ProvedorClaudeCli implements ProvedorModelo {
   nome = "claude-cli";
   constructor(private readonly bin: string, private readonly cwd?: string) {}
 
+  private executar(args: string[], stdin: string, timeoutMs: number): Promise<{ code: number; out: string; err: string }> {
+    return new Promise((resolve) => {
+      const p = spawn(this.bin, args, { cwd: this.cwd, shell: false, env: { ...process.env, PYTHONUTF8: "1" } });
+      let out = "";
+      let err = "";
+      p.stdout.setEncoding("utf8");
+      p.stderr.setEncoding("utf8");
+      p.stdout.on("data", (c: string) => (out += c));
+      p.stderr.on("data", (c: string) => (err += c));
+      const timer = setTimeout(() => {
+        try { p.kill(); } catch { /* já morreu */ }
+        resolve({ code: -1, out, err: `timeout após ${timeoutMs}ms` });
+      }, timeoutMs);
+      p.on("close", (code) => {
+        clearTimeout(timer);
+        resolve({ code: code ?? -1, out, err });
+      });
+      p.on("error", (e) => {
+        clearTimeout(timer);
+        resolve({ code: -1, out, err: String(e) });
+      });
+      p.stdin.write(stdin, "utf8");
+      p.stdin.end();
+    });
+  }
+
   async chamar(c: ChamadaModelo): Promise<RespostaModelo> {
-    // Import tardio: lib.ts arrasta supabase/.env; testes com ProvedorMock ficam puros.
-    const { run } = await import("../lib.js");
-    const args = ["-p", c.prompt, "--model", c.modelo, "--output-format", "json"];
-    const r = await run(this.bin, args, { cwd: this.cwd, timeoutMs: c.timeoutMs ?? 600000 });
+    const args = ["-p", "--model", c.modelo, "--output-format", "json"];
+    const timeoutMs = c.timeoutMs ?? 600000;
+    const r = await this.executar(args, c.prompt, timeoutMs);
+    if (r.code === -1 && /timeout/.test(r.err)) {
+      throw new ErroProvedor("PROVEDOR_TIMEOUT", `claude CLI: ${r.err}`);
+    }
     if (r.code !== 0) {
-      throw new ErroProvedor("PROVEDOR_FALHOU", `claude CLI rc=${r.code}: ${r.err.slice(0, 400)}`, { code: r.code });
+      throw new ErroProvedor("PROVEDOR_FALHOU", `claude CLI rc=${r.code}: ${(r.err || r.out).slice(0, 400)}`, { code: r.code });
     }
     const texto = r.out.trim();
     if (!texto) throw new ErroProvedor("PROVEDOR_SAIDA_VAZIA", "claude CLI retornou saída vazia");
-    // Envelope --output-format json: { result, usage: { input_tokens, output_tokens }, ... }
+    // Envelope --output-format json: { result, usage: { input_tokens, output_tokens }, is_error, ... }
     try {
       const env = JSON.parse(texto) as {
         result?: string;

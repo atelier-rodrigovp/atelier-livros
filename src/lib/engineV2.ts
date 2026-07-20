@@ -80,7 +80,7 @@ export type ConsultaV2<T> =
   | { migracaoPendente: false; dados: T }
   | { migracaoPendente: true; dados: null };
 
-function tabelaAusente(error: { code?: string; message?: string } | null): boolean {
+export function tabelaAusente(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
   return (
     error.code === "42P01" ||
