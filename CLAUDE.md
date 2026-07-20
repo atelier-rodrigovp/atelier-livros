@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Engine V2 (ativa por projeto via `projects.engine_mode='v2'`)
+
+Núcleo novo em `worker/src/v2/` — estado canônico único (`engine_state`/`engine_runs`/`engine_reviews`/`engine_scene_specs`, DDL em `supabase/engine_v2.sql`), skills como contratos versionados em dados (`worker/skills-v2/<id>/contrato.json`, **zero condicional por skill no núcleo**), papéis separados por classe de capacidade (escritor é o único autor de prosa; gravador de estado é código), compilador de contexto com precedência de 7 camadas e hash por pacote, fichas de cena sem prosa (anti-ghostwriting), gates universais separados de sinais editoriais (cotas vêm SÓ do contrato — lição CR4), parecer do revisor persistido e hash-bound (aprovação exige evidência positiva), laboratório de regressão com avaliação cega (`worker/src/v2/lab/`), migração V1→V2 idempotente (`worker/src/v2/migracao.ts`).
+
+Documentação: `docs/engine-v2/00-decisao-arquitetural.md` (por quê), `01-operacao.md` (como operar/recuperar), `02-como-criar-skill.md` (skill nova sem tocar o núcleo). Projetos sem `engine_mode='v2'` seguem na V1 descrita abaixo — o desvio é um único ponto (`worker/src/v2/integracao.ts`).
+
 ## Quick Start Commands
 
 ```bash
