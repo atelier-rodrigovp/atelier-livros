@@ -702,3 +702,390 @@ export function checarDiaHoraSequencia(specs: { numero: number; diaHoraLinha: st
   }
   return out;
 }
+
+// ===========================================================================
+// TRANSPARÊNCIA (AUDITORIA-ESTILO-DANBROWN.md, 2026-07-17): o eixo que faltava.
+// Os detectores acima medem tique BARATO (staccato, muleta, molde); estes medem
+// o ornamento CARO que passava limpo (gnômico, personificação, sanfona, adjetivo
+// avaliativo, piso de declarativas, diálogo, metáfora). TODOS nascem em modo
+// SINAL (alimentam o prompt do revisor; NÃO bloqueiam). Promoção a gate é POR
+// SKILL via ORC_TRANSPARENCIA_POR_SKILL — cota dura só entra para a skill que
+// validou zero falso-positivo nos capítulos-controle do benchmark (regra da
+// convergência 2026-07-13: um FP aqui trava a produção inteira).
+// D2/D3/D4 são sinal-FORTE deliberadamente inclusivo: a precisão final vem do
+// revisor (mesma filosofia do causal-gnômico acima).
+// ===========================================================================
+
+const _NAO_LETRA = "(?<![\\p{L}\\d_])";
+const _FIM_LETRA = "(?![\\p{L}\\d_])";
+
+// --- D1: GNÔMICO AMPLIADO (estende contarCausalGnomico: além do "porque"+cópula,
+//     pega a máxima-cópula "X é uma forma de Y", o sujeito genérico "Homens que…"
+//     e o infinitivo-sujeito "Guardar é…"). Quiasmo fica para o revisor (semântica).
+const _RE_MAXIMA_FORMA = new RegExp(
+  `${_NAO_LETRA}(é|era|são|eram|foi)\\s+(?:só\\s+|sempre\\s+)?(?:uma?\\s+|[oa]\\s+|minha\\s+|meu\\s+|sua\\s+|seu\\s+)?(forma|maneira|jeito|modo|métrica|questão|arte|hábito|categoria|luxo|ofício)s?\\s+de${_FIM_LETRA}`,
+  "iu",
+);
+const _RE_SUJEITO_GENERICO = /^(?:(homens|mulheres|gente|pessoas|tod[oa]\s+\p{L}+|um\s+homem|uma\s+mulher|um\s+alvo|uma\s+ferramenta)\s+que|quem)\s+\p{L}/iu;
+// Máxima DEFINITÓRIA de sujeito genérico: "Um X que <faz Y> (não) é/são Z" —
+// define uma categoria, não descreve um indivíduo concreto (que não fecha em
+// cópula-definição). Exige a cópula após a oração relativa ("Um operador que
+// retém material não é um operador"; "Um arquivamento que deixa cópia é malfeito").
+// "Um homem que esperava junto ao portão" (sem cópula-definição) NÃO casa.
+const _RE_DEFINICAO_GENERICA = /^um[a]?\s+\p{L}+\s+que\s+[^.!?]{3,70}?\s+(?:n[ãa]o\s+)?(é|s[ãa]o|era|eram)\s+(?!(?:el[ea]|o\s|a\s|os\s|as\s)\b)/iu;
+// Máxima de plural genérico no PRESENTE ("Os doentes enterram a si mesmos.",
+// "Curadores não perguntam — curam."): plural + verbo em -am/-em presente
+// (rejeita os passados -aram/-eram/-iram/-avam/-iam).
+const _RE_PLURAL_PRESENTE = /^(?:[oa]s\s+)?\p{Ll}\p{L}+(?:es|ns|is|s)\s+(?:n[ãa]o\s+|nunca\s+|s[óo]\s+)?(\p{L}+[ae]m)(?![\p{L}\d_])/iu;
+const _RE_VERBO_PASSADO_3PL = /(aram|eram|iram|avam|iam)$/iu;
+const _RE_INFINITIVO_SUJEITO = /^(?:e\s+|mas\s+)?[\p{L}]+(?:ar|er|ir)\s+(?:\p{Ll}+\s+){0,2}?(é|era|não\s+(?:é|era))\b/iu;
+const _RE_E_SEMPRE = /(?<![\p{L}\d_])(é|são|era|eram)\s+sempre\s/iu;
+const _RE_MAIS_DO_QUE = /^é\s+mais\s+\p{L}+\s+[^.!?]{0,40}\s+do\s+que\b/iu;
+const _RE_IMPESSOAL_MAXIMA = /^n[ãa]o\s+se\s+\p{L}+[aei](m?)\s/iu;
+const _RE_DEITICO = /(?<![\p{L}\d_])(aqui|agora|hoje|ontem|amanh[ãa]|neste|nesta|desse|dessa|deste|desta|aquele|aquela|este|esta)(?![\p{L}\d_])/iu;
+// Sujeito abstrato + cópula curta ("Lealdade é uma métrica…", "a beleza é sempre…").
+const _ABSTRATOS_GNOMICO_EXTRA = "lealdade|desempenho|amor|ódio|coragem|covardia|guardar|lembrar|esquecer|esperar|explicar|acreditar|confiar";
+
+// Segmentos candidatos: a frase inteira + cláusulas finais após ":" ou travessão
+// (a máxima costuma fechar a frase: "…uma tática antiga: quem preenche o silêncio
+// primeiro entrega mais do que pretende").
+function _segmentosMaxima(s: string): string[] {
+  const out = [s];
+  for (const parte of s.split(/[:—–]/).slice(1)) {
+    const p = parte.trim();
+    if (p) out.push(p);
+  }
+  return out;
+}
+// Nome próprio fora da 1ª palavra = referente concreto (a 1ª sempre é maiúscula).
+function _temNomeProprioInterno(seg: string): boolean {
+  const semPrimeira = seg.replace(/^\s*[\p{L}\d’'-]+\s*/u, "");
+  return _RE_NOME_PROPRIO.test(semPrimeira);
+}
+function _ehMaxima(segBruto: string): boolean {
+  if (/\?["'”’»)\]]*\s*$/.test(segBruto)) return false; // pergunta não é máxima
+  const seg = segBruto.replace(/^[\s,;]+/, "").replace(/[.!?…\s]+$/, "");
+  const nw = palavrasFrase(seg);
+  if (nw < 3 || nw > 22) return false;
+  if (/\d/.test(seg) || _temNomeProprioInterno(seg) || _RE_DEITICO.test(seg)) return false;
+  const nu = semAbertura(seg);
+  if (_RE_MAXIMA_FORMA.test(nu)) return true;
+  if (_RE_SUJEITO_GENERICO.test(nu) && nw <= 18) return true;
+  if (_RE_DEFINICAO_GENERICA.test(nu) && nw <= 20) return true;
+  if (_RE_INFINITIVO_SUJEITO.test(nu)) return true;
+  if (_RE_E_SEMPRE.test(nu)) return true;
+  if (_RE_MAIS_DO_QUE.test(nu)) return true;
+  if (_RE_IMPESSOAL_MAXIMA.test(nu) && nw <= 12) return true;
+  const plu = _RE_PLURAL_PRESENTE.exec(nu);
+  if (plu && nw <= 12 && !_RE_VERBO_PASSADO_3PL.test(plu[1])) return true;
+  // Sujeito abstrato nomeado + cópula, fechando curto (máxima clássica).
+  const reAbstrCop = new RegExp(
+    `^(?:[oa]s?\\s+)?(${_ABSTRATOS}|${_ABSTRATOS_GNOMICO_EXTRA})\\s+(?:\\p{Ll}+\\s+){0,2}?(é|são|era|eram)\\s`,
+    "iu",
+  );
+  if (reAbstrCop.test(nu) && nw <= 16) return true;
+  return false;
+}
+
+export interface GnomicoSinal {
+  n: number;               // total (narração + diálogo)
+  narracao: number;
+  dialogo: number;
+  exemplos: string[];
+  limiar: number;
+  acima: boolean;
+}
+export const LIMIAR_GNOMICO = 2; // meta do contrato do revisor: ≤2/capítulo
+
+export function contarGnomico(texto: string): GnomicoSinal {
+  const exemplos: string[] = [];
+  let narracao = 0, dialogo = 0;
+  const { fr, narr } = frasesRotuladas(semHeadings(texto ?? ""));
+  for (let i = 0; i < fr.length; i++) {
+    const s = fr[i].replace(/\s+/g, " ").trim();
+    const hit = _segmentosMaxima(s).find(_ehMaxima);
+    if (!hit) continue;
+    if (narr[i]) narracao++; else dialogo++;
+    exemplos.push(hit.trim().slice(0, 90));
+  }
+  // O causal ("…porque esperar era uma maneira de mentir") soma sem dupla
+  // contagem quando a frase inteira já foi marcada acima: dedup por frase.
+  const causal = contarCausalGnomico(texto);
+  const causalNovos = causal.exemplos.filter((ex) => !exemplos.some((e) => e.includes(ex.slice(7, 40))));
+  const n = exemplos.length + causalNovos.length;
+  return {
+    n,
+    narracao: narracao + causalNovos.length, // o causal ignora diálogo por construção
+    dialogo,
+    exemplos: exemplos.concat(causalNovos).slice(0, 6),
+    limiar: LIMIAR_GNOMICO,
+    acima: n > LIMIAR_GNOMICO,
+  };
+}
+
+// --- D2: PERSONIFICAÇÃO de abstração / corpo-agente. Lista ABERTA (a fechada
+//     subdetectou 1-2 ordens de grandeza na auditoria). Exclusões codificadas:
+//     símile ("como se a memória…" é D7, não D2), idiomatismo morto, fala de
+//     pessoa por metonímia comum ("a voz respondeu" após travessão adjacente).
+const _ABSTRATOS =
+  "raz[ãa]o|medo|sil[êe]ncio|mem[óo]ria|lembran[çc]a|d[úu]vida|certeza|culpa|p[âa]nico|instinto|l[óo]gica|esperan[çc]a|verdade|mentira|solid[ãa]o|pressa|paci[êe]ncia|ambi[çc][ãa]o|cidade|noite|manh[ãa]|madrugada|escurid[ãa]o|disciplina|rotina|h[áa]bito|hist[óo]ria|passado|futuro|dist[âa]ncia|beleza|dor|raiva|fome|cansa[çc]o|aus[êe]ncia|piedade|f[ée]|intui[çc][ãa]o|paranoia|programa|sistema|m[áa]quina|maquinaria|aparato|aparelho|mecanismo|engrenagem|dispositivo|protocolo|procedimento|burocracia|institui[çc][ãa]o|ag[êe]ncia|organiza[çc][ãa]o|frieza|lista|casa|papel|terra";
+const _CORPO =
+  "m[ãa]os?|mand[íi]bula|corpo|cabe[çc]a|olhos|dedos?|pulso|est[ôo]mago|garganta|pele|reflexo|ombros?|joelhos?|p[ée]s?";
+const _V_AGENTE =
+  "decid|soub|sab|escolh|recus|insist|mentiu|mente|mentia|respond|pergunt|esper|aprend|entend|negoci|vot|convoc|devor|cortej|tra[íi]|desist|promet|cobr|exig|aceit|compr|vend|ensin|obedec|comand|arquiv|julg|perdo|castig|conden|resist|pediu|ped|guard|acredit|fingi|fing|desmen|denunci|entreg|conspir|vigi|trabalh|serv|dorm|acord|respir|fez|faz|fazia|mud|vir[oa]|volt|segu|encolh|permiti|concord|discord|hesit|teim|obrig|convenc|abandon|persegu|acus|absolv|fal(?:a|ou|ava|am)|ench|devolv|escrev|pediu|dit(?:a|ou|ava)|contou|conta|contava|chama|chamou|puxou|puxa|puxava";
+const _RE_PERSONIFICACAO = new RegExp(
+  // artigo/possessivo + [adjetivo?] + substantivo abstrato/corpo + [", aparte,"?]
+  // + ["que"?] + janela curta + [neg/refl/aux?] + verbo de agência
+  `${_NAO_LETRA}(?:o|a|os|as|sua|seu|minha|meu|aquela?|essa?|esta?|própri[oa])\\s+(?:\\p{Ll}+\\s+)?(${_ABSTRATOS}|${_CORPO})(?:,\\s+[^,.!?]{1,25},)?\\s+(?:que\\s+)?(?:\\p{Ll}+\\s+){0,3}?(?:se\\s+|j[áa]\\s+|n[ãa]o\\s+|nunca\\s+|vai\\s+|ia\\s+|tinham?\\s+)?(${_V_AGENTE})\\p{Ll}*${_FIM_LETRA}`,
+  "iu",
+);
+const _IDIOMATISMOS = [
+  /peg(ou|a|ava)\s+fogo/iu, /conta\s+(n[ãa]o\s+)?fecha/iu, /tempo\s+pass/iu,
+  /cora[çc][ãa]o\s+(bat|dispar|acele)/iu, /cabe[çc]a\s+do[íi]/iu, /est[ôo]mago\s+ronc/iu,
+  /casa\s+ca[íi]/iu, /porta\s+(abriu|fechou|bateu)/iu,
+];
+
+export interface PersonificacaoSinal { n: number; por1000: number; exemplos: string[]; acima: boolean }
+export const LIMIAR_PERSONIFICACAO_1000 = 1.5; // meta: ≤1/1000 (folga de sinal: 1.5)
+
+export function contarPersonificacao(texto: string): PersonificacaoSinal {
+  const exemplos: string[] = [];
+  const { fr, narr } = frasesRotuladas(semHeadings(texto ?? ""));
+  for (let i = 0; i < fr.length; i++) {
+    if (!narr[i]) continue; // fala de personagem: voz dele, revisor julga
+    const s = fr[i].replace(/\s+/g, " ");
+    const m = _RE_PERSONIFICACAO.exec(s);
+    if (!m) continue;
+    const antes = s.slice(0, m.index);
+    if (/\bcomo\s+(se|quem)?\s*$/iu.test(antes)) continue;   // símile explícito ⇒ D7
+    if (_IDIOMATISMOS.some((re) => re.test(m[0]) || re.test(s))) continue;
+    exemplos.push(s.trim().slice(0, 100));
+  }
+  const palavras = (semHeadings(texto ?? "").match(/[\p{L}\d’'-]+/gu) ?? []).length;
+  const por1000 = palavras ? Math.round((exemplos.length / palavras) * 10000) / 10 : 0;
+  return { n: exemplos.length, por1000, exemplos: exemplos.slice(0, 6), acima: por1000 > LIMIAR_PERSONIFICACAO_1000 };
+}
+
+// --- D3: FRASE-SANFONA (a mesma percepção reformulada em cadeia). Três moldes
+//     operacionais: escada "de que… de que…", dupla-negação reformuladora
+//     ("não X — Y" ×2 ou "não X, mas Y" + outra reformulação) e aposto-sobre-
+//     aposto (≥2 travessões internos OU ≥3 vírgulas fora de enumeração).
+//     Guarda anti-enumeração: segmentos curtos (≤3 palavras) entre vírgulas
+//     sem cópula = lista legítima, não sanfona.
+export interface SanfonaSinal { n: number; exemplos: string[]; limiar: number; acima: boolean }
+export const LIMIAR_SANFONA = 1; // meta: ≤1/capítulo
+
+function _ehEnumeracao(s: string): boolean {
+  const meio = s.split(/[—–]/)[0];
+  const seg = meio.split(",").map((x) => x.trim()).filter(Boolean);
+  if (seg.length < 3) return false;
+  const curtos = seg.slice(1).filter((x) => palavrasFrase(x) <= 3 && !_RE_COP_GNOMICA.test(x));
+  return curtos.length >= seg.length - 2;
+}
+
+export function contarSanfona(texto: string): SanfonaSinal {
+  const exemplos: string[] = [];
+  for (const f of dividirFrases(semHeadings(texto ?? ""))) {
+    if (ehDialogo(f)) continue;
+    const s = f.replace(/\s+/g, " ");
+    const travessoes = (s.match(/[—–]/g) ?? []).length;
+    const virgulas = (s.match(/,/g) ?? []).length;
+    const escadaDeQue = (s.match(/\bde que\b/giu) ?? []).length >= 2;
+    const negacoes = (s.match(/(?<![\p{L}\d_])n[ãa]o\s+\p{L}+/giu) ?? []).length;
+    const negReformula = negacoes >= 2 && /(?<![\p{L}\d_])n[ãa]o\s+[^,;—–]{2,40}[,;—–]\s*(mas|e sim|s[óo]|é)\b/iu.test(s);
+    const apostoDenso = (travessoes >= 2 || virgulas >= 3) && !_ehEnumeracao(s) && palavrasFrase(s) >= 18;
+    if (escadaDeQue || negReformula || (apostoDenso && (negacoes >= 1 || _RE_COP_GNOMICA.test(s))))
+      exemplos.push(s.trim().slice(0, 110));
+  }
+  return { n: exemplos.length, exemplos: exemplos.slice(0, 5), limiar: LIMIAR_SANFONA, acima: exemplos.length > LIMIAR_SANFONA };
+}
+
+// --- D4: ADJETIVO AVALIATIVO em objeto físico ("facho honesto", "papel estúpido").
+//     Tique RARO (0,4-1,1/1000 na auditoria) e de alto risco de FP ⇒ SÓ SINAL,
+//     nunca cota dura. Lista curada dos dois lados.
+const _ADJ_AVALIATIVO =
+  "honest[oa]s?|decentes?|est[úu]pid[oa]s?|educad[oa]s?|generos[oa]s?|cru[ée]is|cruel|arrogantes?|t[íi]mid[oa]s?|pacientes?|impacientes?|entediad[oa]s?|traiçoeir[oa]s?|obedientes?|teimos[oa]s?|humildes?|orgulhos[oa]s?|covardes?|corajos[oa]s?|sincer[oa]s?|mentiros[oa]s?|leais?|ingênu[oa]s?|c[úu]mplices?";
+const _OBJETO_FISICO =
+  "luz|facho|porta|mesa|corredor|pr[ée]dio|parede|papel|m[áa]quina|rel[óo]gio|estrada|cadeira|janela|copo|telefone|carro|n[úu]mero|letra|n[óo]dulo|cicatriz|l[âa]mpada|muro|pedra|ch[ãa]o|cimento|a[çc]o|vidro|tela|pasta|arquivo|formul[áa]rio|caneta|l[âa]mina|caixa|cofre|mapa|foto|quadro|livro|bloco|gaveta|escada|rampa|vaga|cerca|port[ãa]o";
+const _RE_ADJ_OBJ_POS = new RegExp(`${_NAO_LETRA}(${_OBJETO_FISICO})\\s+(?:\\p{Ll}+\\s+)?(?:e\\s+)?(${_ADJ_AVALIATIVO})${_FIM_LETRA}`, "iu");
+const _RE_ADJ_OBJ_PRE = new RegExp(`${_NAO_LETRA}(${_ADJ_AVALIATIVO})\\s+(${_OBJETO_FISICO})${_FIM_LETRA}`, "iu");
+const _RE_ADJ_OBJ_COP = new RegExp(`${_NAO_LETRA}(${_OBJETO_FISICO})[^.!?]{0,20}\\s(era|é|s[ãa]o|eram|parecia|estava)\\s+(?:\\p{Ll}+\\s+)?(${_ADJ_AVALIATIVO})${_FIM_LETRA}`, "iu");
+
+export interface AdjetivoAvaliativoSinal { n: number; exemplos: string[] }
+export function contarAdjetivoAvaliativo(texto: string): AdjetivoAvaliativoSinal {
+  const exemplos: string[] = [];
+  for (const f of dividirFrases(semHeadings(texto ?? ""))) {
+    const s = f.replace(/\s+/g, " ");
+    if (_RE_ADJ_OBJ_POS.test(s) || _RE_ADJ_OBJ_PRE.test(s) || _RE_ADJ_OBJ_COP.test(s))
+      exemplos.push(s.trim().slice(0, 100));
+  }
+  return { n: exemplos.length, exemplos: exemplos.slice(0, 5) };
+}
+
+// --- D5: PISO de frases declarativas simples. Mesma heurística da auditoria
+//     (comparabilidade da régua): ≤15 palavras, ≤1 vírgula, sem travessão
+//     interno/';', não-interrogativa/exclamativa, sem subordinativa inicial.
+const _RE_SUBORD_INICIAL = /^(quando|embora|enquanto|se|porque|como\s+se|apesar|ainda\s+que|mesmo\s+que)\b/iu;
+export interface DeclarativasSinal { pct: number; frases: number; abaixo: boolean }
+export const PISO_DECLARATIVAS_PCT = 50; // meta: ≥50%
+
+export function percentDeclarativasSimples(texto: string): DeclarativasSinal {
+  const fr = dividirFrases(semHeadings(texto ?? ""));
+  if (!fr.length) return { pct: 0, frases: 0, abaixo: false };
+  let simples = 0;
+  for (const f of fr) {
+    const s = semAbertura(f);
+    const interno = s.slice(1); // travessão de fala inicial já removido
+    if (/[?!]["'”’»)\]]*$/.test(f)) continue;
+    if (/[—–;]/.test(interno)) continue;
+    if ((s.match(/,/g) ?? []).length > 1) continue;
+    if (palavrasFrase(f) > 15) continue;
+    if (_RE_SUBORD_INICIAL.test(s)) continue;
+    simples++;
+  }
+  const pct = Math.round((simples / fr.length) * 1000) / 10;
+  return { pct, frases: fr.length, abaixo: fr.length >= 20 && pct < PISO_DECLARATIVAS_PCT };
+}
+
+// --- D6: DIÁLOGO / interioridade contínua. % de palavras em parágrafos de fala
+//     (mesma convenção da auditoria) + maior sequência de frases de narração
+//     "estática" (RE_ESTATICO) sem evento. O piso de diálogo só faz sentido com
+//     ≥2 personagens em cena — quem sabe disso é a spec; o chamador passa.
+export interface DialogoSinal { dialogoPct: number; maxInterioridadeSeguida: number; abaixo: boolean }
+export const PISO_DIALOGO_PCT = 15;      // meta (≥2 personagens em cena)
+export const TETO_INTERIORIDADE_RUN = 3; // meta (personagem sozinho)
+
+export function sinalDialogoInterioridade(texto: string, doisOuMaisEmCena = true): DialogoSinal {
+  const t = semHeadings(texto ?? "");
+  let palavrasFala = 0, palavrasTotal = 0;
+  for (const par of t.split(/\n{2,}/)) {
+    const n = (par.match(/[\p{L}\d’'-]+/gu) ?? []).length;
+    palavrasTotal += n;
+    if (/^[\s>]*[—–]/.test(par)) palavrasFala += n;
+  }
+  const dialogoPct = palavrasTotal ? Math.round((palavrasFala / palavrasTotal) * 1000) / 10 : 0;
+  const { fr, narr } = frasesRotuladas(t);
+  let run = 0, maxRun = 0;
+  for (let i = 0; i < fr.length; i++) {
+    if (narr[i] && RE_ESTATICO.test(fr[i])) { run++; maxRun = Math.max(maxRun, run); }
+    else run = 0;
+  }
+  const abaixo = doisOuMaisEmCena
+    ? dialogoPct < PISO_DIALOGO_PCT && palavrasTotal > 600
+    : maxRun > TETO_INTERIORIDADE_RUN;
+  return { dialogoPct, maxInterioridadeSeguida: maxRun, abaixo };
+}
+
+// --- D7: METÁFORA ELABORADA (teto ≈1/300 palavras; cadeia = 2 a <300 palavras).
+//     Absorve os gatilhos explícitos; o símile-andaime ("como se") mantém seu
+//     teto próprio nos MOLDES — aqui medimos DENSIDADE e CADEIA.
+const _RE_METAFORA = /(?<![\p{L}\d_])(como\s+se|como\s+quem|feito\s+\p{L}|igual\s+a\s|como\s+uma?\s)/giu;
+export interface MetaforaSinal { n: number; por300: number; cadeias: number; exemplos: string[]; acima: boolean }
+export function contarMetaforaElaborada(texto: string): MetaforaSinal {
+  const t = semHeadings(texto ?? "");
+  const posicoes: number[] = [];
+  const exemplos: string[] = [];
+  let m: RegExpExecArray | null;
+  _RE_METAFORA.lastIndex = 0;
+  while ((m = _RE_METAFORA.exec(t)) !== null) {
+    posicoes.push((t.slice(0, m.index).match(/[\p{L}\d’'-]+/gu) ?? []).length);
+    exemplos.push(t.slice(m.index, m.index + 80).replace(/\s+/g, " ").trim());
+  }
+  const palavras = (t.match(/[\p{L}\d’'-]+/gu) ?? []).length;
+  let cadeias = 0;
+  for (let i = 1; i < posicoes.length; i++) if (posicoes[i] - posicoes[i - 1] < 300) cadeias++;
+  const por300 = palavras ? Math.round((posicoes.length / palavras) * 300 * 100) / 100 : 0;
+  return { n: posicoes.length, por300, cadeias, exemplos: exemplos.slice(0, 5), acima: por300 > 1 || cadeias > 0 };
+}
+
+// --- AGREGADOR: sinais legíveis para o prompt do revisor (mesmo formato dos
+//     sinais consultivos existentes) + gate opcional POR SKILL.
+export interface OrcamentoTransparencia {
+  gnomico: number;            // teto por capítulo
+  personificacaoPor1000: number;
+  sanfona: number;
+  declarativasMinPct: number;
+  bloqueia: boolean;          // false = tudo sinal (default de toda skill)
+  // AUDITORIA-HOOVER (CR4): eixos PROTEGIDOS nas skills intimistas. Ausentes/true =
+  // comportamento dan-brown (emite os sinais). false = NÃO emite o sinal (a
+  // interioridade/metáfora emocional é feature, não defeito). Só a CADEIA de metáfora
+  // continua a sinalizar quando `metaforaDensidade:false`.
+  pisoDeclarativas?: boolean; // default true (emite "declarativas <piso%")
+  pisoDialogo?: boolean;      // default true (emite "diálogo <15%" / "interioridade contínua")
+  metaforaDensidade?: boolean;// default true (emite por densidade>1 OU cadeia); false = só cadeia
+}
+export const SINAL_TRANSPARENCIA: OrcamentoTransparencia = {
+  gnomico: LIMIAR_GNOMICO, personificacaoPor1000: LIMIAR_PERSONIFICACAO_1000,
+  sanfona: LIMIAR_SANFONA, declarativasMinPct: PISO_DECLARATIVAS_PCT, bloqueia: false,
+};
+// Promoção POR SKILL (fatia 5 do plano): só entra aqui skill validada no
+// benchmark com zero FP nos capítulos-controle. Vazio = nenhum bloqueio.
+// hoover-mcfadden (AUDITORIA-HOOVER.md): SINAL (bloqueia:false) dos 4 alvos de
+// ornamento (gnômico/personificação/sanfona/adjetivo), MAS com os eixos protegidos
+// DESLIGADOS — sem piso de declarativa, sem piso de diálogo, metáfora só sinaliza em
+// CADEIA. A voz emocional em 1ª pessoa (interioridade/metáfora sentimental) é feature.
+export const ORC_TRANSPARENCIA_POR_SKILL: Record<string, OrcamentoTransparencia> = {
+  "hoover-mcfadden": {
+    gnomico: LIMIAR_GNOMICO, personificacaoPor1000: LIMIAR_PERSONIFICACAO_1000,
+    sanfona: LIMIAR_SANFONA, declarativasMinPct: PISO_DECLARATIVAS_PCT, bloqueia: false,
+    pisoDeclarativas: false, pisoDialogo: false, metaforaDensidade: false,
+  },
+};
+
+export function orcTransparenciaParaSkill(skill?: string | null): OrcamentoTransparencia {
+  return (skill && ORC_TRANSPARENCIA_POR_SKILL[skill]) || SINAL_TRANSPARENCIA;
+}
+
+export interface TransparenciaResultado {
+  gnomico: GnomicoSinal;
+  personificacao: PersonificacaoSinal;
+  sanfona: SanfonaSinal;
+  adjetivoAvaliativo: AdjetivoAvaliativoSinal;
+  declarativas: DeclarativasSinal;
+  dialogo: DialogoSinal;
+  metafora: MetaforaSinal;
+  linhas: string[];   // sinais formatados p/ prompt (vazio se nada digno de nota)
+  ofensores: string[]; // SÓ quando orc.bloqueia — o que estourou a cota dura
+}
+
+export function diagnosticarTransparencia(
+  texto: string,
+  skill?: string | null,
+  doisOuMaisEmCena = true,
+): TransparenciaResultado {
+  const orc = orcTransparenciaParaSkill(skill);
+  const gnomico = contarGnomico(texto);
+  const personificacao = contarPersonificacao(texto);
+  const sanfona = contarSanfona(texto);
+  const adjetivoAvaliativo = contarAdjetivoAvaliativo(texto);
+  const declarativas = percentDeclarativasSimples(texto);
+  const dialogo = sinalDialogoInterioridade(texto, doisOuMaisEmCena);
+  const metafora = contarMetaforaElaborada(texto);
+
+  const linhas: string[] = [];
+  if (gnomico.n > orc.gnomico)
+    linhas.push(`fecho gnomico/maxima ${gnomico.n}x (alvo <= ${orc.gnomico}; ex.: ${gnomico.exemplos[0] ?? ""})`);
+  if (personificacao.por1000 > orc.personificacaoPor1000)
+    linhas.push(`personificacao de abstracao ${personificacao.n}x (${personificacao.por1000}/1000; ex.: ${personificacao.exemplos[0] ?? ""})`);
+  if (sanfona.n > orc.sanfona)
+    linhas.push(`frase-sanfona ${sanfona.n}x (alvo <= ${orc.sanfona}; ex.: ${sanfona.exemplos[0] ?? ""})`);
+  if (adjetivoAvaliativo.n > 1)
+    linhas.push(`adjetivo avaliativo em objeto ${adjetivoAvaliativo.n}x (ex.: ${adjetivoAvaliativo.exemplos[0] ?? ""})`);
+  if (orc.pisoDeclarativas !== false && declarativas.abaixo)
+    linhas.push(`frases declarativas simples ${declarativas.pct}% (piso ${orc.declarativasMinPct}%)`);
+  if (orc.pisoDialogo !== false && dialogo.abaixo)
+    linhas.push(doisOuMaisEmCena
+      ? `dialogo ${dialogo.dialogoPct}% das palavras (piso ${PISO_DIALOGO_PCT}% com 2+ em cena)`
+      : `interioridade continua ${dialogo.maxInterioridadeSeguida} frases seguidas (teto ${TETO_INTERIORIDADE_RUN})`);
+  // Metáfora: default sinaliza por densidade OU cadeia; nas skills intimistas
+  // (metaforaDensidade:false) só a CADEIA é defeito — a metáfora sentimental isolada fica.
+  const metaforaSinaliza = orc.metaforaDensidade === false ? metafora.cadeias > 0 : metafora.acima;
+  if (metaforaSinaliza)
+    linhas.push(`metafora elaborada ${metafora.n}x (${metafora.por300}/300 palavras; cadeias ${metafora.cadeias})`);
+
+  const ofensores = orc.bloqueia
+    ? linhas.filter((l) =>
+        /^(fecho gnomico|personificacao|frase-sanfona|frases declarativas)/.test(l))
+    : [];
+  return { gnomico, personificacao, sanfona, adjetivoAvaliativo, declarativas, dialogo, metafora, linhas, ofensores };
+}

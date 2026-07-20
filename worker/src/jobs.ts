@@ -27,6 +27,7 @@ import {
 import { normalizarModelosAgentes } from "./modelos-agentes.js";
 import { normalizarVozRegra4 } from "./voz-regra4.js";
 import { normalizarCraftSkill } from "./craft-skill.js";
+import { desornamentarModelosPerfil } from "./modelos-perfil.js";
 import {
   avaliarFundacaoNoDisco,
   diffFundacao,
@@ -475,9 +476,15 @@ async function aplicarNormalizadoresFundacao(dir: string, skill: string | null |
     if (c.mudou) console.log(`[craft] resumo da skill '${c.skill}' injetado no perfil-de-voz.md`);
     else if (!c.reconhecida && skill) console.warn(`[craft] skill '${skill}' sem bloco de craft — perfil segue sem resumo`);
   }
+  // Modelos §2 do perfil com tique de ornamento ⇒ MODELO-FLAG (CR1 da auditoria
+  // de estilo; proveniência incerta nunca é reescrita — decisão do autor).
+  {
+    const f = await desornamentarModelosPerfil(dir);
+    if (f.mudou) console.warn(`[modelos-perfil] ${f.arquivo}: tiques nos parágrafos-modelo (${f.flags.join(", ")}) — flag injetado`);
+  }
   // Escritor lê a craft direto + revisor reprova "competente e chato".
   {
-    const a = await normalizarCraftNosAgentes(path.join(dir, ".claude", "agents"));
+    const a = await normalizarCraftNosAgentes(path.join(dir, ".claude", "agents"), skill);
     if (a.escritor) console.log("[craft] livro-escritor: leitura de craft por capítulo injetada");
     if (a.revisor) console.log("[craft] livro-revisor: veredito de propulsão injetado");
   }

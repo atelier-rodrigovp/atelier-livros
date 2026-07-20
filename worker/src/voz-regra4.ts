@@ -59,17 +59,18 @@ A voz depende de **ritmo variado**. O defeito a matar é a cadência repetitiva
 frases muito curtas em sequência, que viram caricatura. Não se proíbe o fragmento
 (ele é bisturi); **dosa-se** e **alterna-se o comprimento da frase de propósito**.
 
-**Alvo positivo:** ação pode ser curta e seca; **revelação respira numa frase mais
-longa e encadeada**. Funda frases curtas coladas quando a cena pede continuidade;
-corte seco só no soco. Reação física ancorada neste corpo, nesta cena — nunca o
-clichê de prateleira.
+**Alvo positivo:** ação pode ser curta e seca; a revelação pode alongar **UMA** frase —
+**sem empilhar apostos nem reformular a mesma percepção** (a frase-sanfona é defeito
+tanto quanto o staccato). Resolva o staccato variando com frases médias declarativas
+(SVO), não fundindo tudo num período longo; corte seco só no soco. Reação física
+ancorada neste corpo, nesta cena — nunca o clichê de prateleira.
 
 **Cota por capítulo (o Revisor cobra por NÚMERO — bate com o detector determinístico):**
 - **Fragmento de ênfase (frase de 1–3 palavras):** no máximo **${faixa(orc.fragEnfase)}**, e ${clausulaColados(orc)}.
 - **Pensamento em itálico:** no máximo **${faixa(orc.italico)}**, cada um para um golpe real de reconhecimento.
 - **Pergunta retórica suspensa:** no máximo **${faixa(orc.retorica)}**.
 - **Ritmo variado conscientemente:** alterne o comprimento da frase; a revelação pode
-  respirar numa frase longa e encadeada; **nunca o mesmo molde dois capítulos seguidos**.
+  alongar UMA frase — **nunca empilhe apostos**; **nunca o mesmo molde dois capítulos seguidos**.
 - **Sem clipe de negação nem anáfora:** não repita "Não X." curto como remate
   ("Não precisava. Não precisavam."); não abra frases consecutivas com a mesma palavra
   ("Davam datas. Davam horas."); nada de staccato denso nem epigrama antitético em série.
@@ -80,8 +81,9 @@ clichê de prateleira.
   "parecia que", "de certa forma/maneira"**.
 
 Estourar a cota é reprovação estética: o capítulo é marcado para reescrita de ritmo
-(funde/encadeia as frases), preservando sentido e voz. Um detector determinístico
-mede isto a cada capítulo — não é questão de impressão.
+(varie com frases médias declarativas; **não** converta staccato em período empilhado),
+preservando sentido e voz. Um detector determinístico mede isto a cada capítulo — não
+é questão de impressão.
 ${MARCADOR_FIM}`;
 }
 // Compat: texto default (cadência longa) — mesmo conteúdo de sempre.
@@ -95,19 +97,44 @@ export function politicaCadenciaEstrutura(orc: OrcamentoCadencia = ORC_CADENCIA)
     `com ≤${faixa(orc.italico)} pensamentos em itálico, ≤${faixa(orc.retorica)} perguntas retóricas, ≤${faixa(orc.fragEnfase)} fragmentos de ênfase ` +
     `${orc.fragColados <= 0 ? "**e nunca dois colados**" : `**e no máximo ${orc.fragColados} pares colados**`}; sem staccato denso, anáfora colada ou clipe de negação ` +
     `repetido; "coisa" ≤1/cap (troque pelo referente). Instrução = **variar o ritmo** ` +
-    `(fundir frases curtas, encadear na revelação), não só cortar. Ver \`perfil-de-voz.md\`.\n` +
+    `(frases médias declarativas entre as curtas; alongar no máximo UMA frase na revelação, ` +
+    `sem empilhar apostos), não só cortar. Ver \`perfil-de-voz.md\`.\n` +
     MARCADOR_FIM
   );
 }
 // Compat: texto default.
 export const POLITICA_CADENCIA_ESTRUTURA = politicaCadenciaEstrutura();
 
-// perfil-de-voz.md: anexa a seção da cota ao fim, se ainda não existir.
+// Frases do bloco ANTIGO que empurravam a frase-sanfona (auditoria de estilo,
+// CR4): upgrade in-place quando a cota já foi injetada com o texto velho.
+const _UPGRADES_COTA: [string, string][] = [
+  [
+    "**revelação respira numa frase mais\nlonga e encadeada**. Funda frases curtas coladas quando a cena pede continuidade;\ncorte seco só no soco.",
+    "a revelação pode alongar **UMA** frase —\n**sem empilhar apostos nem reformular a mesma percepção** (a frase-sanfona é defeito\ntanto quanto o staccato). Resolva o staccato variando com frases médias declarativas\n(SVO), não fundindo tudo num período longo; corte seco só no soco.",
+  ],
+  [
+    "a revelação pode\n  respirar numa frase longa e encadeada;",
+    "a revelação pode\n  alongar UMA frase — **nunca empilhe apostos**;",
+  ],
+  [
+    "reescrita de ritmo\n(funde/encadeia as frases), preservando",
+    "reescrita de ritmo\n(varie com frases médias declarativas; **não** converta staccato em período empilhado),\npreservando",
+  ],
+];
+
+// perfil-de-voz.md: anexa a seção da cota ao fim, se ainda não existir; cota
+// antiga com o texto pró-sanfona ⇒ upgrade in-place das frases.
 export function garantirRegra4NoPerfil(
   conteudo: string,
   orc: OrcamentoCadencia = ORC_CADENCIA
 ): { texto: string; mudou: boolean } {
-  if (jaTemCota(conteudo)) return { texto: conteudo, mudou: false };
+  if (jaTemCota(conteudo)) {
+    let texto = conteudo, mudou = false;
+    for (const [antiga, nova] of _UPGRADES_COTA) {
+      if (texto.includes(antiga)) { texto = texto.replace(antiga, nova); mudou = true; }
+    }
+    return { texto, mudou };
+  }
   return { texto: (conteudo ?? "").replace(/\s*$/, "") + "\n\n" + secaoRegra4Perfil(orc) + "\n", mudou: true };
 }
 
@@ -141,7 +168,16 @@ export const LINHA_GUARDA =
   `${MARCADOR_GUARDA}\n` +
   `> **Guarda:** os parágrafos-modelo abaixo são ALVO de TÉCNICA — emule o ritmo, a ` +
   `lente e o léxico; **não copie** o conteúdo e **não reproduza muleta** ("coisa", ` +
-  `"algo", "de repente"…) nem staccato colado neles. Um modelo limpo faz parte da regra.`;
+  `"algo", "de repente"…) nem staccato colado neles — nem **aforismo/máxima, ` +
+  `personificação de abstração, símile-andaime ou eco de negação** que porventura ` +
+  `apareçam (são defeito, não assinatura). Um modelo limpo faz parte da regra.`;
+
+// Upgrade in-place da guarda antiga (sem a cláusula de ornamento) — auditoria de estilo.
+const _GUARDA_ANTIGA_FECHO = ` nem staccato colado neles. Um modelo limpo faz parte da regra.`;
+const _GUARDA_NOVA_FECHO =
+  ` nem staccato colado neles — nem **aforismo/máxima, personificação de abstração, ` +
+  `símile-andaime ou eco de negação** que porventura apareçam (são defeito, não ` +
+  `assinatura). Um modelo limpo faz parte da regra.`;
 
 // Região da §2 PARÁGRAFOS-MODELO (do cabeçalho até a próxima '## ' ou o fim).
 function regiaoModelos(conteudo: string): { idxApos: number; corpo: string } | null {
@@ -155,9 +191,18 @@ function regiaoModelos(conteudo: string): { idxApos: number; corpo: string } | n
 }
 
 // Injeta a linha de guarda logo após o cabeçalho da §2, se ainda não houver.
+// Guarda ANTIGA (sem a cláusula de ornamento) presente ⇒ upgrade in-place.
 export function garantirGuardaModelos(conteudo: string): { texto: string; mudou: boolean } {
   const t = conteudo ?? "";
-  if (t.includes(MARCADOR_GUARDA) || /n[ãa]o\s+reproduz\w*\s+muleta/i.test(t)) return { texto: t, mudou: false };
+  if (t.includes(MARCADOR_GUARDA) || /n[ãa]o\s+reproduz\w*\s+muleta/i.test(t)) {
+    // Upgrade in-place: só quando o FECHO ANTIGO exato ainda está presente (some
+    // após a troca ⇒ idempotente). Não usar sentinela genérico — o bloco de craft
+    // do mesmo perfil também contém "personificação de abstração".
+    if (t.includes(_GUARDA_ANTIGA_FECHO)) {
+      return { texto: t.replace(_GUARDA_ANTIGA_FECHO, _GUARDA_NOVA_FECHO), mudou: true };
+    }
+    return { texto: t, mudou: false };
+  }
   const reg = regiaoModelos(t);
   if (!reg) return { texto: t, mudou: false }; // sem §2: não inventa seção
   return { texto: t.slice(0, reg.idxApos) + LINHA_GUARDA + "\n" + t.slice(reg.idxApos), mudou: true };

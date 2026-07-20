@@ -131,7 +131,82 @@ fecham igual (ex.: três perguntas retóricas seguidas, três socos emocionais s
 tipo de gancho DIFERENTE, sem enfraquecer a tensão. Não confunda variar o TIPO com enfraquecer
 o gancho — todo capítulo ainda fecha em gancho honesto.`;
 
-export const BLOCO_PROPULSAO = `
+// TRANSPARÊNCIA (AUDITORIA-ESTILO-DANBROWN.md, CR3/CR4): o veredito tinha eixo
+// único (propulsão) — "mais vivo" sem contrapeso vira mais carga retórica. Este
+// adendo cria o SEGUNDO eixo com o mesmo peso. As cotas são as aprovadas pelo
+// autor (gnômico ≤2, personificação ≤2, sanfona ≤1). Sinais determinísticos
+// chegam pelo prompt (maneirismo.ts::diagnosticarTransparencia, modo SINAL).
+export const ADENDO_TRANSPARENCIA = `### TRANSPARÊNCIA — segundo eixo do veredito (mesmo peso que "está vivo?")
+Um capítulo pode estar vivo e mesmo assim OPACO: a frase se admira em vez de mostrar o
+evento. Julgue TAMBÉM:
+- **Fecho gnômico/máxima** (frases que resolvem em aforismo geral: "X é uma forma de Y",
+  "Homens que X já Y"): **≤2 por capítulo**. Acima disso REPROVE e converta os demais em
+  imagem concreta, ação ou consequência — vale também para fala de personagem que só
+  fala em epigrama.
+- **Personificação de abstração/corpo-agente** ("a razão decidiu", "a mão soube antes da
+  cabeça", "a cidade indiferente"): **≤2 por capítulo**, nunca duas na mesma página. O
+  padrão é agente humano + verbo concreto.
+- **Frase-sanfona** (a mesma percepção reformulada 2+ vezes em apostos ou "não X — Y"
+  encadeados): diga UMA vez, a melhor. **≤1 por capítulo.**
+- **Narrador invisível:** o narrador não opina nem decora — adjetivo moral/estético em
+  objeto físico ("facho honesto", "papel estúpido") é edição obrigatória.
+- **Piso de transparência:** a maioria das frases é declarativa simples (SVO, sem
+  subordinação dupla); interioridade ≤1-2 linhas por beat, colada a estímulo externo;
+  metáfora elaborada ≈≤1 por página, nunca em cadeia.
+Reprovação por OPACIDADE tem o MESMO peso que reprovação por capítulo morto. "Vivo" se
+prova por evento e corte — não por carga retórica. O prompt pode trazer contagens-sinal
+determinísticas (SINAIS DE TRANSPARENCIA); trate como pista forte e confirme na leitura.`;
+
+// TRANSPARÊNCIA — variante INTIMISTA (AUDITORIA-HOOVER.md, CR4). As skills de voz
+// emocional em 1ª pessoa (hoover-mcfadden) sofrem com os MESMOS 4 tiques de IA
+// (aforismo, personificação de abstração, frase-sanfona, adjetivo moral em objeto) —
+// esses ficam. MAS o "piso de transparência" do dan-brown (maioria declarativa,
+// interioridade ≤1-2 linhas, metáfora ≤1/página) MATA o gênero: interioridade contínua
+// É a voz, 1ª pessoa emocional é feature, metáfora sentimental isolada é feature. Aqui o
+// piso vira PROTEÇÃO explícita; só a CADEIA de metáfora é defeito. Mesmo cabeçalho do bloco
+// default (o revisor não precisa saber que existem duas variantes), sentinela própria p/
+// idempotência/troca. NÃO regride o dan-brown (que fica fora do mapa de skills intimistas).
+const _SENTINELA_INTIMISTA = "<!-- transp-intimista -->";
+export const ADENDO_TRANSPARENCIA_INTIMISTA = `### TRANSPARÊNCIA — segundo eixo do veredito (mesmo peso que "está vivo?")
+${_SENTINELA_INTIMISTA}
+Esta é uma voz INTIMISTA em 1ª pessoa (emoção crua, narradora não-confiável). Um capítulo
+pode estar vivo e mesmo assim OPACO — mas OPACIDADE aqui é **cara de IA**, não interioridade.
+Julgue TAMBÉM, cortando só o ornamento de IA:
+- **Fecho gnômico/máxima** (frases que resolvem em aforismo geral: "a beleza é sempre a
+  superfície de algo enterrado", "Um X que Y é Z"): **≤2 por capítulo**. Acima disso REPROVE
+  e converta os demais em imagem concreta, ação ou consequência — inclusive fala/pensamento
+  da narradora que só fala em epigrama.
+- **Personificação de ABSTRAÇÃO** ("a razão decidiu", "a culpa me obrigou", "a memória sabia
+  antes"): abstração + verbo de agência humana é edição. **Não confunda** com (a) reação
+  física sentida em 1ª pessoa ("meu peito apertou") nem (b) uma imagem afetiva ISOLADA do fio
+  da narradora — essas são a VOZ e ficam. O tique é a abstração-agente empilhada.
+- **Frase-sanfona** (a MESMA percepção reformulada 2+ vezes em apostos ou "não X — Y"
+  encadeados): diga UMA vez, a melhor. **≤1 por capítulo.** NÃO confunda com enumeração
+  descritiva concreta (cada item novo) nem com interioridade que AVANÇA (cada frase acrescenta).
+- **Narrador honesto:** adjetivo moral/estético gratuito em objeto físico ("facho honesto",
+  "papel estúpido") é edição — mas o julgamento afetivo da narradora sobre pessoas/relações é a voz.
+- **PROTEGIDO — NÃO penalize, NÃO imponha piso/teto:** interioridade contínua (é a voz — pode
+  ocupar o capítulo inteiro), 1ª pessoa presente emocional, metáfora sentimental ISOLADA (teto
+  generoso — só a CADEIA de 2+ metáforas em poucas linhas é defeito), ritmo lírico. **NÃO existe
+  piso de frase declarativa nem piso de diálogo aqui** — densidade de sentimento sem evento você
+  já cobra pelo adendo de interioridade-sem-evento; não a cobre de novo como "pouca declarativa".
+Reprovação por ORNAMENTO DE IA tem o MESMO peso que reprovação por capítulo morto — mas a régua
+é o ornamento (os 4 acima), NUNCA a interioridade ou a metáfora emocional. O prompt pode trazer
+contagens-sinal (SINAIS DE TRANSPARENCIA, já filtradas para esta voz); trate como pista e confirme.`;
+
+// Skills de voz intimista/emocional em 1ª pessoa: recebem a variante que protege
+// interioridade/metáfora. Data-driven (uma linha por skill; default = bloco dan-brown).
+export const SKILLS_INTIMISTAS: Record<string, true> = { "hoover-mcfadden": true };
+
+/** O adendo de transparência correto para a skill (intimista protege a voz; default = dan-brown). */
+export function adendoTransparenciaParaSkill(skill?: string | null): string {
+  return skill && SKILLS_INTIMISTAS[skill] ? ADENDO_TRANSPARENCIA_INTIMISTA : ADENDO_TRANSPARENCIA;
+}
+
+// O bloco é montado por skill: o adendo de transparência é o único que varia
+// (intimista protege interioridade/metáfora; default = dan-brown). Todo o resto é comum.
+export function blocoPropulsao(skill?: string | null): string {
+  return `
 ${MARCADOR_PROPULSAO}
 
 ## VEREDITO DE PROPULSÃO — "ISTO ESTÁ VIVO?" (reprova, não só checklist de defeito)
@@ -150,6 +225,8 @@ corte no pico, encadeie a caça às pistas) — não só cortam tique. Preserve 
 
 ${ADENDO_PARIDADE}
 
+${adendoTransparenciaParaSkill(skill)}
+
 ${ADENDO_MOTIF}
 
 ${ADENDO_REDUNDANCIA_CONCEITUAL}
@@ -161,6 +238,9 @@ ${ADENDO_INTERIORIDADE}
 ${ADENDO_VARIEDADE_GANCHO}
 
 <!-- /PROPULSAO -->`;
+}
+// Compat: bloco default (dan-brown / skills não-intimistas).
+export const BLOCO_PROPULSAO = blocoPropulsao();
 
 // Best-effort: neutraliza a linha blanket "não releia a fundação / o digest basta" (no que
 // tange à VOZ). O bloco anexado é a garantia; isto remove a contradição mais comum.
@@ -182,8 +262,9 @@ export function garantirCraftLeituraEscritor(conteudo: string): { texto: string;
   return { texto: base.replace(/\s*$/, "") + "\n\n" + BLOCO_CRAFT_LEITURA + "\n", mudou: true };
 }
 
-export function garantirPropulsaoRevisor(conteudo: string): { texto: string; mudou: boolean } {
+export function garantirPropulsaoRevisor(conteudo: string, skill?: string | null): { texto: string; mudou: boolean } {
   const t = conteudo ?? "";
+  const intimista = !!(skill && SKILLS_INTIMISTAS[skill]);
   if (t.includes(MARCADOR_PROPULSAO)) {
     let texto = t, mudou = false;
     // upgrade SPEC-07: bloco v1 (sem o adendo de paridade) ganha o adendo in-place.
@@ -191,7 +272,23 @@ export function garantirPropulsaoRevisor(conteudo: string): { texto: string; mud
       texto = texto.replace("<!-- /PROPULSAO -->", `${ADENDO_PARIDADE}\n\n<!-- /PROPULSAO -->`);
       mudou = true;
     }
-    // upgrade FASE 8: bloco sem o adendo de motif/eco-redundante ganha in-place.
+    // upgrade FASE 8: bloco sem o adendo de transparência ganha in-place (variante da skill).
+    if (!texto.includes("TRANSPARÊNCIA — segundo eixo do veredito")) {
+      texto = texto.replace("<!-- /PROPULSAO -->", `${adendoTransparenciaParaSkill(skill)}\n\n<!-- /PROPULSAO -->`);
+      mudou = true;
+    } else {
+      // AUDITORIA-HOOVER (CR4): TROCA idempotente da variante de transparência quando a
+      // skill não bate com o bloco já injetado. Match por texto exato do adendo constante
+      // (a string antiga some após a troca ⇒ idempotente).
+      const temIntimista = texto.includes(_SENTINELA_INTIMISTA);
+      if (intimista && !temIntimista && texto.includes(ADENDO_TRANSPARENCIA)) {
+        texto = texto.replace(ADENDO_TRANSPARENCIA, ADENDO_TRANSPARENCIA_INTIMISTA);
+        mudou = true;
+      } else if (!intimista && temIntimista && texto.includes(ADENDO_TRANSPARENCIA_INTIMISTA)) {
+        texto = texto.replace(ADENDO_TRANSPARENCIA_INTIMISTA, ADENDO_TRANSPARENCIA);
+        mudou = true;
+      }
+    }
     if (!texto.includes("BEAT CENTRAL — eco redundante")) {
       texto = texto.replace("<!-- /PROPULSAO -->", `${ADENDO_MOTIF}\n\n<!-- /PROPULSAO -->`);
       mudou = true;
@@ -218,12 +315,12 @@ export function garantirPropulsaoRevisor(conteudo: string): { texto: string; mud
     }
     return { texto, mudou };
   }
-  return { texto: t.replace(/\s*$/, "") + "\n\n" + BLOCO_PROPULSAO + "\n", mudou: true };
+  return { texto: t.replace(/\s*$/, "") + "\n\n" + blocoPropulsao(skill) + "\n", mudou: true };
 }
 
 export interface CraftAgentesAjuste { escritor: boolean; revisor: boolean }
 
-export async function normalizarCraftNosAgentes(agentsDir: string): Promise<CraftAgentesAjuste> {
+export async function normalizarCraftNosAgentes(agentsDir: string, skill?: string | null): Promise<CraftAgentesAjuste> {
   let arquivos: string[];
   try {
     arquivos = await readdir(agentsDir);
@@ -239,6 +336,6 @@ export async function normalizarCraftNosAgentes(agentsDir: string): Promise<Craf
     return mudou;
   };
   out.escritor = await passo("livro-escritor.md", garantirCraftLeituraEscritor);
-  out.revisor = await passo("livro-revisor.md", garantirPropulsaoRevisor);
+  out.revisor = await passo("livro-revisor.md", (c) => garantirPropulsaoRevisor(c, skill));
   return out;
 }

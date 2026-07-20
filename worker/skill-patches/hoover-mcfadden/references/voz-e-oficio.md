@@ -167,12 +167,33 @@ Os trechos intercalados que parecem memórias do Tomás têm voz própria:
 
 - Abrir capítulo com clima/tempo ("A chuva batia na janela...") sem função.
 - Advérbios em -mente empilhados.
+- **Aforismo / máxima / fecho gnômico** — resolver uma frase numa sentença geral
+  sobre a vida ("a beleza é sempre a superfície de algo enterrado", "quem espera
+  já decidiu ter medo", "Um X que Y é sempre Z"). Máximo ~2 por capítulo, e mesmo
+  esses de preferência na fala de um personagem, não na narração. A narradora
+  OBSERVA o concreto (o copo lavado, a veneziana trancada); ela não filosofa em
+  epigrama. Troque a máxima pela imagem concreta, a ação ou a consequência.
+- **Personificação de abstração** — dar agência humana a um conceito ("a razão
+  decidiu por mim", "a culpa me obrigou a ficar", "a memória sabia antes de mim").
+  Prefira o agente humano + verbo concreto, ou a reação física em 1ª pessoa ("meu
+  peito apertou"). Isto é diferente de uma imagem afetiva isolada da voz — o tique
+  é a abstração-agente repetida.
+- **Frase-sanfona** — reformular a MESMA percepção duas ou três vezes na mesma
+  frase, em apostos ou "não era X, era Y, ou talvez Z" encadeados. Diga uma vez, a
+  melhor. (Não confundir com enumeração concreta, onde cada item é novo, nem com
+  interioridade que avança — essas ficam.)
 - Metáfora médica óbvia demais ("meu coração era um monitor em linha reta").
   Use com extrema parcimônia.
 - Resumir emoção em vez de encená-la ("eu estava devastada" → mostre o gesto).
 - Diálogo expositivo onde um personagem conta ao outro o que ambos já sabem.
 - Cliffhanger barato (a narradora esconde do leitor algo que ela claramente
   sabe naquele instante — isso é trapaça, não suspense).
+
+> **O que NÃO é defeito (não confundir com os tiques acima):** a interioridade
+> contínua em 1ª pessoa é a VOZ — pode ocupar o capítulo inteiro; a emoção crua e a
+> metáfora sentimental ISOLADA são feature, não ornamento; não há piso de frase
+> declarativa nem de diálogo. Os três tiques acima são "cara de IA"; a interioridade
+> e o calor de Hoover, não. Corte o aforismo, não o coração.
 
 ## Teste rápido de cadência (rode mentalmente antes de entregar)
 

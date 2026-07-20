@@ -4,9 +4,9 @@ description: >-
   Transforma uma ideia crua de livro num projeto executável: conduz uma entrevista em blocos (perguntas em botões com recomendação), valida a fundação num portão de qualidade e gera o projeto (Bíblia, Mapa de Personagens, Estrutura, estado, cinco subagentes). Use quando o autor quiser começar um livro novo, estruturar um enredo, desenvolver uma premissa, 'montar a fundação', 'criar a bíblia da obra' ou 'estruturar a trama'. Ao fim, grava um ESTADO_LIVRO.json semente (fase ESCRITA) e entrega um prompt agêntico pronto para colar no Claude Code, que escreve o livro inteiro com o motor v2 e revisa com book-bestseller-review. NÃO dispara o /goal. Camada anti-maçada: anti-repetição (Mapa de Conhecimento do Leitor) e densidade por entrelaçamento. Agnóstica de gênero. NÃO use para escrever capítulos nem revisar manuscrito pronto (book-bestseller-review).
 ---
 
-# Arquiteto de Enredo — da ideia à fundação escrevível (v6.3)
+# Arquiteto de Enredo — da ideia à fundação escrevível (v6.4)
 
-> **Versão monolítica v6.3.** Esta SKILL.md é autossuficiente: todas as políticas
+> **Versão monolítica v6.4.** Esta SKILL.md é autossuficiente: todas as políticas
 > estão embutidas aqui (seções "REFERÊNCIA EMBUTIDA" no fim). Se os moldes dos
 > cinco agentes não existirem na instalação, reconstrua-os a partir da anatomia
 > descrita aqui.
@@ -143,11 +143,17 @@ Quando os 8 blocos fecharem, antes de gerar:
        protagonista algo que não se recupera (risco que aterrissa, não melodrama).
        Sem custo por ato = **< 8**.
      - **e) Voz: assinatura positiva** — "você reconheceria de olhos vendados?".
-       Digital sintática/léxica/de-olhar específica e diferenciada por autor. Só
-       "não-genérica" (defesa negativa) é 6–7, **não** 8. SPEC completa em
-       **REFERÊNCIA EMBUTIDA C** (assinatura positiva + parágrafos-modelo +
-       diferenciação por autor); o gate de Voz pontua **distinção**, não só
-       ausência de genérico.
+       A nota ≥8 exige voz **reconhecível de olhos vendados pela LENTE** (o que a
+       POV nota primeiro na cena), **pelo LÉXICO** (3–4 famílias de palavras
+       próprias) e **pelo RITMO declarado** — **com prosa TRANSPARENTE**. Só
+       "não-genérica" (defesa negativa) é 6–7, **não** 8. **Densidade de ornamento
+       NÃO pontua:** aforismo, personificação de abstração, símile em cadeia e
+       reformulação encadeada são **DEFEITOS de assinatura, não assinatura**. Uma
+       voz nota 9 é inconfundível E invisível: o leitor reconhece a lente, não a
+       frase se exibindo. SPEC completa em **REFERÊNCIA EMBUTIDA C** (assinatura
+       positiva por lente/léxico/ritmo + parágrafos-modelo transparentes +
+       diferenciação por autor); o gate de Voz pontua **distinção transparente**,
+       não densidade de ornamento.
 
 3. **Diagnóstico de densidade:** `palavras-alvo ÷ fios ativos`. Se um fio sozinho
    carrega além de ~25–30k palavras, a fundação está magra — devolva ao Bloco 3/4
@@ -241,8 +247,9 @@ Quando os 8 blocos fecharem, antes de gerar:
    `review/`.
 4. **Perfil de voz** → `perfil-de-voz.md` — com **SEÇÃO DE ASSINATURA POSITIVA**
    (REFERÊNCIA EMBUTIDA C): não só anti-maneirismo (defesa negativa), mas a digital
-   própria do autor — hábitos sintáticos, léxico, modo de ver, 2–3 parágrafos-modelo
-   e diferenciação explícita das outras vozes da casa.
+   própria do autor — modo de ver (lente), léxico, cadência (hábitos sintáticos
+   dosados), 2–3 parágrafos-modelo **transparentes** (marcador `<!-- MODELOS-GERADOS
+   v1 -->`) e diferenciação explícita das outras vozes da casa.
 5. **Revisão única:** apresente o projeto + as políticas + a tabela de modelos;
    peça uma rodada de ajustes. **Confirme aqui:** `max_iteracoes_reescrita`
    (default 4), `gerar_epub` (sim/não), meta de nota (default 9.0) e idioma do
@@ -466,28 +473,44 @@ devagar".
 
 ---
 
-# REFERÊNCIA EMBUTIDA C — Perfil de Voz: Assinatura Positiva (v6.3)
+# REFERÊNCIA EMBUTIDA C — Perfil de Voz: Assinatura Positiva (v6.4)
 
 > A defesa de voz da v5–v6 é **negativa** (a auditoria caça "voz genérica"; o linter
 > corta maneirismo). Isso garante piso 6–7, **não** o 8–9. Voz de 9 é
-> **inconfundível** — e isso se **prescreve**, não se torce por "evite clichê". O
+> **inconfundível E invisível** (prosa transparente) — e isso se **prescreve**, não
+> se torce por "evite clichê". O
 > `perfil-de-voz.md` passa a declarar uma **assinatura positiva**: a digital que
 > faria o leitor reconhecer o autor de olhos vendados. Agnóstico de gênero.
 
 ## Estrutura obrigatória do `perfil-de-voz.md`
 Além das seções atuais (referências, cadência, anti-maneirismo), o perfil ganha:
 
+> **A digital principal vem de LENTE + LÉXICO + CADÊNCIA — não de pontuação nem de
+> ornamento.** Prosa-alvo TRANSPARENTE: declarativa, narrador invisível, metáfora
+> rara. Voz inconfundível **e** invisível: o leitor reconhece a lente, não a frase
+> se exibindo.
+
 ### 1. Assinatura positiva
-- **Hábitos sintáticos:** comprimento/ritmo de frase típicos; subordinação vs.
-  parataxe; pontuação-assinatura (travessão, dois-pontos revelador, frase-fragmento
-  como ênfase) — **com QUANDO usar**, não só que existem.
+- **Modo de VER (digital principal):** por qual lente o narrador apreende o mundo (o
+  que nota primeiro numa cena — o corpo? o poder? o tempo? a culpa?). É isto, mais
+  que a sintaxe, que torna a voz inconfundível. **Regra:** descreva a lente por
+  **COMPORTAMENTO OBSERVÁVEL** ("nota o que foi consertado antes de notar quem
+  consertou"), **NUNCA por máxima/aforismo** — "a beleza é sempre X" é **PROIBIDO** na
+  lente. Se a lente couber numa frase de efeito, **reescreva-a como hábito de
+  percepção**.
 - **Léxico controlado:** 3–6 famílias de palavras que o autor habita; registro
   (culto/coloquial/técnico) e o que ele **evita**.
-- **Um modo de VER:** por qual lente o narrador apreende o mundo (o que nota
-  primeiro numa cena — o corpo? o poder? o tempo? a culpa?). É isto, mais que a
-  sintaxe, que torna a voz inconfundível.
+- **Cadência:** comprimento/ritmo de frase típicos; subordinação vs. parataxe.
+- **Hábitos sintáticos (recursos DOSADOS, não o núcleo):** travessão, dois-pontos
+  revelador e frase-fragmento como ênfase **podem permanecer**, mas **com QUANDO
+  usar** e em dose — são recurso, não a assinatura. A digital principal vem de
+  lente + léxico + cadência, não da pontuação.
 
 ### 2. Parágrafos-modelo (2–3)
+No perfil gerado, a seção de modelos abre com o marcador de uma linha
+`<!-- MODELOS-GERADOS v1 -->` (permite ao worker distinguir modelo gerado pela
+fundação de modelo editado depois pelo autor).
+
 Dois a três parágrafos-**ALVO** que o `livro-escritor` imita como referência de
 TÉCNICA. Invioláveis:
 - **Emular técnica, NUNCA copiar** texto/personagens/mundo/enredo de obra
@@ -495,6 +518,36 @@ TÉCNICA. Invioláveis:
   *demonstram* a assinatura — jamais trechos de terceiros.
 - Cada parágrafo vem anotado com **"o que aqui é assinatura"** (1 linha): o escritor
   imita a técnica, descarta o conteúdo.
+
+**Contrato dos parágrafos-modelo (obrigatório).** Os 2–3 modelos DEVEM:
+- **(a)** passar no próprio `### ORÇAMENTO DE PÁGINA` do perfil (o modelo respeita a
+  cota que ele mesmo prescreve);
+- **(b)** conter **ZERO aforismo/máxima**, **ZERO personificação de abstração**,
+  **ZERO símile-andaime** ("como se…", "como quem…"), **ZERO eco de negação**
+  ("Não era X. Era Y.");
+- **(c)** ter **≥1 modelo obrigatoriamente de AÇÃO/DIÁLOGO** em frases declarativas
+  simples (SVO, ≤15 palavras na maioria);
+- **(d)** demonstrar a assinatura **pela lente e pelo léxico**, não por ornamento.
+
+**Exemplo BOM (transparente — lente e léxico visíveis):**
+> Ela passou o dedo na dobradiça antes de olhar o homem. A porta tinha sido trocada,
+> não consertada — parafusos novos, madeira nova, tudo rápido demais. O homem sorriu
+> e estendeu a mão. Ela não pegou. Perguntou quem tinha feito o serviço.
+>
+> *O que aqui é assinatura:* a lente **nota o reparo antes de notar a pessoa**
+> (comportamento observável, não máxima); léxico de conserto/material; frases
+> declarativas curtas; diálogo/ação carregam a cena. Sem ornamento.
+
+**Exemplo RUIM (aforístico-personificado — REPROVA):**
+> A beleza é sempre a casca de algum estrago. A porta a encarava como quem guarda um
+> segredo, e o silêncio da casa não era ausência de som: era uma presença que se
+> recusava a partir.
+>
+> *Por que reprova:* abre com **máxima/aforismo** ("A beleza é sempre X"); **personifica
+> abstração** (a porta "encara", o silêncio "se recusa a partir"); usa **símile-andaime**
+> ("como quem"); usa **eco de negação** ("não era ausência… era presença"). A frase se
+> exibe; a lente some. Viola (b) e (d) — e é exatamente o padrão que o escritor imita e
+> o revisor passa a impor.
 
 ### 3. Diferenciação por autor (digital própria)
 Cada autor da casa tem assinatura **distinta** — o perfil NÃO é um molde comum. Ao
@@ -504,16 +557,24 @@ que ESTE perfil difere das demais). **Teste:** dois perfis da casa, lado a lado,
 reconhecíveis sem o rótulo.
 
 ## No portão (Fase 1.5 — dimensão Voz e a de EXCELÊNCIA "voz-assinatura")
-A nota de Voz pontua **distinção**, não só ausência de genérico:
+A nota de Voz pontua **distinção transparente**, não densidade de ornamento:
 - **< 6 (viabilidade):** voz genérica/indefinida → **não gera**.
 - **6–7:** competente, sem tique, mas **substituível** (poderia ser de qualquer um).
-- **≥ 8 (ambição):** assinatura presente — "reconheceria de olhos vendados?"; os
-  três itens acima definidos e digital distinta das demais vozes da casa. Abaixo de
-  8, devolva ao **Bloco 6** para cravar a assinatura, ou registre o teto honesto.
+- **≥ 8 (ambição):** assinatura presente e **transparente** — reconhecível de olhos
+  vendados pela **lente** (o que a POV nota primeiro), pelo **léxico** (3–4 famílias
+  próprias) e pelo **ritmo declarado**; digital distinta das demais vozes da casa.
+  **Ornamento não sobe a nota:** aforismo, personificação de abstração, símile em
+  cadeia e reformulação encadeada são **defeitos de assinatura** — uma voz 9 é
+  inconfundível E invisível (reconhece-se a lente, não a frase se exibindo). Abaixo
+  de 8, devolva ao **Bloco 6** para cravar a assinatura, ou registre o teto honesto.
 
 ---
 
 ## Registro de versões
+- **v6.4** — Assinatura transparente: gate de Voz redefinido (lente+léxico+ritmo;
+  ornamento não pontua), contrato dos parágrafos-modelo (zero aforismo/
+  personificação/símile/eco; ≥1 modelo declarativo), marcador MODELOS-GERADOS v1
+  (ref. AUDITORIA-ESTILO-DANBROWN.md).
 - **v6.3** — Refino C: `perfil-de-voz.md` deixa de ser só defesa negativa
   (anti-maneirismo) e ganha **ASSINATURA POSITIVA** (REFERÊNCIA EMBUTIDA C):
   hábitos sintáticos, léxico, modo de ver, 2–3 parágrafos-modelo (emular técnica,

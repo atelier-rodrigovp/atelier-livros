@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import {
   BookMarked,
+  FlaskConical,
   Gauge,
   LayoutDashboard,
   Library,
@@ -30,6 +31,7 @@ const nav = [
   { to: "/autores", label: "Autores", icon: Users },
   { to: "/vendas", label: "Vendas", icon: LineChart },
   { to: "/observabilidade", label: "Observabilidade", icon: Gauge },
+  { to: "/laboratorio", label: "Laboratório", icon: FlaskConical },
   { to: "/configuracoes", label: "Configurações", icon: Settings },
 ];
 

@@ -1,6 +1,6 @@
 {
-  "manifestVersion": "1.0.5",
-  "generatedAt": "2026-07-16T12:18:00.000Z",
+  "manifestVersion": "1.0.8",
+  "generatedAt": "2026-07-18T00:00:00.000Z",
   "compatibility": "Atelier worker 0.1.x",
   "requiredTests": [
     "python tools/test_gate_spec.py",
@@ -14,7 +14,7 @@
     },
     {
       "path": "arquiteto-de-enredo/SKILL.md",
-      "sha256": "5abfa084cb3bc3d1b0d44695003c316ec53f9340d10913ec6c2f4ffef0722597"
+      "sha256": "8c960f41e2a4768d1b2c34b7ffdc20bd00f16dd38f7e35cd42b6558d3bf2ae0e"
     },
     {
       "path": "hoover-mcfadden/01-Capitulo-01-A-primeira-consulta.md",
@@ -22,11 +22,11 @@
     },
     {
       "path": "hoover-mcfadden/references/voz-e-oficio.md",
-      "sha256": "ceb2a1a29b53202864a7d9e1a573976c23b81e31072feef22ad7360f429c8614"
+      "sha256": "da31faa3b3be10abf51ae98c0b2cc38f75e81b93be2f7fda100f414c3c346ebb"
     },
     {
       "path": "livro-do-zero-ao-epub/assets/livro_runner.py",
-      "sha256": "8d842d4651802f89476f7c94812e1c01ec8bc26df930e59449378907179c5955"
+      "sha256": "e7924317a6262d47fba1bd27db05010e222635d3009ab16ed281fa81c2c1fca6"
     }
   ]
 }

@@ -33,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ReviewReport } from "@/components/ReviewReport";
+import { EngineV2Panel } from "@/components/EngineV2Panel";
 
 interface Edition { id: string; idioma: string; status: string; is_origem: boolean; nota_review: number | null; }
 interface Artifact { id: string; edition_id: string | null; tipo: string; storage_path: string; url_publica: string | null; created_at?: string; meta?: any; }
@@ -572,6 +573,7 @@ export default function Projeto() {
           <TabsTrigger value="epubs">EPUBs</TabsTrigger>
           <TabsTrigger value="publicacao">Publicação</TabsTrigger>
           <TabsTrigger value="editorial">Editorial</TabsTrigger>
+          <TabsTrigger value="engine">Engine</TabsTrigger>
         </TabsList>
 
         {/* FUNDAÇÃO */}
@@ -1267,6 +1269,11 @@ export default function Projeto() {
               })()}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ENGINE V2 */}
+        <TabsContent value="engine">
+          <EngineV2Panel projectId={proj.id} />
         </TabsContent>
       </Tabs>
 

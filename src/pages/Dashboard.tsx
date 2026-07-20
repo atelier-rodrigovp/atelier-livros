@@ -8,6 +8,7 @@ import { signedUrl, deleteProject } from "@/lib/storage";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
 import type { Job, Project } from "@/lib/types";
 import { projectStatusBadge } from "@/lib/status";
+import { tabelaAusente } from "@/lib/engineV2";
 import { resolveOperationalState, buildResolverInput, toneToVariant, escritaGovernaCartao, type OperationalState, type ChapterRow } from "@/lib/resolveOperationalState";
 import { CoverArt } from "@/components/CoverArt";
 import { Badge } from "@/components/ui/badge";
@@ -53,12 +54,13 @@ export default function Dashboard() {
   const [estados, setEstados] = useState<Record<string, OperationalState>>({});
   const [jobsFundacao, setJobsFundacao] = useState<Record<string, Job>>({});
   const [capas, setCapas] = useState<Record<string, string>>({});
+  const [engineV2, setEngineV2] = useState<Record<string, { skill?: { id: string; versao: string }; divergencias: number }>>({});
 
   const carregar = useCallback(async () => {
     // Resolvedor único (S7): busca jobs de escrita + chapters (com hash/quality) +
     // pausa de produção; cada projeto vira UMA OperationalState — mesma fonte da
     // página de projeto e da observabilidade (paridade).
-    const [{ data: projs }, { data: eds }, { data: chs }, { data: jobsOperacionais }, { data: arts }, { data: ctrl }] = await Promise.all([
+    const [{ data: projs }, { data: eds }, { data: chs }, { data: jobsOperacionais }, { data: arts }, { data: ctrl }, engRes] = await Promise.all([
       supabase.from("projects").select("*").order("created_at", { ascending: false }),
       supabase.from("editions").select("id,project_id,is_origem"),
       supabase.from("chapters").select("edition_id,numero,text_sha256,quality_status"),
@@ -66,7 +68,18 @@ export default function Dashboard() {
         .in("tipo", ["escrever_livro", "criar_fundacao", "refinar_fundacao"]),
       supabase.from("artifacts").select("edition_id,storage_path,url_publica").eq("tipo", "capa"),
       supabase.from("worker_control").select("enabled").maybeSingle(),
+      supabase.from("engine_state").select("project_id,engine_version,doc"),
     ]);
+    // Engine V2: antes da migração (supabase/engine_v2.sql) a tabela não existe — ignora em silêncio.
+    const eng: Record<string, { skill?: { id: string; versao: string }; divergencias: number }> = {};
+    if (!engRes.error) {
+      for (const r of (engRes.data as { project_id: string; doc?: { skill?: { id: string; versao: string }; migracao?: { divergencias?: number } } }[]) ?? []) {
+        eng[r.project_id] = { skill: r.doc?.skill, divergencias: r.doc?.migracao?.divergencias ?? 0 };
+      }
+    } else if (!tabelaAusente(engRes.error)) {
+      console.warn("engine_state:", engRes.error.message);
+    }
+    setEngineV2(eng);
     const projList = (projs as Project[]) ?? [];
     setProjects(projList);
     // worker_control.enabled é a pausa GLOBAL (SG6: producao_desativada), não a
@@ -247,6 +260,16 @@ export default function Dashboard() {
                     <div className="min-w-0 flex-1 space-y-1.5">
                       <h3 className="line-clamp-2 pr-6 font-semibold leading-snug">{c.project.titulo}</h3>
                       <p className="text-xs text-muted-foreground">{c.project.genero ?? "—"} · {c.project.idioma_origem}</p>
+                      {(() => {
+                        const ev2 = engineV2[c.project.id];
+                        if (!ev2?.skill) return null;
+                        return (
+                          <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                            Engine V2 · {ev2.skill.id}@{ev2.skill.versao}
+                            {ev2.divergencias > 0 && <Badge variant="warning" className="px-1.5 text-[10px]">migração pendente</Badge>}
+                          </p>
+                        );
+                      })()}
                       <StatusBadge s={statusDe(c.project)} />
                       {(() => {
                         const st = estados[c.project.id];

@@ -1,0 +1,147 @@
+{
+  "schema": "skill-contract/v1",
+  "id": "hoover-mcfadden",
+  "versao": "1.0.0",
+  "nome": "Hoover–McFadden — suspense intimista com narradora não-confiável",
+  "familia_editorial": "suspense_intimista",
+  "motor_narrativo": "cena vivida em 1ª pessoa → relógio aperta → omissão/revelação da narradora → gancho",
+  "unidade_dramatica": "beat emocional",
+  "pov": {
+    "pessoa": "primeira"
+  },
+  "temporalidade": "relógio comprimido: DIA/HORA no topo de cada capítulo e sempre avança; 3 relógios NOMEADOS (janela cirúrgica / doença da narradora / antagonista), cada um com dono e deadline, ≥1 move por capítulo; fio-M de memória intercalado em itálico",
+  "faixa_palavras": { "min": 2000, "alvo": 2400, "max": 2800 },
+  "ritmo": {
+    "descricao": "frase curta e cheia é ASSINATURA — a contagem de fragmentos é a voz e ganha folga; a régua contra staccato vazio fica na densidade, nos pares colados e na anáfora; ritmo rápido pela tensão e pelo gancho, nunca por encurtar a cena",
+    "cadencia": {
+      "curta": 4,
+      "enfase": 3,
+      "colados": 8,
+      "staccatoFrac": 0.55,
+      "minFrases": 8,
+      "clipeNeg": 3,
+      "anafora": 2,
+      "epigrama": 1,
+      "fragEnfase": 20,
+      "fragColados": 6,
+      "italico": 3,
+      "retorica": 2
+    }
+  },
+  "acao_interioridade": {
+    "relacao": "interioridade_dominante",
+    "descricao": "Interioridade contínua em 1ª pessoa é FEATURE — pode ocupar o capítulo inteiro. Lição CR4: a régua do thriller de enigma (piso declarativo + teto de interioridade + teto de metáfora) MATA este gênero; aqui não existe piso de declarativas nem teto de interioridade. A personagem sangra na página; o que se corta é só o ornamento de IA."
+  },
+  "politica_exposicao": "a informação passa pelo filtro da narradora — o que ela percebe, omite ou enquadra AGORA; fair-play: nada sonegado do leitor que ela já saiba; o twist se sustenta na releitura",
+  "politica_dialogo": {
+    "descricao": "sem piso de diálogo nem de declarativas (lição CR4) — densidade de sentimento é a voz; o evento continua obrigatório, mas cobrado pela régua de interioridade-sem-evento, nunca como 'pouca declarativa'"
+  },
+  "politica_metafora": {
+    "descricao": "metáfora sentimental ISOLADA é feature (teto generoso, sem cota) — só a CADEIA de 2+ metáforas em poucas linhas é defeito"
+  },
+  "tipos_gancho": [
+    "revelacao_narradora",
+    "virada_percepcao",
+    "ameaca_intima",
+    "virada",
+    "pergunta_suspensa",
+    "soco_emocional",
+    "relogio"
+  ],
+  "regras": [
+    {
+      "id": "anti-gnomico-empilhado",
+      "texto": "Converta máximas decorativas em imagem concreta, ação ou consequência; fecho gnômico fica em no máximo 2 por capítulo. A régua: a personagem está sangrando (fica) ou o narrador está se admirando (sai).",
+      "tipo": "cota",
+      "cota": { "max": 2, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
+    },
+    {
+      "id": "anti-personificacao-abstracao",
+      "texto": "Personificação de ABSTRAÇÃO ('a culpa me obrigou') fica em no máximo 2 por capítulo. Não confunda com reação física em 1ª pessoa ('meu peito apertou') nem com imagem afetiva isolada — essas são a voz.",
+      "tipo": "cota",
+      "cota": { "max": 2, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
+    },
+    {
+      "id": "anti-sanfona",
+      "texto": "Diga cada percepção UMA vez, a melhor; frase-sanfona fica em no máximo 1 por capítulo. Não confunda com interioridade que AVANÇA (cada frase acrescenta) nem com enumeração descritiva concreta.",
+      "tipo": "cota",
+      "cota": { "max": 1, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
+    },
+    {
+      "id": "primeira-pessoa-presente",
+      "texto": "1ª pessoa no PRESENTE nos capítulos da narradora — pretérito é defeito de voz; o fio-M de memória entra em itálico, como voz secundária que contrapõe o presente.",
+      "tipo": "alvo_positivo",
+      "papeis": ["escritor", "revisor_literario"]
+    },
+    {
+      "id": "interioridade-e-feature",
+      "texto": "A personagem sangra na página: interioridade contínua, 1ª pessoa emocional e metáfora sentimental isolada são a VOZ — proteja-as; não imponha piso de declarativas nem teto de interioridade (lição CR4).",
+      "tipo": "alvo_positivo",
+      "papeis": ["escritor", "revisor_literario"]
+    },
+    {
+      "id": "relogio-move",
+      "texto": "Pelo menos 1 dos 3 relógios nomeados move por capítulo, com dono e deadline visíveis na cena; Dia/Hora corrente avança em toda spec.",
+      "tipo": "alvo_positivo",
+      "papeis": ["arquiteto_cena", "escritor", "auditor_factual"]
+    },
+    {
+      "id": "pista-antes-do-pagamento",
+      "texto": "Nenhuma revelação sem pista registrada na Tabela de Pistas: semente antes do pagamento — o twist se sustenta na releitura, sem trapaça.",
+      "tipo": "alvo_positivo",
+      "papeis": ["arquiteto_enredo", "arquiteto_cena", "revisor_literario"]
+    },
+    {
+      "id": "narradora-fair-play",
+      "texto": "A omissão/distorção da narradora é jogável: o leitor tem o que ela percebe AGORA; a spec declara o que ela omite ou enquadra neste capítulo.",
+      "tipo": "alvo_positivo",
+      "papeis": ["arquiteto_cena", "escritor", "revisor_literario"]
+    },
+    {
+      "id": "piso-densidade",
+      "texto": "Cena vivida: capítulos da narradora com pelo menos 2.000 palavras (alvo 2.000–2.800). Densidade é mais cena vivida, não mais palavras; o fio-M é isento do piso.",
+      "tipo": "cota",
+      "cota": { "min": 2000, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
+    },
+    {
+      "id": "gancho-varia",
+      "texto": "O capítulo fecha em gancho depois de a cena ter sido vivida, de tipo diferente dos 2 capítulos anteriores.",
+      "tipo": "alvo_positivo",
+      "papeis": ["arquiteto_cena", "escritor", "revisor_literario"]
+    },
+    {
+      "id": "custo-emocional-aterrissado",
+      "texto": "A dor tem consequência na cena e na trama — emoção crua com custo aterrissado, nunca melodrama gratuito.",
+      "tipo": "alvo_positivo",
+      "papeis": ["escritor", "revisor_literario"]
+    }
+  ],
+  "testes_positivos": [
+    "a personagem sangra na página: interioridade emocional contínua preservada (anti-dano — se o calor cair, a correção passou do ponto)",
+    "narradora não-confiável com fair-play: a releitura faz sentido duplo, sem trapaça",
+    "≥1 relógio nomeado move por capítulo, com dono e deadline visíveis na cena",
+    "1ª pessoa PRESENTE estável na voz da narradora",
+    "gancho de fim que obriga a virar a página, plantado e variado"
+  ],
+  "sinais_negativos": [
+    "aforismo empilhado (narrador se admirando)",
+    "personificação de abstração",
+    "frase-sanfona",
+    "pretérito na voz da narradora",
+    "capítulo-sinopse abaixo do piso de densidade",
+    "revelação sem pista plantada",
+    "melodrama sem consequência",
+    "relógio parado (nenhum move no capítulo)"
+  ],
+  "excecoes": [],
+  "estruturas_exigidas": {
+    "docs": ["matriz-de-relogios.md", "regras-da-narradora.md"],
+    "campos_spec": ["Dia/Hora", "Relógios", "Pistas", "Gancho", "Narradora", "Decisão/Ação", "Modo", "Novidade"]
+  },
+  "referencias": ["references/voz-e-oficio.md", "references/processo-de-capitulo.md"],
+  "modelos_positivos": []
+}

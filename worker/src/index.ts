@@ -3,6 +3,7 @@
 import "dotenv/config";
 import { sb, OWNER } from "./supabase.js";
 import { executarJob, type Job } from "./jobs.js";
+import { executarJobRoteado } from "./v2/integracao.js";
 import { LimiteMaxError, deveRecuperar } from "./limite-max.js";
 import { escolherProximo, normalizarMaxParalelo, type ProjInfo } from "./fila.js";
 import { aguardarConexao } from "./espera-conexao.js";
@@ -370,7 +371,9 @@ async function processarJob(job: Job) {
   }, 60_000);
   keepalive.unref?.();
   try {
-    await executarJob(job, heartbeat);
+    // Engine V2 (D2/ADR-001): único ponto de desvio — engine_mode='v2' roteia
+    // para o pipeline V2; todo o resto segue na V1 byte-idêntica.
+    await executarJobRoteado(job, heartbeat, executarJob);
     const { data: current } = job.payload?.reconciliacao_legada
       ? await sb.from("jobs").select("payload,progresso").eq("owner", OWNER).eq("id", job.id).single()
       : { data: null };
