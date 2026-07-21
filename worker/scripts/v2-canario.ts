@@ -197,9 +197,18 @@ async function continuarCapitulos(skillId: string, totalCaps: number, ctx: CtxCa
   // Estado FRESCO decide o que falta (retomada: capítulos aprovados são pulados).
   const estadoAtual = await gravador.carregarEstado();
   const resultados: Record<string, unknown>[] = [];
+  const revalidar = process.argv.includes("--revalidar");
   for (let n = 1; n <= totalCaps; n++) {
     const cap = estadoAtual.doc.capitulos[String(n)];
     if (cap && (cap.status === "aprovado" || cap.status === "aprovado_com_excecao")) {
+      if (revalidar) {
+        console.log(`— capítulo ${n}/${totalCaps}: aprovado sob régua anterior — REVALIDANDO sob a vigente…`);
+        const r = await revalidarCapitulo(n, ctx, deps);
+        console.log(`   → ${r.status}`);
+        resultados.push(r);
+        if (r.status !== "aprovado" && r.status !== "aprovado_com_excecao") break;
+        continue;
+      }
       console.log(`— capítulo ${n}/${totalCaps}: já aprovado (retomada), pulando`);
       resultados.push({ capitulo: n, status: cap.status, textHash: cap.text_hash, retomado: true });
       continue;
@@ -275,6 +284,73 @@ async function continuarCapitulos(skillId: string, totalCaps: number, ctx: CtxCa
   await fs.writeFile(relPath, JSON.stringify(relatorio, null, 2), "utf8");
   console.log(`relatório: ${relPath}`);
   return relatorio;
+}
+
+/**
+ * --revalidar: re-avalia capítulos APROVADOS sob a régua VIGENTE (sinais + revisor +
+ * auditor no texto do disco, sem escritor). Necessário quando a aprovação anterior
+ * aconteceu sob contratos depois rejeitados. Aprovado → review nova hash-bound;
+ * reprovado → correção dirigida (reescritaDirigida) com as correções do parecer novo.
+ */
+async function revalidarCapitulo(n: number, ctx: CtxCanario, deps: DepsPipeline): Promise<Record<string, unknown>> {
+  const { contrato, gravador, persistencia, provedor, mapa, projectId } = ctx;
+  const caminho = path.join(deps.dirManuscrito, `capitulo-${String(n).padStart(2, "0")}.md`);
+  const texto = await fs.readFile(caminho, "utf8");
+  const { medirSinais, resumoSinais } = await import("../src/v2/sinais.js");
+  const { conferirParecer, validarParecer } = await import("../src/v2/revisor.js");
+  const { tarefaRevisor, tarefaAuditorFactual } = await import("../src/v2/tarefas.js");
+  const { hashText } = await import("../src/quality-state.js");
+
+  const ficha = await persistencia.lerFichaMaisRecente(projectId, n);
+  const sinais = medirSinais(texto, contrato.contrato);
+  const secaoTexto = { titulo: "TEXTO A AVALIAR", texto, fonte: "manuscrito" };
+  const extrair = (t: string): unknown => {
+    const m = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+    return JSON.parse((m ? m[1] : t).trim());
+  };
+
+  const compRev = compilarPacote({ papel: "revisor_literario", alvo: `capitulo:${n}`, contrato, perfil: deps.perfil, ficha: ficha ?? undefined, fatos: [secaoTexto] });
+  if (!compRev.ok) throw new Error(`revalidação bloqueada: ${JSON.stringify(compRev.bloqueios)}`);
+  const rRev = await executarPapel<ReturnType<typeof validarParecer>>({
+    gravador, provedor, mapa,
+    papel: "revisor_literario",
+    alvo: `capitulo:${n}`,
+    pacote: compRev.pacote!,
+    tarefa: tarefaRevisor(n, resumoSinais(sinais), contrato.contrato),
+    parse: (t) => validarParecer(extrair(t)),
+  });
+  const conf = conferirParecer(rRev.valor, sinais);
+  let verdict = conf.verdictEfetivo;
+
+  const compAud = compilarPacote({ papel: "auditor_factual", alvo: `capitulo:${n}`, contrato, perfil: deps.perfil, ficha: ficha ?? undefined, fatos: [secaoTexto] });
+  const rAud = await executarPapel<{ contradicoes: { gravidade: string }[]; conhecimento_indevido: unknown[] }>({
+    gravador, provedor, mapa,
+    papel: "auditor_factual",
+    alvo: `capitulo:${n}`,
+    pacote: compAud.pacote!,
+    tarefa: tarefaAuditorFactual(n),
+    parse: (t) => extrair(t) as { contradicoes: { gravidade: string }[]; conhecimento_indevido: unknown[] },
+  });
+  if (rAud.valor.contradicoes?.some((c) => c.gravidade === "bloqueante") || (rAud.valor.conhecimento_indevido?.length ?? 0) > 0) {
+    verdict = "reprovado";
+  }
+
+  const textHash = hashText(texto);
+  if (verdict === "aprovado" || verdict === "aprovado_com_excecao") {
+    const reviewId = await persistencia.inserirReview({
+      project_id: projectId, edition_id: null, capitulo: n, text_hash: textHash, verdict, run_id: rRev.runId, parecer: rRev.valor,
+    });
+    await gravador.aprovarCapitulo(n, { id: reviewId, text_hash: textHash, verdict, parecer: rRev.valor }, caminho);
+    return { capitulo: n, revalidado: true, status: verdict, reviewId, textHash };
+  }
+  // Reprovado sob a régua vigente: correção dirigida sobre o texto atual.
+  console.log(`   revalidação reprovou o cap ${n} (${conf.problemas[0] ?? "parecer reprovado"}) — correção dirigida…`);
+  if (!ficha) throw new Error(`cap ${n} reprovado na revalidação e sem ficha persistida para reescrita`);
+  const r = await escreverCapitulo(deps, n, {
+    fichaExistente: ficha,
+    reescritaDirigida: { correcoes: rRev.valor.correcoes.length ? rRev.valor.correcoes : [{ local: "capítulo inteiro", problema: conf.problemas[0] ?? "reprovado na revalidação", instrucao: "corrija conforme o parecer" }], textoBase: texto },
+  });
+  return { capitulo: n, revalidado: true, status: r.status, reviewId: r.reviewId, textHash: r.textHash, runs: r.runs.length };
 }
 
 /** Fases pós-escrita do canário (--completo): editor estrutural → meta-nota. */
