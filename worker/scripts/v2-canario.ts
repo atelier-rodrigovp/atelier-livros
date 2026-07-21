@@ -257,7 +257,16 @@ async function rodarFasesFinais(
 ): Promise<Record<string, unknown>> {
   const { contrato, gravador, persistencia, provedor, mapa, projectId, dirProjeto } = ctx;
   const estado = await gravador.carregarEstado();
-  if (estado.doc.fase === "escrita") await gravador.mudarFase("revisao_final");
+  // Canários antigos podem ter estado com fase atrasada (execução pré-DDL gravou
+  // fases só no disco; o Supabase ficou em "fundacao" com capítulos aprovados).
+  // Avança em cadeia até revisao_final — transição a transição, todas válidas.
+  const cadeia = ["fundacao", "estrutura", "escrita", "revisao_final"] as const;
+  let fase = estado.doc.fase as (typeof cadeia)[number] | string;
+  while (cadeia.includes(fase as (typeof cadeia)[number]) && fase !== "revisao_final") {
+    const proxima = cadeia[cadeia.indexOf(fase as (typeof cadeia)[number]) + 1];
+    await gravador.mudarFase(proxima);
+    fase = proxima;
+  }
 
   // Editor estrutural (pulado na retomada se já registrado no estado).
   let edicao: Record<string, unknown> = estado.doc.edicao_estrutural ?? {};
