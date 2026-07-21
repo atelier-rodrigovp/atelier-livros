@@ -24,6 +24,8 @@ export interface ExecucaoPapel<T> {
   parentRunId?: string | null;
   maxTentativas?: number;               // default 2 (1 retry técnico com instrução corretiva)
   timeoutMs?: number;
+  /** Metadados auditáveis da chamada (ex.: modo_correcao) — vão ao run do ledger. */
+  payload?: Record<string, unknown>;
 }
 
 export interface ResultadoPapel<T> {
@@ -54,6 +56,7 @@ export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPa
       parent_run_id: parent ?? null,
       attempt: tentativa,
       evidencias: [],
+      ...(e.payload ? { payload: e.payload } : {}),
     });
 
     const correcao = tentativa > 1

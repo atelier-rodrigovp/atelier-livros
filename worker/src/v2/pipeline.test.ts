@@ -477,6 +477,44 @@ describe("escreverCapitulo — docs factuais no pacote", () => {
   });
 });
 
+describe("escreverCapitulo — reescrita dirigida (meta-nota)", () => {
+  it("usa fichaExistente + textoBase; pula arquiteto e escrita inicial; 1ª chamada do escritor é a correção em modo reescrita", async () => {
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_CORRIGIDA); // a própria correção (não há escrita inicial)
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecer()));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    const r = await escreverCapitulo(deps, 3, {
+      fichaExistente: ficha(),
+      reescritaDirigida: {
+        textoBase: PROSA_OK,
+        correcoes: [{ local: "capítulo 3", problema: "final fraco", instrucao: "feche com uma consequência concreta" }],
+      },
+    });
+
+    expect(r.status).toBe("aprovado");
+    // Nenhuma chamada ao arquiteto (usa fichaExistente); exatamente uma ao escritor (a correção)
+    expect(provedor.chamadas.filter((c) => c.papel === "arquiteto_cena")).toHaveLength(0);
+    const escritor = provedor.chamadas.filter((c) => c.papel === "escritor");
+    expect(escritor).toHaveLength(1);
+    expect(escritor[0].prompt).toContain("Reescreva o capítulo"); // modo reescrita
+    expect(escritor[0].prompt).toContain("PRESERVE integralmente");
+    expect(escritor[0].prompt).toContain("feche com uma consequência concreta"); // instrução do avaliador
+    expect(escritor[0].prompt).not.toContain("palavra por palavra");
+    // O texto no disco é a versão corrigida (não a base)
+    expect(readFileSync(path.join(dir, "manuscrito", "capitulo-03.md"), "utf8")).toBe(PROSA_CORRIGIDA);
+    expect(r.textHash).toBe(hashText(PROSA_CORRIGIDA));
+    // fichaExistente: nenhuma spec nova inserida
+    expect(lerJsonl("specs.jsonl")).toHaveLength(0);
+  });
+
+  it("reescrita dirigida sem fichaExistente lança REESCRITA_SEM_FICHA", async () => {
+    await expect(
+      escreverCapitulo(deps, 3, { reescritaDirigida: { textoBase: PROSA_OK, correcoes: [] } })
+    ).rejects.toMatchObject({ name: "ErroEngine", codigo: "REESCRITA_SEM_FICHA" });
+  });
+});
+
 describe("escreverCapitulo — contextualizador fora do schema", () => {
   it("item com 80 palavras rejeita; segunda saída inválida propaga ErroEngine FORA_DO_SCHEMA", async () => {
     provedor.enfileirar("contextualizador", CTX_PROSA);

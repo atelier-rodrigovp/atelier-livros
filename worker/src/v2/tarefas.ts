@@ -74,6 +74,18 @@ export function tarefaEscritorCorrecao(
   ].join("\n");
 }
 
+/** Canário de voz (wizard): UMA cena curta de amostra da voz do contrato, pré-fundação. */
+export function tarefaCanarioVoz(ideia: string, contrato: SkillContract): string {
+  return [
+    `Escreva UMA cena curta de amostra (300–500 palavras), em português brasileiro, demonstrando a VOZ desta skill para a ideia do autor.`,
+    `Ideia do autor: ${ideia}`,
+    `A cena deve ter: um objetivo concreto, um obstáculo, uma virada e um gancho final (tipo permitido: ${contrato.tipos_gancho.join(", ")}).`,
+    `É uma AMOSTRA de voz, não o capítulo 1: personagens podem ser provisórios; a voz e a cadência do contrato são o que está em prova.`,
+    `Não mencione o processo, a skill ou o pacote. Sem título.`,
+    `Responda APENAS a prosa da cena.`,
+  ].join("\n");
+}
+
 /** Revisor literário: parecer estruturado (parecer/v1) com disposição de cada sinal. */
 export function tarefaRevisor(capitulo: number, resumoSinais: string, contrato: SkillContract): string {
   return [
@@ -100,6 +112,33 @@ export function tarefaArquitetoEnredo(briefing: { titulo: string; premissa: stri
     `- "perfil_voz": descrição de voz em markdown curto (≤300 palavras) coerente com o contrato (${contrato.familia_editorial}; ${contrato.acao_interioridade.relacao}). PROIBIDO incluir parágrafos-modelo, aforismos ou frases de exemplo — a fundação não semeia ornamento (o perfil descreve, não demonstra).`,
     `- "estrutura": um item por capítulo; "resumo_estrutural" aponta objetivo/virada em ≤25 palavras, sem prosa.`,
     `- "fios": nomes dos fios narrativos${contrato.pov.rotacao ? ` (entre ${contrato.pov.rotacao.fios_min} e ${contrato.pov.rotacao.fios_max})` : ""}.`,
+  ].join("\n");
+}
+
+/** Editor estrutural: PROPÕE corte/reordenação de capítulos inteiros — nunca escreve prosa. */
+export function tarefaEditorEstrutural(totalCaps: number, contrato: SkillContract): string {
+  return [
+    `Avalie a MACRO-ESTRUTURA do livro completo (${totalCaps} capítulos) — seção CAPÍTULOS — e proponha edições estruturais.`,
+    `Você PROPÕE; você NÃO escreve prosa. Saída APENAS JSON no schema "structural-edit/v1": { "schema":"structural-edit/v1", "propostas":[{"tipo":"nenhuma"|"corte"|"reordenacao","capitulos":[number],"nova_ordem"?:[number],"justificativa":string}] }.`,
+    `REGRAS DURAS:`,
+    `- PROIBIDO propor fusão, reescrita ou qualquer prosa. Só é permitido cortar um capítulo inteiro OU reordenar capítulos.`,
+    `- "corte": SOMENTE com justificativa estrutural forte — capítulo redundante que não avança nenhum fio. "capitulos" lista o(s) número(s) a cortar.`,
+    `- "reordenacao": "nova_ordem" traz TODOS os números de 1 a ${totalCaps} (menos os cortados) exatamente uma vez, na nova sequência.`,
+    `- Na dúvida, responda [{"tipo":"nenhuma","capitulos":[],"justificativa":"estrutura sólida; sem corte nem reordenação"}].`,
+    `Julgue pela família editorial "${contrato.familia_editorial}" e pelo motor narrativo "${contrato.motor_narrativo}".`,
+    `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
+  ].join("\n");
+}
+
+/** Avaliador de livro completo (meta-nota): parecer comercial no papel revisor_literario, alvo "livro". */
+export function tarefaAvaliadorLivro(meta: number, contrato: SkillContract): string {
+  return [
+    `Avalie o LIVRO COMPLETO (seção MANUSCRITO) como um crítico comercial. Meta de nota: ${meta.toFixed(1)}.`,
+    `Responda APENAS JSON no schema "avaliacao-livro/v1": { "schema":"avaliacao-livro/v1", "nota": number (0 a 10, uma casa decimal), "pontos_fortes": [string], "pontos_fracos": [string], "capitulos_a_reescrever": [{"capitulo": number, "problemas": [string], "instrucoes": [string]}], "resumo": string }.`,
+    `A nota deve ser FUNDAMENTADA nos critérios comerciais: progressão dramática, força do gancho de abertura e dos ganchos de capítulo, clareza, emoção e originalidade.`,
+    `"capitulos_a_reescrever": inclua um capítulo APENAS quando reescrevê-lo muda a nota do livro — não liste capítulo que já funciona. As "instrucoes" devem ser objetivas e LOCALIZADAS (o que mudar e onde), uma por problema.`,
+    `Julgue a identidade pela família "${contrato.familia_editorial}" (testes positivos: ${contrato.testes_positivos.slice(0, 4).join("; ") || "—"}).`,
+    `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
   ].join("\n");
 }
 

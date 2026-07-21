@@ -27,12 +27,13 @@ import {
   tarefaRevisor,
   type ModoCorrecao,
 } from "./tarefas.js";
-import type {
-  ContratoCompilado,
-  MapaModelos,
-  Parecer,
-  ResultadoGate,
-  SceneSpec,
+import {
+  ErroEngine,
+  type ContratoCompilado,
+  type MapaModelos,
+  type Parecer,
+  type ResultadoGate,
+  type SceneSpec,
 } from "./tipos.js";
 
 export interface DepsPipeline {
@@ -175,6 +176,12 @@ export async function escreverCapitulo(
     fichaExistente?: SceneSpec;
     anteriores?: { numero: number; trecho: string }[];
     trechosAnteriores?: SecaoContexto[];
+    /**
+     * Reescrita dirigida (meta-nota): reusa a ficha e o texto do disco como base, pula a
+     * escrita inicial e aplica as correções do avaliador em modo "reescrita" como 1ª ação,
+     * seguindo depois o fluxo normal de gates/sinais/revisor/auditor/decisão.
+     */
+    reescritaDirigida?: { correcoes: { local: string; problema: string; instrucao: string }[]; textoBase: string };
   }
 ): Promise<ResultadoCapitulo> {
   const runs: string[] = [];
@@ -183,6 +190,14 @@ export async function escreverCapitulo(
   const nn = String(capitulo).padStart(2, "0");
   const caminho = path.join(deps.dirManuscrito, `capitulo-${nn}.md`);
   const maxCorrecoes = deps.maxCorrecoes ?? 2;
+
+  if (opts?.reescritaDirigida && !opts.fichaExistente) {
+    throw new ErroEngine({
+      codigo: "REESCRITA_SEM_FICHA",
+      classe: "tecnica",
+      mensagem: `reescrita dirigida do capítulo ${capitulo} exige fichaExistente`,
+    });
+  }
 
   // Base comum das execuções de papel (ledger completo por chamada).
   const base = {
@@ -321,16 +336,23 @@ export async function escreverCapitulo(
   if (!compEsc.ok) return bloquearPorCompilacao(compEsc.bloqueios);
   const pacoteEscritor = compEsc.pacote!;
 
-  const rEsc = await executarPapel<string>({
-    ...base,
-    papel: "escritor",
-    alvo: alvoCap,
-    pacote: pacoteEscritor,
-    tarefa: tarefaEscritor(ficha, deps.contrato.contrato),
-    parse: parseProsa,
-  });
-  runs.push(rEsc.runId);
-  let texto = rEsc.valor;
+  // Reescrita dirigida usa o texto do disco como base (pula a escrita inicial);
+  // no fluxo normal, o escritor produz a prosa inicial.
+  let texto: string;
+  if (opts?.reescritaDirigida) {
+    texto = opts.reescritaDirigida.textoBase;
+  } else {
+    const rEsc = await executarPapel<string>({
+      ...base,
+      papel: "escritor",
+      alvo: alvoCap,
+      pacote: pacoteEscritor,
+      tarefa: tarefaEscritor(ficha, deps.contrato.contrato),
+      parse: parseProsa,
+    });
+    runs.push(rEsc.runId);
+    texto = rEsc.valor;
+  }
 
   const gravarERegistrar = async (t: string): Promise<void> => {
     gravarAtomico(caminho, t);
@@ -340,7 +362,6 @@ export async function escreverCapitulo(
       spec_hash: specHash,
     });
   };
-  await gravarERegistrar(texto);
 
   // -------------------------------------------------------------------------
   // 4. GATES UNIVERSAIS — com UMA rodada de correção dirigida por passagem
@@ -364,6 +385,7 @@ export async function escreverCapitulo(
       pacote: pacoteEscritor,
       tarefa: tarefaEscritorCorrecao(capitulo, correcoes, texto, modo),
       parse: parseProsa,
+      payload: { modo_correcao: modo }, // auditável no ledger (a UI mostra o modo por tentativa)
     });
     runs.push(r.runId);
     texto = r.valor;
@@ -386,6 +408,14 @@ export async function escreverCapitulo(
     await deps.gravador.registrarBloqueio("GATE_" + falhos[0].gate, alvoCap, evidencias);
     return { capitulo, status: "bloqueado", textHash: hashText(texto), gatesFalhos: falhos, problemas, runs };
   };
+
+  // Em reescrita dirigida, a PRIMEIRA ação é a correção do avaliador em modo reescrita
+  // (sobre o texto do disco); no fluxo normal, grava a prosa inicial do escritor.
+  if (opts?.reescritaDirigida) {
+    await corrigirComEscritor(opts.reescritaDirigida.correcoes, "reescrita");
+  } else {
+    await gravarERegistrar(texto);
+  }
 
   let gatesFalhos = await garantirGates();
   if (gatesFalhos.length) return bloquearPorGates(gatesFalhos);

@@ -13,6 +13,11 @@ import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
 import { mapaModelosDoAmbiente } from "./config.js";
 import { ProvedorClaudeCli } from "./provedor.js";
 import { hashJsonCanonico } from "./hash.js";
+import { compilarPacote, type SecaoContexto } from "./compilador.js";
+import { executarPapel } from "./papeis.js";
+import { tarefaCanarioVoz, tarefaEditorEstrutural } from "./tarefas.js";
+import { aplicarEdicaoEstrutural, validarPropostas, type PlanoEstrutural } from "./estrutural.js";
+import { executarMeta9 } from "./meta9.js";
 import { ErroEngine } from "./tipos.js";
 
 /** Tipos de job que a V2 sabe executar (os demais permanecem na V1 mesmo em modo v2). */
@@ -48,6 +53,10 @@ export async function executarJobRoteado(
     const { executarLaboratorio } = await import("./lab/job.js");
     return executarLaboratorio(job as unknown as Parameters<typeof executarLaboratorio>[0]);
   }
+  if (job.tipo === "canario_voz") {
+    // Job exclusivo V2 (wizard): cena curta de amostra da voz antes da fundação.
+    return executarCanarioVoz(job);
+  }
   if (job.project_id && TIPOS_V2.has(job.tipo)) {
     const modo = await engineModeDoProjeto(job.project_id);
     if (modo === "v2") return executarEscritaV2(job);
@@ -69,7 +78,7 @@ export async function executarEscritaV2(job: Job): Promise<void> {
   const projectId = job.project_id!;
   const { data: proj, error } = await sb
     .from("projects")
-    .select("id,titulo,skill_escrita,total_capitulos,piso_palavras")
+    .select("id,titulo,skill_escrita,total_capitulos,piso_palavras,briefing")
     .eq("owner", OWNER)
     .eq("id", projectId)
     .single();
@@ -124,6 +133,18 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     }
   }
 
+  // Decisões explícitas do autor (wizard) = camada 3 do compilador (decisao_autor).
+  const briefing = ((proj as { briefing?: Record<string, unknown> }).briefing ?? {}) as {
+    decisoes_autor?: { texto?: string; em?: string }[];
+  };
+  const instrucoesAutor = (briefing.decisoes_autor ?? [])
+    .filter((d) => typeof d?.texto === "string" && d.texto.trim())
+    .map((d) => ({
+      texto: d.texto!.trim(),
+      camada: "decisao_autor" as const,
+      fonte: `autor:${d.em ?? "briefing"}`,
+    }));
+
   const deps: DepsPipeline = {
     gravador,
     persistencia,
@@ -136,6 +157,7 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     editionId: job.edition_id ?? null,
     jobId: job.id,
     docsFactuais,
+    instrucoesAutor,
   };
 
   await atualizarProgresso(job.id, {
@@ -183,6 +205,222 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     }
   }
 
-  await gravador.mudarFase("revisao_final");
+  // Retomabilidade: um job re-executado com a meta-nota já em curso NUNCA pode
+  // tentar regredir a fase (avaliacao → revisao_final é transição inválida) nem
+  // re-rodar o editor estrutural (cada retomada geraria um plano novo).
+  const estadoPosEscrita = await gravador.carregarEstado();
+  if (estadoPosEscrita.doc.fase === "concluido") {
+    await atualizarProgresso(job.id, { fase: "CONCLUIDO", etapa: "já concluído (retomada)" });
+    return;
+  }
+  if (estadoPosEscrita.doc.fase === "escrita") {
+    await gravador.mudarFase("revisao_final");
+  }
   await atualizarProgresso(job.id, { fase: "REVISAO_FINAL", etapa: "capítulos aprovados" });
+
+  // ---------------------------------------------------------------------------
+  // PARTE A — Editor estrutural (propõe corte/reordenação; o pipeline aplica no disco).
+  // Pulado na retomada quando o estado já registra uma edição estrutural.
+  // ---------------------------------------------------------------------------
+  if (estadoPosEscrita.doc.edicao_estrutural) {
+    await atualizarProgresso(job.id, { fase: "EDICAO_ESTRUTURAL", etapa: "já aplicada (retomada)" });
+    return executarMeta9Integrada(job, {
+      gravador, persistencia, deps, contrato, dirProjeto, projectId, docsFactuais,
+    });
+  }
+  const secoesCaps: SecaoContexto[] = [];
+  for (let n = 1; n <= total; n++) {
+    const ficha = await persistencia.lerFichaMaisRecente(projectId, n);
+    if (ficha) {
+      secoesCaps.push({ titulo: `CAPÍTULO ${n} — FICHA`, texto: JSON.stringify(ficha, null, 2), fonte: `spec:${n}` });
+    } else {
+      // Sem ficha persistida: usa as primeiras ~150 palavras da prosa como resumo estrutural.
+      let resumo = "";
+      try {
+        const t = await fs.readFile(path.join(deps.dirManuscrito, `capitulo-${String(n).padStart(2, "0")}.md`), "utf8");
+        resumo = t.split(/\s+/).filter(Boolean).slice(0, 150).join(" ");
+      } catch {
+        /* capítulo ausente no disco: seção fica vazia */
+      }
+      secoesCaps.push({ titulo: `CAPÍTULO ${n} — ABERTURA`, texto: resumo, fonte: `capitulo:${n}` });
+    }
+  }
+
+  const compEd = compilarPacote({ papel: "editor_estrutural", alvo: "livro", contrato, perfil: deps.perfil, fatos: secoesCaps });
+  if (!compEd.ok) {
+    throw new ErroEngine({
+      codigo: "EDICAO_ESTRUTURAL_BLOQUEADA",
+      classe: "qualidade",
+      mensagem: `edição estrutural bloqueada na compilação: ${compEd.bloqueios.map((b) => `${b.codigo}: ${b.detalhe}`).join(" · ")}`,
+    });
+  }
+  let plano: PlanoEstrutural;
+  let runIdEd: string;
+  try {
+    const r = await executarPapel<PlanoEstrutural>({
+      gravador,
+      provedor: deps.provedor,
+      mapa: deps.mapa,
+      jobId: job.id,
+      editionId: job.edition_id ?? null,
+      papel: "editor_estrutural",
+      alvo: "livro",
+      pacote: compEd.pacote!,
+      tarefa: tarefaEditorEstrutural(total, contrato.contrato),
+      parse: (t) => validarPropostas(extrairJson(t), total),
+    });
+    plano = r.valor;
+    runIdEd = r.runId;
+  } catch (e) {
+    // Erro de schema após os retries do executor → qualidade (não silencioso).
+    if (e instanceof ErroEngine && e.codigo === "FORA_DO_SCHEMA") {
+      throw new ErroEngine({ codigo: "EDICAO_ESTRUTURAL_SCHEMA", classe: "qualidade", mensagem: e.message });
+    }
+    throw e;
+  }
+  const relatorioEd = aplicarEdicaoEstrutural({ dirManuscrito: deps.dirManuscrito, propostas: plano.propostas, total });
+  await gravador.registrarEdicaoEstrutural({
+    run_id: runIdEd,
+    propostas: plano.propostas.length,
+    aplicadas: relatorioEd.aplicadas.length,
+    detalhe: relatorioEd.aplicadas,
+  });
+  await gravador.aplicarMapaCapitulos(relatorioEd.mapa);
+  await atualizarProgresso(job.id, {
+    fase: "EDICAO_ESTRUTURAL",
+    propostas: plano.propostas.length,
+    aplicadas: relatorioEd.aplicadas.length,
+  });
+
+  // ---------------------------------------------------------------------------
+  // PARTE B — Meta-nota (bestseller): consolida, avalia e reescreve até a meta.
+  // ---------------------------------------------------------------------------
+  await executarMeta9Integrada(job, { gravador, persistencia, deps, contrato, dirProjeto, projectId, docsFactuais });
+}
+
+/** Chamada da meta-nota compartilhada entre o fluxo normal e a retomada. */
+async function executarMeta9Integrada(
+  job: Job,
+  ctx: {
+    gravador: Gravador;
+    persistencia: Awaited<ReturnType<typeof criarPersistencia>>["persistencia"];
+    deps: DepsPipeline;
+    contrato: ReturnType<typeof carregarContrato>;
+    dirProjeto: string;
+    projectId: string;
+    docsFactuais: { titulo: string; texto: string; fonte: string }[];
+  }
+): Promise<void> {
+  await executarMeta9({
+    gravador: ctx.gravador,
+    persistencia: ctx.persistencia,
+    provedor: ctx.deps.provedor,
+    mapa: ctx.deps.mapa,
+    contrato: ctx.contrato,
+    perfil: ctx.deps.perfil,
+    dirProjeto: ctx.dirProjeto,
+    dirManuscrito: ctx.deps.dirManuscrito,
+    projectId: ctx.projectId,
+    editionId: job.edition_id ?? null,
+    jobId: job.id,
+    docsFactuais: ctx.docsFactuais,
+    meta: (job.payload as { meta_nota?: number })?.meta_nota ?? 9,
+    maxIteracoes: (job.payload as { max_iteracoes?: number })?.max_iteracoes ?? 3,
+    reportarEtapa: async (etapa, dados) => {
+      if (etapa === "CONSOLIDACAO") await atualizarProgresso(job.id, { fase: "CONSOLIDACAO" });
+      else if (etapa === "AVALIACAO") await atualizarProgresso(job.id, { fase: "AVALIACAO", ...(dados ?? {}) });
+      else if (etapa === "CONCLUIDO") await atualizarProgresso(job.id, { fase: "CONCLUIDO", ...(dados ?? {}) });
+    },
+  });
+}
+
+/**
+ * Canário de voz (wizard, F4): UMA cena curta de amostra na skill escolhida, antes
+ * da fundação. O texto vai para jobs.progresso.canario_voz (a UI lê de lá) e uma
+ * cópia de auditoria fica em <dirProjeto>/canario-voz.md. Nenhum capítulo é criado.
+ */
+export async function executarCanarioVoz(job: Job): Promise<void> {
+  const { sb, OWNER } = await import("../supabase.js");
+  const { projDir, CLAUDE_BIN } = await import("../lib.js");
+  const projectId = job.project_id;
+  if (!projectId) {
+    throw new ErroEngine({ codigo: "PROJETO_AUSENTE", classe: "configuracao", mensagem: "canario_voz sem project_id" });
+  }
+  const { data: proj, error } = await sb
+    .from("projects")
+    .select("id,titulo,skill_escrita,briefing")
+    .eq("owner", OWNER)
+    .eq("id", projectId)
+    .single();
+  if (error || !proj) {
+    throw new ErroEngine({ codigo: "PROJETO_AUSENTE", classe: "configuracao", mensagem: `projeto ${projectId} não encontrado: ${error?.message ?? ""}` });
+  }
+
+  const skillV1 = (job.payload as { skill_escrita?: string })?.skill_escrita
+    ?? (proj as { skill_escrita?: string }).skill_escrita
+    ?? "";
+  const skillId = MAPA_SKILL_V1_V2[skillV1] ?? skillV1;
+  const contrato = carregarContrato(skillId);
+
+  const briefing = ((proj as { briefing?: Record<string, unknown> }).briefing ?? {}) as { ideia_central?: string };
+  const ideia = (briefing.ideia_central ?? "").trim() || `um livro na família ${contrato.contrato.familia_editorial}`;
+
+  const dirProjeto = projDir(projectId);
+  const { persistencia } = await criarPersistencia({ dirProjeto });
+  const gravador = new Gravador({ persistencia, projectId });
+
+  // Perfil sintético: ainda não há fundação — o canário demonstra a VOZ do contrato.
+  const comp = compilarPacote({
+    papel: "escritor",
+    alvo: "canario-voz",
+    contrato,
+    perfil: {
+      texto: `Amostra de voz pré-fundação. Ideia central do autor: ${ideia}`,
+      skillId: contrato.contrato.id,
+      hash: hashJsonCanonico(ideia),
+      validado: true,
+    },
+  });
+  if (!comp.ok) {
+    throw new ErroEngine({
+      codigo: "CANARIO_VOZ_BLOQUEADO",
+      classe: "configuracao",
+      mensagem: `canário de voz bloqueado na compilação: ${comp.bloqueios.map((b) => `${b.codigo}: ${b.detalhe}`).join(" · ")}`,
+    });
+  }
+  const r = await executarPapel<string>({
+    gravador,
+    provedor: new ProvedorClaudeCli(CLAUDE_BIN, dirProjeto),
+    mapa: mapaModelosDoAmbiente(),
+    jobId: job.id,
+    papel: "escritor",
+    alvo: "canario-voz",
+    pacote: comp.pacote!,
+    tarefa: tarefaCanarioVoz(ideia, contrato.contrato),
+    parse: (t) => {
+      const limpo = t.trim();
+      if (!limpo) throw new Error("cena vazia");
+      return limpo;
+    },
+  });
+
+  // Cópia de auditoria no disco (worker escreve; modelo nunca toca disco).
+  await fs.mkdir(dirProjeto, { recursive: true });
+  await fs.writeFile(path.join(dirProjeto, "canario-voz.md"), r.valor, "utf8");
+
+  await atualizarProgresso(job.id, {
+    fase: "CANARIO_VOZ",
+    canario_voz: {
+      texto: r.valor,
+      skill_id: contrato.contrato.id,
+      contrato_versao: contrato.contrato.versao,
+      hash: hashJsonCanonico(r.valor),
+    },
+  });
+}
+
+/** Extrai JSON da resposta do modelo (aceita cerca ```json ... ```). Lança se inválido. */
+function extrairJson(texto: string): unknown {
+  const m = texto.match(/```(?:json)?\s*([\s\S]*?)```/);
+  return JSON.parse((m ? m[1] : texto).trim());
 }
