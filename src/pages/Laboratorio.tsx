@@ -30,6 +30,18 @@ interface LabCega {
   texto: string;
 }
 
+interface LabSkillVersao {
+  id: string;
+  versao: string;
+  hash: string;
+}
+
+interface LabRelease {
+  decisao: "aprovada" | "rejeitada";
+  por: string;
+  em: string;
+}
+
 interface ProgressoLab {
   fase?: string;
   etapa?: string;
@@ -37,6 +49,10 @@ interface ProgressoLab {
   lab_execucao_id?: string;
   lab_cegas?: LabCega[];
   lab_gabarito?: Record<string, string>;
+  // Versões dos contratos da execução — só aparece se o worker publicar (ver rodar.ts/job.ts).
+  lab_skills?: LabSkillVersao[];
+  // Decisão do autor sobre o release, registrada manualmente pela UI.
+  lab_release?: LabRelease;
 }
 
 const DECISAO: Record<string, { label: string; variant: BadgeVariant }> = {
@@ -81,7 +97,7 @@ function skillsDoRelatorio(rel?: LabRelatorio, gabarito?: Record<string, string>
   return gabarito ? Array.from(new Set(Object.values(gabarito))) : [];
 }
 
-function Relatorio({ rel }: { rel: LabRelatorio }) {
+function Relatorio({ rel, skillsVersoes }: { rel: LabRelatorio; skillsVersoes?: LabSkillVersao[] }) {
   const skills = skillsDoRelatorio(rel);
   const dec = DECISAO[rel.decisao] ?? { label: rel.decisao, variant: "outline" as BadgeVariant };
   const matriz = rel.matrizConfusao;
@@ -97,7 +113,24 @@ function Relatorio({ rel }: { rel: LabRelatorio }) {
           · distinguibilidade da máquina: <span className="tabular-nums">{pct(rel.distinguibilidade)}</span>
         </span>
         {rel.execucaoId && <span className="text-xs text-muted-foreground">· execução {rel.execucaoId}</span>}
+        {rel.anterior && (
+          <span className="text-xs text-muted-foreground">
+            · comparada com execução anterior {rel.anterior}
+          </span>
+        )}
       </div>
+
+      {/* Honestidade: só exibe versões de contrato se o worker as publicou em progresso.lab_skills. */}
+      {skillsVersoes?.length ? (
+        <p className="text-xs text-muted-foreground">
+          contratos: {skillsVersoes.map((s) => `${s.id}@${s.versao}`).join(" · ")}
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          versões dos contratos não publicadas nesta execução (worker ainda não grava
+          progresso.lab_skills) — mostrando só o que está disponível.
+        </p>
+      )}
 
       <div className="overflow-x-auto rounded-md border">
         <table className="w-full text-xs">
@@ -258,6 +291,7 @@ export default function Laboratorio() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [executando, setExecutando] = useState(false);
+  const [registrando, setRegistrando] = useState(false);
 
   const carregar = useCallback(async () => {
     const { data, error } = await supabase
@@ -297,6 +331,33 @@ export default function Laboratorio() {
       toast.error((e as Error).message);
     } finally {
       setExecutando(false);
+    }
+  }
+
+  // Registra a decisão do autor (independente da decisão automática do relatório):
+  // lê o progresso atual do job, faz merge de lab_release e grava de volta.
+  async function registrarDecisao(jobId: string, decisao: LabRelease["decisao"]) {
+    setRegistrando(true);
+    try {
+      const { data, error: errLeitura } = await supabase
+        .from("jobs")
+        .select("progresso")
+        .eq("id", jobId)
+        .single();
+      if (errLeitura) throw errLeitura;
+      const atualProg = (data?.progresso ?? {}) as ProgressoLab;
+      const merged: ProgressoLab = {
+        ...atualProg,
+        lab_release: { decisao, por: "autor", em: new Date().toISOString() },
+      };
+      const { error } = await supabase.from("jobs").update({ progresso: merged }).eq("id", jobId);
+      if (error) throw error;
+      toast.success(decisao === "aprovada" ? "Aprovação registrada." : "Rejeição registrada.");
+      await carregar();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setRegistrando(false);
     }
   }
 
@@ -378,7 +439,64 @@ export default function Laboratorio() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Relatorio rel={pgRelatorio.lab_relatorio} />
+                <Relatorio rel={pgRelatorio.lab_relatorio} skillsVersoes={pgRelatorio.lab_skills} />
+              </CardContent>
+            </Card>
+          )}
+
+          {jobRelatorio && pgRelatorio?.lab_relatorio && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-xl">Decisão de release</CardTitle>
+                <CardDescription>
+                  A versão ativa dos contratos é a publicada com o worker (repo); este registro
+                  documenta a decisão de release.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="text-xs text-muted-foreground">Decisão automática:</span>
+                  <Badge
+                    variant={
+                      (DECISAO[pgRelatorio.lab_relatorio.decisao] ?? { variant: "outline" as BadgeVariant })
+                        .variant
+                    }
+                  >
+                    {(DECISAO[pgRelatorio.lab_relatorio.decisao] ?? { label: pgRelatorio.lab_relatorio.decisao })
+                      .label}
+                  </Badge>
+                </div>
+                {pgRelatorio.lab_release ? (
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="text-xs text-muted-foreground">Decisão do autor:</span>
+                    <Badge variant={pgRelatorio.lab_release.decisao === "aprovada" ? "success" : "destructive"}>
+                      {pgRelatorio.lab_release.decisao}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      · {pgRelatorio.lab_release.por} · {fmtData(pgRelatorio.lab_release.em)}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      disabled={registrando}
+                      onClick={() => registrarDecisao(jobRelatorio.id, "aprovada")}
+                    >
+                      {registrando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                      Registrar aprovação do autor
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={registrando}
+                      onClick={() => registrarDecisao(jobRelatorio.id, "rejeitada")}
+                    >
+                      {registrando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                      Registrar rejeição
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}

@@ -23,10 +23,29 @@ export interface EstadoCanonicoV2 {
   updated_at?: string;
   doc: {
     schema: string;
-    fase: string;
+    // Ordem lógica: escrita → revisao_final → consolidacao → avaliacao → concluido.
+    fase:
+      | "fundacao"
+      | "estrutura"
+      | "escrita"
+      | "revisao_final"
+      | "consolidacao"
+      | "avaliacao"
+      | "concluido"
+      | "bloqueado";
     skill?: { id: string; versao: string; hash: string };
     fundacao?: { versao: string; hash: string; docs: Record<string, string> };
     total_capitulos?: number;
+    // Edição estrutural (editor_estrutural PROPÕE; o pipeline aplica os cortes/reordenações).
+    edicao_estrutural?: {
+      run_id?: string;
+      propostas: number;
+      aplicadas: number;
+      detalhe: string[];
+      em: string;
+    };
+    // Meta-nota (avaliação de livro): última nota alcançada e o alvo comercial.
+    avaliacao?: { nota?: number; meta: number; iteracoes: number; relatorio_path?: string; em: string };
     capitulos: Record<string, CapituloEstadoV2>;
     bloqueios: { codigo: string; alvo: string; detalhe: string; desde: string }[];
     migracao?: { origem: string; em: string; divergencias?: number };
@@ -54,6 +73,7 @@ export interface RunV2 {
   tokens_out?: number;
   erro?: { codigo: string; classe: string; mensagem: string } | null;
   evidencias?: unknown[];
+  payload?: Record<string, unknown> | null;
 }
 
 export interface ReviewV2 {
@@ -106,7 +126,7 @@ export async function listarRunsV2(projectId: string, limite = 50): Promise<Cons
   const { data, error } = await supabase
     .from("engine_runs")
     .select(
-      "id,papel,capacidade,model_provider,model_name,alvo,status,attempt,parent_run_id,engine_version,skill_id,skill_version,input_bundle_hash,output_hash,started_at,finished_at,tokens_in,tokens_out,erro"
+      "id,papel,capacidade,model_provider,model_name,alvo,status,attempt,parent_run_id,engine_version,skill_id,skill_version,input_bundle_hash,output_hash,started_at,finished_at,tokens_in,tokens_out,erro,payload"
     )
     .eq("project_id", projectId)
     .order("started_at", { ascending: false })

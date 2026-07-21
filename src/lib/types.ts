@@ -51,6 +51,7 @@ export const JOB_TIPOS = [
   "gerar_post_social",
   "aceitar_excecao_qualidade",
   "laboratorio_v2",
+  "canario_voz",
 ] as const;
 export type JobTipo = (typeof JOB_TIPOS)[number];
 
@@ -101,6 +102,7 @@ export interface Project {
   status: ProjectStatus;
   briefing: Record<string, unknown>;
   skill_escrita: string | null;
+  engine_mode: string | null;
   paginas_alvo: number | null;
   total_capitulos: number | null;
   piso_palavras: number;
