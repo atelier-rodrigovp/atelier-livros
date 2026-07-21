@@ -69,9 +69,14 @@ export class SupabasePersistencia implements PersistenciaV2 {
     return { sb, OWNER };
   }
 
-  /** Retenta SÓ falha transitória de rede (backoff 2s/8s/30s); erro de banco propaga direto. */
+  /**
+   * Retenta SÓ falha transitória de rede; erro de banco propaga direto.
+   * Backoff 2s/8s/30s/60s/120s — uma oscilação de minutos no Supabase matava um
+   * runner de horas (canário hoover 2026-07-21 perdeu a prosa do capítulo em
+   * memória por esgotar 3 retries em ~40s).
+   */
   private async comRede<T>(fn: () => Promise<T>): Promise<T> {
-    const esperas = [2000, 8000, 30000];
+    const esperas = [2000, 8000, 30000, 60000, 120000];
     for (let tentativa = 0; ; tentativa++) {
       try {
         return await fn();
