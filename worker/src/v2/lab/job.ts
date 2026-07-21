@@ -60,6 +60,8 @@ export async function executarLaboratorio(job: JobLab): Promise<void> {
     lab_relatorio: relatorio,
     lab_execucao_id: exec.id,
     lab_relatorio_path: relPath,
+    // Versões dos contratos desta execução (a UI mostra "dan-brown@1.1.0 …").
+    lab_skills: exec.skills,
     // Amostras cegas para avaliação HUMANA: sem skillId (a UI revela só depois do palpite).
     lab_cegas: [...exec.amostras]
       .sort((a, b) => a.textoHash.localeCompare(b.textoHash))
