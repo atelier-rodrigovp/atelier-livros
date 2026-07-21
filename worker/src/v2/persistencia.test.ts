@@ -101,4 +101,26 @@ describe("DiscoPersistencia", () => {
     expect(await p.lerEstado("proj-1")).toBeNull();
     expect(await p.disponivel()).toBe(true);
   });
+
+  it("maiorVersaoSpec enxerga specs órfãs (sem capítulo escrito no estado)", async () => {
+    const p = new DiscoPersistencia(dir);
+    expect(await p.maiorVersaoSpec("proj-1", 1)).toBe(0);
+
+    const specBase = {
+      project_id: "proj-1",
+      edition_id: null,
+      capitulo: 1,
+      hash: "h",
+      status: "validada",
+      ficha: { schema: "scene-spec/v1", capitulo: 1 },
+      origem_run_id: null,
+    };
+    await p.inserirSpec({ ...specBase, versao: 1 } as never);
+    await p.inserirSpec({ ...specBase, versao: 3 } as never);
+    await p.inserirSpec({ ...specBase, capitulo: 2, versao: 9 } as never);
+
+    expect(await p.maiorVersaoSpec("proj-1", 1)).toBe(3);
+    expect(await p.maiorVersaoSpec("proj-1", 2)).toBe(9);
+    expect(await p.maiorVersaoSpec("outro-projeto", 1)).toBe(0);
+  });
 });

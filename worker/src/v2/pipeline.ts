@@ -217,12 +217,24 @@ export async function escreverCapitulo(
   // -------------------------------------------------------------------------
   // 1. FICHA (arquiteto_cena) — ou usa a existente
   // -------------------------------------------------------------------------
+  // Versão da ficha derivada do MÁXIMO entre estado canônico e banco: o estado
+  // só registra spec_versao quando o escritor conclui, então queda entre gravar
+  // a ficha e escrever o capítulo deixaria spec órfã no banco e a retomada
+  // colidiria com a unique(project, capítulo, versão) (achados dos canários 6 e 7).
+  const estadoParaSpec = await deps.gravador.carregarEstado();
+  const versaoConhecida = Math.max(
+    estadoParaSpec.doc.capitulos[String(capitulo)]?.spec_versao ?? 0,
+    await deps.persistencia.maiorVersaoSpec(deps.projectId, capitulo)
+  );
+  let specVersao: number;
   let ficha: SceneSpec;
   if (opts?.fichaExistente) {
-    // Limitação documentada: a interface de persistência não tem consulta de spec;
-    // ficha existente é assumida como já persistida — o pipeline não re-insere.
+    // Ficha existente já está persistida (o pipeline não re-insere); o estado
+    // referencia a última versão conhecida.
+    specVersao = Math.max(versaoConhecida, 1);
     ficha = opts.fichaExistente;
   } else {
+    specVersao = versaoConhecida + 1;
     const comp = compilar("arquiteto_cena", `spec:${capitulo}`);
     if (!comp.ok) return bloquearPorCompilacao(comp.bloqueios);
     const r = await executarPapel<SceneSpec>({
@@ -248,13 +260,11 @@ export async function escreverCapitulo(
     });
     runs.push(r.runId);
     ficha = r.valor;
-    // Sempre versão 1: sem consulta de specs na interface, o pipeline não sabe se já
-    // existe versão anterior (limitação aceita; a UI/worker resolve versões futuras).
     await deps.persistencia.inserirSpec({
       project_id: deps.projectId,
       edition_id: deps.editionId ?? null,
       capitulo,
-      versao: 1,
+      versao: specVersao,
       hash: hashJsonCanonico(ficha),
       status: "validada",
       ficha,
@@ -323,7 +333,7 @@ export async function escreverCapitulo(
     gravarAtomico(caminho, t);
     await deps.gravador.registrarCapituloEscrito(capitulo, caminho, {
       palavras: contarPalavras(t),
-      spec_versao: 1,
+      spec_versao: specVersao,
       spec_hash: specHash,
     });
   };
@@ -476,7 +486,22 @@ export async function escreverCapitulo(
     if (parecer.correcoes.length > 0 && correcoesFeitas < maxCorrecoes && !semConvergencia) {
       violacoesAnterior = violacoes;
       correcoesFeitas++;
-      await corrigirComEscritor(parecer.correcoes);
+      // Violação difusa (ex.: cadência estourada no capítulo inteiro) não se resolve
+      // com lista cirúrgica: cada violação confirmada vira também uma instrução
+      // global com a cota-alvo do contrato (achado do canário hoover).
+      const cotas = new Map(sinais.map((s) => [s.sinal, s.cota]));
+      const globais = parecer.sinais
+        .filter((s) => s.disposicao === "violacao_confirmada")
+        .map((s) => {
+          const cota = cotas.get(s.sinal);
+          const alvo = cota?.max != null ? `no máximo ${cota.max}` : cota?.min != null ? `no mínimo ${cota.min}` : "dentro da cota do contrato";
+          return {
+            local: "capítulo inteiro",
+            problema: `${s.sinal} = ${s.valor} (alvo: ${alvo})`,
+            instrucao: `reduza ${s.sinal} até ${alvo} no capítulo todo — funda fragmentos em frases completas e corte reformulações, preservando conteúdo e voz`,
+          };
+        });
+      await corrigirComEscritor([...parecer.correcoes, ...globais]);
       gatesFalhos = await garantirGates();
       if (gatesFalhos.length) return bloquearPorGates(gatesFalhos);
       continue; // re-roda sinais + revisor + auditor no texto corrigido

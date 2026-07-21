@@ -32,6 +32,8 @@ export interface PersistenciaV2 {
   atualizarRun(id: string, patch: Partial<RunRegistro>): Promise<void>;
   inserirReview(review: ReviewRegistro): Promise<string>;
   inserirSpec(spec: SpecRegistro): Promise<string>;
+  /** Maior versão de spec já persistida para (projeto, capítulo); 0 se nenhuma. */
+  maiorVersaoSpec(projectId: string, capitulo: number): Promise<number>;
   lerEstado(projectId: string): Promise<EstadoCanonico | null>;
   /** Grava com versao+1 (optimistic lock); ErroConcorrencia se a versão esperada divergir. */
   gravarEstado(estado: EstadoCanonico): Promise<void>;
@@ -52,11 +54,31 @@ function tabelaAusente(erro: { code?: string; message?: string } | null): boolea
   );
 }
 
+/** Falha transitória de rede (supabase-js LANÇA nesses casos; erros de banco voltam em `error`). */
+function falhaTransitoriaDeRede(e: unknown): boolean {
+  const msg = e instanceof Error ? `${e.message} ${(e.cause as Error | undefined)?.message ?? ""}` : String(e);
+  return /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up/i.test(msg);
+}
+
 export class SupabasePersistencia implements PersistenciaV2 {
   // Import tardio: módulos que só usam DiscoPersistencia (testes) não exigem .env.
   private async cliente() {
     const { sb, OWNER } = await import("../supabase.js");
     return { sb, OWNER };
+  }
+
+  /** Retenta SÓ falha transitória de rede (backoff 2s/8s/30s); erro de banco propaga direto. */
+  private async comRede<T>(fn: () => Promise<T>): Promise<T> {
+    const esperas = [2000, 8000, 30000];
+    for (let tentativa = 0; ; tentativa++) {
+      try {
+        return await fn();
+      } catch (e) {
+        if (!falhaTransitoriaDeRede(e) || tentativa >= esperas.length) throw e;
+        console.warn(`[engine-v2] rede instável (${(e as Error).message}); retentando em ${esperas[tentativa] / 1000}s…`);
+        await new Promise((r) => setTimeout(r, esperas[tentativa]));
+      }
+    }
   }
 
   private conferir(erro: { code?: string; message?: string } | null, contexto: string): void {
@@ -66,95 +88,126 @@ export class SupabasePersistencia implements PersistenciaV2 {
   }
 
   async inserirRun(run: RunRegistro): Promise<string> {
-    const { sb, OWNER } = await this.cliente();
-    const { data, error } = await sb
-      .from("engine_runs")
-      .insert({ ...run, owner: OWNER })
-      .select("id")
-      .single();
-    this.conferir(error, "engine_runs.insert");
-    return (data as { id: string }).id;
+    return this.comRede(async () => {
+      const { sb, OWNER } = await this.cliente();
+      const { data, error } = await sb
+        .from("engine_runs")
+        .insert({ ...run, owner: OWNER })
+        .select("id")
+        .single();
+      this.conferir(error, "engine_runs.insert");
+      return (data as { id: string }).id;
+    });
   }
 
   async atualizarRun(id: string, patch: Partial<RunRegistro>): Promise<void> {
-    const { sb, OWNER } = await this.cliente();
-    const { error } = await sb.from("engine_runs").update(patch).eq("id", id).eq("owner", OWNER);
-    this.conferir(error, "engine_runs.update");
+    return this.comRede(async () => {
+      const { sb, OWNER } = await this.cliente();
+      const { error } = await sb.from("engine_runs").update(patch).eq("id", id).eq("owner", OWNER);
+      this.conferir(error, "engine_runs.update");
+    });
   }
 
   async inserirReview(review: ReviewRegistro): Promise<string> {
-    const { sb, OWNER } = await this.cliente();
-    const { data, error } = await sb
-      .from("engine_reviews")
-      .insert({ ...review, owner: OWNER })
-      .select("id")
-      .single();
-    this.conferir(error, "engine_reviews.insert");
-    return (data as { id: string }).id;
+    return this.comRede(async () => {
+      const { sb, OWNER } = await this.cliente();
+      const { data, error } = await sb
+        .from("engine_reviews")
+        .insert({ ...review, owner: OWNER })
+        .select("id")
+        .single();
+      this.conferir(error, "engine_reviews.insert");
+      return (data as { id: string }).id;
+    });
   }
 
   async inserirSpec(spec: SpecRegistro): Promise<string> {
-    const { sb, OWNER } = await this.cliente();
-    const { data, error } = await sb
-      .from("engine_scene_specs")
-      .insert({ ...spec, owner: OWNER })
-      .select("id")
-      .single();
-    this.conferir(error, "engine_scene_specs.insert");
-    return (data as { id: string }).id;
+    return this.comRede(async () => {
+      const { sb, OWNER } = await this.cliente();
+      const { data, error } = await sb
+        .from("engine_scene_specs")
+        .insert({ ...spec, owner: OWNER })
+        .select("id")
+        .single();
+      this.conferir(error, "engine_scene_specs.insert");
+      return (data as { id: string }).id;
+    });
+  }
+
+  async maiorVersaoSpec(projectId: string, capitulo: number): Promise<number> {
+    return this.comRede(async () => {
+      const { sb, OWNER } = await this.cliente();
+      const { data, error } = await sb
+        .from("engine_scene_specs")
+        .select("versao")
+        .eq("project_id", projectId)
+        .eq("capitulo", capitulo)
+        .eq("owner", OWNER)
+        .order("versao", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      this.conferir(error, "engine_scene_specs.select");
+      return (data as { versao: number } | null)?.versao ?? 0;
+    });
   }
 
   async lerEstado(projectId: string): Promise<EstadoCanonico | null> {
-    const { sb, OWNER } = await this.cliente();
-    const { data, error } = await sb
-      .from("engine_state")
-      .select("project_id, engine_version, versao, doc, updated_at")
-      .eq("project_id", projectId)
-      .eq("owner", OWNER)
-      .maybeSingle();
-    this.conferir(error, "engine_state.select");
-    return (data as EstadoCanonico | null) ?? null;
+    return this.comRede(async () => {
+      const { sb, OWNER } = await this.cliente();
+      const { data, error } = await sb
+        .from("engine_state")
+        .select("project_id, engine_version, versao, doc, updated_at")
+        .eq("project_id", projectId)
+        .eq("owner", OWNER)
+        .maybeSingle();
+      this.conferir(error, "engine_state.select");
+      return (data as EstadoCanonico | null) ?? null;
+    });
   }
 
   async gravarEstado(estado: EstadoCanonico): Promise<void> {
-    const { sb, OWNER } = await this.cliente();
-    const proxima = estado.versao + 1;
-    if (estado.versao === 0) {
-      // Insert inicial: só quando a linha não existe; conflito de chave = corrida perdida.
-      const { error } = await sb.from("engine_state").insert({
-        project_id: estado.project_id,
-        owner: OWNER,
-        engine_version: estado.engine_version,
-        versao: proxima,
-        doc: estado.doc,
-      });
-      if (error && error.code === "23505") {
-        throw new ErroConcorrencia(`engine_state já existe para ${estado.project_id} (insert inicial perdeu a corrida)`);
+    return this.comRede(async () => {
+      const { sb, OWNER } = await this.cliente();
+      const proxima = estado.versao + 1;
+      if (estado.versao === 0) {
+        // Insert inicial: só quando a linha não existe; conflito de chave = corrida perdida.
+        const { error } = await sb.from("engine_state").insert({
+          project_id: estado.project_id,
+          owner: OWNER,
+          engine_version: estado.engine_version,
+          versao: proxima,
+          doc: estado.doc,
+        });
+        if (error && error.code === "23505") {
+          throw new ErroConcorrencia(`engine_state já existe para ${estado.project_id} (insert inicial perdeu a corrida)`);
+        }
+        this.conferir(error, "engine_state.insert");
+      } else {
+        const { data, error } = await sb
+          .from("engine_state")
+          .update({ engine_version: estado.engine_version, versao: proxima, doc: estado.doc })
+          .eq("project_id", estado.project_id)
+          .eq("owner", OWNER)
+          .eq("versao", estado.versao)
+          .select("project_id");
+        this.conferir(error, "engine_state.update");
+        if (!data || data.length === 0) {
+          throw new ErroConcorrencia(
+            `engine_state de ${estado.project_id}: versão esperada ${estado.versao} não encontrada (gravação concorrente)`
+          );
+        }
       }
-      this.conferir(error, "engine_state.insert");
-    } else {
-      const { data, error } = await sb
-        .from("engine_state")
-        .update({ engine_version: estado.engine_version, versao: proxima, doc: estado.doc })
-        .eq("project_id", estado.project_id)
-        .eq("owner", OWNER)
-        .eq("versao", estado.versao)
-        .select("project_id");
-      this.conferir(error, "engine_state.update");
-      if (!data || data.length === 0) {
-        throw new ErroConcorrencia(
-          `engine_state de ${estado.project_id}: versão esperada ${estado.versao} não encontrada (gravação concorrente)`
-        );
-      }
-    }
-    estado.versao = proxima;
+      estado.versao = proxima;
+    });
   }
 
   async disponivel(): Promise<boolean> {
-    const { sb, OWNER } = await this.cliente();
-    const { error } = await sb.from("engine_state").select("project_id").eq("owner", OWNER).limit(1);
-    this.conferir(error, "engine_state.probe");
-    return true;
+    return this.comRede(async () => {
+      const { sb, OWNER } = await this.cliente();
+      const { error } = await sb.from("engine_state").select("project_id").eq("owner", OWNER).limit(1);
+      this.conferir(error, "engine_state.probe");
+      return true;
+    });
   }
 }
 
@@ -234,6 +287,18 @@ export class DiscoPersistencia implements PersistenciaV2 {
     const id = spec.id ?? randomUUID();
     this.anexar("specs.jsonl", { op: "insert", registro: { ...spec, id } });
     return id;
+  }
+
+  async maiorVersaoSpec(projectId: string, capitulo: number): Promise<number> {
+    let maior = 0;
+    for (const linha of this.lerJsonl("specs.jsonl")) {
+      if (linha.op !== "insert") continue;
+      const r = linha.registro as { project_id?: string; capitulo?: number; versao?: number };
+      if (r.project_id === projectId && r.capitulo === capitulo && typeof r.versao === "number" && r.versao > maior) {
+        maior = r.versao;
+      }
+    }
+    return maior;
   }
 
   async lerEstado(projectId: string): Promise<EstadoCanonico | null> {
