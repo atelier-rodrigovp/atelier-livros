@@ -170,9 +170,29 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     total,
   });
 
+  // Escrita incremental controlada (ex.: prova de 1 capítulo num livro migrado):
+  // payload.max_novos_caps limita quantos capítulos NOVOS esta execução escreve.
+  const maxNovosCaps = Number((job.payload as { max_novos_caps?: number })?.max_novos_caps ?? 0) || Infinity;
+  let novosCaps = 0;
+  const legadosPulados: number[] = [];
+
   for (let n = 1; n <= total; n++) {
     const atual = estado.doc.capitulos[String(n)];
     if (atual && (atual.status === "aprovado" || atual.status === "aprovado_com_excecao")) continue; // retomável
+    if (atual && atual.status === "legado_sem_evidencia") {
+      // Capítulo migrado da V1 sem evidência: NUNCA sobrescrever a prosa do autor.
+      // Reescrevê-lo é decisão humana (UI), não efeito colateral de escrever_livro.
+      legadosPulados.push(n);
+      continue;
+    }
+    if (novosCaps >= maxNovosCaps) {
+      await atualizarProgresso(job.id, {
+        fase: "ESCRITA",
+        etapa: `limite de ${maxNovosCaps} capítulo(s) novo(s) atingido — job encerrado sem revisão final`,
+        ...(legadosPulados.length ? { aviso_legado: `capítulos legado preservados (não reescritos): ${legadosPulados.join(", ")}` } : {}),
+      });
+      return;
+    }
 
     // Trechos anteriores estritamente relevantes: cauda do capítulo anterior (gancho/continuidade local).
     const anteriores: { numero: number; trecho: string }[] = [];
@@ -190,6 +210,7 @@ export async function executarEscritaV2(job: Job): Promise<void> {
 
     await atualizarProgresso(job.id, { cap_atual: n, etapa: `capitulo ${n}/${total}` });
     const r = await escreverCapitulo(deps, n, { anteriores, trechosAnteriores: trechos });
+    novosCaps++;
 
     if (r.status === "bloqueado" || r.status === "reprovado" || r.status === "necessita_decisao_humana") {
       await atualizarProgresso(job.id, {
@@ -203,6 +224,18 @@ export async function executarEscritaV2(job: Job): Promise<void> {
         mensagem: `capítulo ${n} terminou em ${r.status} (${r.problemas[0] ?? r.gatesFalhos[0]?.gate ?? "sem detalhe"})`,
       });
     }
+  }
+
+  // Livro migrado com capítulos legado pulados: o manuscrito NÃO está todo
+  // aprovado pela V2 — revisão final/meta-nota exigiria reescrever prosa do
+  // autor sem decisão humana. Encerra honesto, com o aviso no progresso.
+  if (legadosPulados.length > 0) {
+    await atualizarProgresso(job.id, {
+      fase: "ESCRITA",
+      etapa: "capítulos novos concluídos; capítulos legado preservados (revisão final aguarda decisão do autor)",
+      aviso_legado: `capítulos legado preservados (não reescritos): ${legadosPulados.join(", ")}`,
+    });
+    return;
   }
 
   // Retomabilidade: um job re-executado com a meta-nota já em curso NUNCA pode

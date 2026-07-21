@@ -25,6 +25,9 @@ import { mapaModelosDoAmbiente } from "../src/v2/config.js";
 import { ProvedorClaudeCli } from "../src/v2/provedor.js";
 import { hashJsonCanonico } from "../src/v2/hash.js";
 import { validarSaidaJson } from "../src/v2/gates.js";
+import { tarefaEditorEstrutural } from "../src/v2/tarefas.js";
+import { aplicarEdicaoEstrutural, validarPropostas, type PlanoEstrutural } from "../src/v2/estrutural.js";
+import { executarMeta9 } from "../src/v2/meta9.js";
 
 const BRIEFINGS: Record<string, { titulo: string; premissa: string }> = {
   "dan-brown": {
@@ -218,6 +221,16 @@ async function continuarCapitulos(skillId: string, totalCaps: number, ctx: CtxCa
     if (r.status !== "aprovado" && r.status !== "aprovado_com_excecao") break; // falha é retomável: re-rodar com --dir continua do estado
   }
 
+  // --completo: fases pós-escrita (editor estrutural + meta-nota) quando TODOS
+  // os capítulos terminaram aprovados — é a prova DoD dessas etapas no canário.
+  let fasesFinais: Record<string, unknown> | undefined;
+  const todosAprovados =
+    resultados.length === totalCaps &&
+    resultados.every((r) => r.status === "aprovado" || r.status === "aprovado_com_excecao");
+  if (process.argv.includes("--completo") && todosAprovados) {
+    fasesFinais = await rodarFasesFinais(totalCaps, ctx, deps);
+  }
+
   const relatorio = {
     projectId,
     skill: { id: contrato.contrato.id, versao: contrato.contrato.versao, hash: contrato.hash },
@@ -226,6 +239,7 @@ async function continuarCapitulos(skillId: string, totalCaps: number, ctx: CtxCa
     migracaoPendente,
     fundacao: { fios: fundacao.fios, promessa: fundacao.promessa_editorial, runId: ctx.fundacaoRunId },
     capitulos: resultados,
+    ...(fasesFinais ? { fases_finais: fasesFinais } : {}),
     executadoEm: new Date().toISOString(),
   };
   const relPath = path.join(dirProjeto, "engine-v2", "canario-relatorio.json");
@@ -233,6 +247,68 @@ async function continuarCapitulos(skillId: string, totalCaps: number, ctx: CtxCa
   await fs.writeFile(relPath, JSON.stringify(relatorio, null, 2), "utf8");
   console.log(`relatório: ${relPath}`);
   return relatorio;
+}
+
+/** Fases pós-escrita do canário (--completo): editor estrutural → meta-nota. */
+async function rodarFasesFinais(
+  totalCaps: number,
+  ctx: CtxCanario,
+  deps: DepsPipeline
+): Promise<Record<string, unknown>> {
+  const { contrato, gravador, persistencia, provedor, mapa, projectId, dirProjeto } = ctx;
+  const estado = await gravador.carregarEstado();
+  if (estado.doc.fase === "escrita") await gravador.mudarFase("revisao_final");
+
+  // Editor estrutural (pulado na retomada se já registrado no estado).
+  let edicao: Record<string, unknown> = estado.doc.edicao_estrutural ?? {};
+  if (!estado.doc.edicao_estrutural) {
+    console.log("— editor estrutural…");
+    const secoes: { titulo: string; texto: string; fonte: string }[] = [];
+    for (let n = 1; n <= totalCaps; n++) {
+      const ficha = await persistencia.lerFichaMaisRecente(projectId, n);
+      if (ficha) secoes.push({ titulo: `CAPÍTULO ${n} — FICHA`, texto: JSON.stringify(ficha, null, 2), fonte: `spec:${n}` });
+    }
+    const comp = compilarPacote({ papel: "editor_estrutural", alvo: "livro", contrato, perfil: deps.perfil, fatos: secoes });
+    if (!comp.ok) throw new Error(`edição estrutural bloqueada: ${JSON.stringify(comp.bloqueios)}`);
+    const r = await executarPapel<PlanoEstrutural>({
+      gravador, provedor, mapa,
+      papel: "editor_estrutural",
+      alvo: "livro",
+      pacote: comp.pacote!,
+      tarefa: tarefaEditorEstrutural(totalCaps, contrato.contrato),
+      parse: (t) => {
+        const m = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+        return validarPropostas(JSON.parse((m ? m[1] : t).trim()), totalCaps);
+      },
+    });
+    const rel = aplicarEdicaoEstrutural({ dirManuscrito: deps.dirManuscrito, propostas: r.valor.propostas, total: totalCaps });
+    await gravador.registrarEdicaoEstrutural({ run_id: r.runId, propostas: r.valor.propostas.length, aplicadas: rel.aplicadas.length, detalhe: rel.aplicadas });
+    await gravador.aplicarMapaCapitulos(rel.mapa);
+    edicao = { run_id: r.runId, propostas: r.valor.propostas.length, aplicadas: rel.aplicadas.length, detalhe: rel.aplicadas };
+    console.log(`   → propostas: ${r.valor.propostas.length} · aplicadas: ${rel.aplicadas.length}`);
+  }
+
+  // Meta-nota (orçamento curto no canário; escalação honesta vira registro, não beco).
+  console.log("— meta-nota (avaliação de livro)…");
+  try {
+    const r = await executarMeta9({
+      gravador, persistencia, provedor, mapa, contrato,
+      perfil: deps.perfil,
+      dirProjeto,
+      dirManuscrito: deps.dirManuscrito,
+      projectId,
+      meta: 9,
+      maxIteracoes: 2,
+      docsFactuais: deps.docsFactuais,
+    });
+    console.log(`   → nota ${r.nota} (meta 9) em ${r.iteracoes} iteração(ões) — atingiu: ${r.atingiu}`);
+    return { edicao_estrutural: edicao, avaliacao: { nota: r.nota, atingiu: r.atingiu, iteracoes: r.iteracoes, relatorio: r.relatorioPath } };
+  } catch (e) {
+    const estadoFinal = await gravador.carregarEstado();
+    const av = estadoFinal.doc.avaliacao;
+    console.log(`   → meta não atingida (${e instanceof Error ? e.message : e}) — nota persistida: ${av?.nota ?? "?"}`);
+    return { edicao_estrutural: edicao, avaliacao: { nota: av?.nota, atingiu: false, iteracoes: av?.iteracoes, relatorio: av?.relatorio_path, escalacao: e instanceof Error ? e.message : String(e) } };
+  }
 }
 
 async function main() {
