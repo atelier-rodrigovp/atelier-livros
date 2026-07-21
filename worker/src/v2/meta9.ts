@@ -78,6 +78,17 @@ export interface AvaliacaoLivro {
   resumo: string;
 }
 
+/**
+ * Floor mínimo para APROVAÇÃO (rubrica, banda "market-ready": nenhuma dimensão
+ * major abaixo de 7). A média NUNCA aprova sozinha — o floor decide junto.
+ */
+export const FLOOR_MINIMO_APROVACAO = 7;
+
+/** Predicado ÚNICO de aprovação da meta-nota: média ≥ meta E floor ≥ mínimo. */
+export function atingiuMeta(av: AvaliacaoLivro, meta: number): boolean {
+  return av.nota >= meta && av.floor.nota >= FLOOR_MINIMO_APROVACAO;
+}
+
 /** Média ponderada + floor (determinísticos — o modelo nunca soma a própria nota). */
 export function derivarNotaEFloor(dimensoes: Record<string, DimensaoAvaliada>): { nota: number; floor: { dimensao: string; nota: number } } {
   let soma = 0;
@@ -227,7 +238,7 @@ function pareceDeAvaliacao(av: AvaliacaoLivro, meta: number): Parecer {
     emotional_effect: eixoDe("payoff"),
     continuity: eixoDe("coerencia_consistencia"),
     hook_effectiveness: eixoDe("hook_abertura"),
-    verdict: av.nota >= meta ? "aprovado" : "reprovado",
+    verdict: atingiuMeta(av, meta) ? "aprovado" : "reprovado",
     evidencias,
     sinais: [],
     correcoes,
@@ -447,12 +458,12 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
       run_id: runId,
       capitulo: null,
       text_hash: consolidado.hash,
-      verdict: av.nota >= meta ? "aprovado" : "reprovado",
+      verdict: atingiuMeta(av, meta) ? "aprovado" : "reprovado",
       parecer: pareceDeAvaliacao(av, meta),
     });
     await deps.gravador.registrarAvaliacao({ nota: av.nota, meta, iteracoes: iteracao, relatorio_path: relatorioPath });
 
-    if (av.nota >= meta) {
+    if (atingiuMeta(av, meta)) {
       await deps.gravador.mudarFase("concluido");
       await reportar("CONCLUIDO", { nota: av.nota, meta, iteracoes: iteracao });
       return { atingiu: true, nota: av.nota, iteracoes: iteracao, relatorioPath };
@@ -481,7 +492,8 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
       }));
       const r = await escreverCapitulo(depsPipeline, alvo.capitulo, {
         fichaExistente: ficha,
-        reescritaDirigida: { correcoes, textoBase },
+        textoBase,
+        reescritaDirigida: { correcoes },
       });
       if (r.status !== "aprovado" && r.status !== "aprovado_com_excecao") {
         await deps.gravador.registrarBloqueio(

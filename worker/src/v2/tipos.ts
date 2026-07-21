@@ -148,6 +148,10 @@ export interface SinalDisposto {
   valor: number | string;         // medição do detector
   disposicao: Disposicao;
   evidencia: string;              // trecho/linha localizados
+  /** violacao_confirmada em sinal de contagem exige as ocorrências julgadas reais, citadas uma a uma */
+  ocorrencias_citadas?: { trecho: string; posicao?: string }[];
+  /** disposição parcial: nº de ocorrências medidas julgadas falso positivo (citadas + falsos = valor) */
+  falsos_positivos?: number;
 }
 
 export interface EvidenciaLocalizada {

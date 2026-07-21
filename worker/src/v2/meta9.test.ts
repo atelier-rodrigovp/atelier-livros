@@ -164,6 +164,40 @@ function lerReviews(): { op: string; registro: Record<string, unknown> }[] {
 }
 
 describe("executarMeta9", () => {
+  it("floor decide: média acima da meta com UMA dimensão major fraca REPROVA (floor principle)", async () => {
+    // Nove dimensões em 9.7 e estrutura_ritmo em 6: média ponderada ≈ 9.4 (≥ meta 9),
+    // mas o floor (6) fica abaixo do mínimo da rubrica (7) → reprovado, nunca aprovado.
+    const chaves = [
+      "hook_abertura", "premissa_originalidade", "estrutura_ritmo", "personagens",
+      "prosa_oficio", "payoff", "coerencia_consistencia", "final", "encaixe_mercado", "acabamento",
+    ];
+    const dimensoes = Object.fromEntries(
+      chaves.map((c) => [c, { nota: c === "estrutura_ritmo" ? 6 : 9.7, evidencia: `evidência de ${c}` }])
+    );
+    provedor.enfileirar(
+      "revisor_literario",
+      JSON.stringify({
+        schema: "avaliacao-livro/v2",
+        dimensoes,
+        pontos_fortes: ["prosa excepcional"],
+        pontos_fracos: ["meio do livro sem tração"],
+        capitulos_a_reescrever: [],
+        resumo: "média alta com estrutura fraca",
+      })
+    );
+
+    await expect(executarMeta9(deps({ meta: 9, maxIteracoes: 1 }))).rejects.toMatchObject({
+      codigo: "META_NAO_ATINGIDA",
+    });
+    // A review de livro persiste REPROVADA mesmo com média ≥ meta, e a nota headline fica no estado
+    const reviews = lerReviews().filter((x) => x.registro.capitulo === null);
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0].registro).toMatchObject({ verdict: "reprovado" });
+    const estado = await disco.lerEstado("proj-1");
+    expect(estado?.doc.avaliacao?.nota).toBeGreaterThanOrEqual(9);
+    expect(estado?.doc.fase).not.toBe("concluido");
+  });
+
   it("retomada: fase já em avaliacao não tenta transição inválida e conclui", async () => {
     // Simula um crash anterior: a fase ficou em "avaliacao" (consolidação já feita).
     await gravador.mudarFase("consolidacao");

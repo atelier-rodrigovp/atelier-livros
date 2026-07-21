@@ -16,12 +16,13 @@ import { hashJsonCanonico } from "./hash.js";
 import { compilarPacote, type SecaoContexto } from "./compilador.js";
 import { executarPapel } from "./papeis.js";
 import { tarefaCanarioVoz, tarefaEditorEstrutural } from "./tarefas.js";
+import { gerarFundacaoV2, materializarFundacao } from "./fundacao.js";
 import { aplicarEdicaoEstrutural, validarPropostas, type PlanoEstrutural } from "./estrutural.js";
 import { executarMeta9 } from "./meta9.js";
 import { ErroEngine } from "./tipos.js";
 
 /** Tipos de job que a V2 sabe executar (os demais permanecem na V1 mesmo em modo v2). */
-export const TIPOS_V2 = new Set(["escrever_livro", "laboratorio_v2"]);
+export const TIPOS_V2 = new Set(["escrever_livro", "criar_fundacao", "laboratorio_v2"]);
 
 export async function engineModeDoProjeto(projectId: string): Promise<string> {
   const { sb, OWNER } = await import("../supabase.js");
@@ -59,7 +60,9 @@ export async function executarJobRoteado(
   }
   if (job.project_id && TIPOS_V2.has(job.tipo)) {
     const modo = await engineModeDoProjeto(job.project_id);
-    if (modo === "v2") return executarEscritaV2(job);
+    if (modo === "v2") {
+      return job.tipo === "criar_fundacao" ? executarFundacaoV2Job(job) : executarEscritaV2(job);
+    }
   }
   return executarV1(job, hb);
 }
@@ -365,6 +368,72 @@ async function executarMeta9Integrada(
       else if (etapa === "CONCLUIDO") await atualizarProgresso(job.id, { fase: "CONCLUIDO", ...(dados ?? {}) });
     },
   });
+}
+
+/**
+ * criar_fundacao no pipeline V2 (roteado por engine_mode, como escrever_livro):
+ * arquiteto_enredo gera a fundação mínima (fundacao.ts, caminho único com o
+ * canário); o módulo materializa disco + estado + fases. Idempotente: fundação
+ * já materializada (perfil no disco + estado.fundacao) não re-roda o modelo.
+ */
+export async function executarFundacaoV2Job(job: Job): Promise<void> {
+  const { sb, OWNER } = await import("../supabase.js");
+  const { projDir, CLAUDE_BIN } = await import("../lib.js");
+  const projectId = job.project_id!;
+  const { data: proj, error } = await sb
+    .from("projects")
+    .select("id,titulo,skill_escrita,total_capitulos,briefing")
+    .eq("owner", OWNER)
+    .eq("id", projectId)
+    .single();
+  if (error || !proj) {
+    throw new ErroEngine({ codigo: "PROJETO_AUSENTE", classe: "configuracao", mensagem: `projeto ${projectId} não encontrado: ${error?.message ?? ""}` });
+  }
+  const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
+  const contrato = carregarContrato(MAPA_SKILL_V1_V2[skillV1] ?? skillV1);
+  const dirProjeto = projDir(projectId);
+  const { persistencia } = await criarPersistencia({ dirProjeto });
+  const gravador = new Gravador({ persistencia, projectId });
+
+  const totalCaps = (proj as { total_capitulos?: number }).total_capitulos ?? 0;
+  if (!totalCaps || totalCaps < 1) {
+    throw new ErroEngine({ codigo: "TOTAL_CAPITULOS_INDEFINIDO", classe: "configuracao", mensagem: "criar_fundacao V2 exige total_capitulos definido no projeto (wizard)" });
+  }
+
+  // Idempotência: fundação já materializada não re-roda o arquiteto.
+  const estado = await gravador.carregarEstado();
+  let perfilExistente = "";
+  try {
+    perfilExistente = await fs.readFile(path.join(dirProjeto, "perfil-de-voz.md"), "utf8");
+  } catch { /* primeira execução */ }
+  if (estado.doc.fundacao && perfilExistente.trim()) {
+    await atualizarProgresso(job.id, { engine: "v2", fase: "FUNDACAO", etapa: "fundação já materializada (idempotente)" });
+    return;
+  }
+
+  const briefing = ((proj as { briefing?: Record<string, unknown> }).briefing ?? {}) as { ideia_central?: string };
+  const premissa = (briefing.ideia_central ?? "").trim();
+  if (!premissa) {
+    throw new ErroEngine({ codigo: "BRIEFING_AUSENTE", classe: "configuracao", mensagem: "criar_fundacao V2 exige briefing.ideia_central" });
+  }
+
+  const depsF = {
+    gravador,
+    persistencia,
+    provedor: new ProvedorClaudeCli(CLAUDE_BIN, dirProjeto),
+    mapa: mapaModelosDoAmbiente(),
+    contrato,
+    dirProjeto,
+    jobId: job.id,
+  };
+  await atualizarProgresso(job.id, { engine: "v2", fase: "FUNDACAO", skill: contrato.contrato.id, skill_versao: contrato.contrato.versao });
+  const { fundacao, runId } = await gerarFundacaoV2(depsF, {
+    titulo: (proj as { titulo?: string }).titulo ?? "Sem título",
+    premissa,
+    totalCapitulos: totalCaps,
+  });
+  await materializarFundacao(depsF, fundacao, totalCaps);
+  await atualizarProgresso(job.id, { fase: "FUNDACAO", etapa: "fundação materializada", fios: fundacao.fios, fundacao_run: runId });
 }
 
 /**

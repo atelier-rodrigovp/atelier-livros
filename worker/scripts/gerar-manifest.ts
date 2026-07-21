@@ -4,10 +4,10 @@
 // manifest ⇒ rode isto (o teste de regressão em skill-manifest.test.ts falha
 // a suíte se esquecer).
 // Uso: npx tsx worker/scripts/gerar-manifest.ts
-import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sha256Skill } from "../src/skill-manifest.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const raiz = path.resolve(here, "..", "skill-patches");
@@ -17,7 +17,9 @@ const man = JSON.parse(readFileSync(manifestPath, "utf8"));
 let mudanças = 0;
 for (const f of man.files) {
   const alvo = path.join(raiz, ...f.path.split("/"));
-  const atual = createHash("sha256").update(readFileSync(alvo)).digest("hex");
+  // MESMA canonicalização do verificador (LF) — hash sobre CRLF bruto gerava
+  // manifests que reprovavam o próprio arquivo fonte (caso 1.0.9).
+  const atual = sha256Skill(readFileSync(alvo), f.path);
   if (atual !== f.sha256) {
     console.log(`~ ${f.path}\n  ${f.sha256.slice(0, 16)}… -> ${atual.slice(0, 16)}…`);
     f.sha256 = atual;

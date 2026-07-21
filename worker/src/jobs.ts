@@ -453,7 +453,9 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
         genero: b.genero ?? proj.genero ?? null,
         serie: b.serie ?? proj.serie ?? null,
         volume: b.volume ?? proj.volume ?? 1,
-        total_capitulos: b.num_capitulos ?? proj.total_capitulos ?? null,
+        // Wizard V2 é AUTORITATIVO para total_capitulos (mesma regra de skill/
+        // decisões/canário): a entrevista só define quando o wizard não definiu.
+        total_capitulos: proj.total_capitulos ?? b.num_capitulos ?? null,
         paginas_alvo: b.paginas_alvo ?? proj.paginas_alvo ?? null,
         piso_palavras: b.piso_palavras ?? proj.piso_palavras ?? 1400,
         meta_nota: b.meta_nota ?? proj.meta_nota ?? 9.0,

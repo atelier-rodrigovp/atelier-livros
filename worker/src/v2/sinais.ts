@@ -54,13 +54,13 @@ export function medirSinais(texto: string, contrato: SkillContract): SinalMedido
   const out: SinalMedido[] = [];
 
   const gn = contarGnomico(texto);
-  out.push(medir("gnomico", gn.n, gn.exemplos, cotaDeclarada(contrato, "gnomico")));
+  out.push(medir("gnomico", gn.n, gn.todos, cotaDeclarada(contrato, "gnomico")));
 
   const pe = contarPersonificacao(texto);
-  out.push(medir("personificacao", pe.n, pe.exemplos, cotaDeclarada(contrato, "personificacao")));
+  out.push(medir("personificacao", pe.n, pe.todos, cotaDeclarada(contrato, "personificacao")));
 
   const sa = contarSanfona(texto);
-  out.push(medir("sanfona", sa.n, sa.exemplos, cotaDeclarada(contrato, "sanfona")));
+  out.push(medir("sanfona", sa.n, sa.todos, cotaDeclarada(contrato, "sanfona")));
 
   const de = percentDeclarativasSimples(texto);
   out.push(medir("declarativas_pct", de.pct, [], cotaDeclarada(contrato, "declarativas")));
@@ -69,7 +69,7 @@ export function medirSinais(texto: string, contrato: SkillContract): SinalMedido
   const cotaMet = contrato.politica_metafora.cota_por_capitulo != null
     ? { max: contrato.politica_metafora.cota_por_capitulo }
     : cotaDeclarada(contrato, "metafora");
-  out.push(medir("metafora_elaborada", me.n, me.exemplos, cotaMet));
+  out.push(medir("metafora_elaborada", me.n, me.todos, cotaMet));
 
   const di = sinalDialogoInterioridade(texto);
   const pisoDialogo = contrato.politica_dialogo.piso_percentual;
@@ -85,7 +85,7 @@ export function medirSinais(texto: string, contrato: SkillContract): SinalMedido
     // (t.nome) nunca casava — cadência declarada jamais saía da cota (defeito da
     // auditoria de fechamento).
     const declarou = t.chave != null && contrato.ritmo.cadencia != null && t.chave in (contrato.ritmo.cadencia ?? {});
-    out.push({ sinal: `cadencia.${t.nome}`, valor: t.n, cota: declarou ? { max: t.alvo } : undefined, fora_da_cota: declarou && t.acima, exemplos: t.exemplos.slice(0, 3) });
+    out.push({ sinal: `cadencia.${t.nome}`, valor: t.n, cota: declarou ? { max: t.alvo } : undefined, fora_da_cota: declarou && t.acima, exemplos: t.todosExemplos ?? t.exemplos });
   }
 
   // Tamanho do capítulo (sinal, não gate — decisão da F6).
@@ -99,14 +99,19 @@ export function medirSinais(texto: string, contrato: SkillContract): SinalMedido
   return out;
 }
 
-/** Resumo textual dos sinais para o prompt do revisor (medições reais, não opinião). */
+/**
+ * Resumo textual dos sinais para o prompt do revisor (medições reais, não opinião).
+ * TODAS as ocorrências medidas são listadas, numeradas (adendo 2: o revisor só pode
+ * confirmar violação citando cada ocorrência — para isso precisa vê-las todas).
+ */
 export function resumoSinais(sinais: SinalMedido[]): string {
-  const linhas = sinais.map((s) => {
+  const linhas: string[] = [];
+  for (const s of sinais) {
     const cota = s.cota
       ? ` (cota${s.cota.min != null ? ` mín ${s.cota.min}` : ""}${s.cota.max != null ? ` máx ${s.cota.max}` : ""}${s.fora_da_cota ? " — FORA" : ""})`
       : "";
-    const ex = s.exemplos.length ? ` · ex.: ${s.exemplos.slice(0, 2).map((e) => JSON.stringify(e)).join(" ")}` : "";
-    return `- ${s.sinal}: ${s.valor}${cota}${ex}`;
-  });
+    linhas.push(`- ${s.sinal}: ${s.valor}${cota}`);
+    s.exemplos.forEach((e, i) => linhas.push(`    ${i + 1}. ${JSON.stringify(e)}`));
+  }
   return linhas.join("\n");
 }

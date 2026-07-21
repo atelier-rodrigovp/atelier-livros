@@ -177,11 +177,17 @@ export async function escreverCapitulo(
     anteriores?: { numero: number; trecho: string }[];
     trechosAnteriores?: SecaoContexto[];
     /**
-     * Reescrita dirigida (meta-nota): reusa a ficha e o texto do disco como base, pula a
-     * escrita inicial e aplica as correções do avaliador em modo "reescrita" como 1ª ação,
-     * seguindo depois o fluxo normal de gates/sinais/revisor/auditor/decisão.
+     * Texto-base (revalidação/meta-nota): usa o texto dado (normalmente o do disco) em
+     * vez de escrever prosa nova — o fluxo de gates/sinais/revisor/auditor/decisão roda
+     * IDÊNTICO (caminho único de decisão; scripts nunca reimplementam aprovação).
+     * Exige fichaExistente.
      */
-    reescritaDirigida?: { correcoes: { local: string; problema: string; instrucao: string }[]; textoBase: string };
+    textoBase?: string;
+    /**
+     * Reescrita dirigida (meta-nota): sobre o textoBase, aplica as correções do avaliador
+     * em modo "reescrita" como 1ª ação, seguindo depois o fluxo normal. Exige textoBase.
+     */
+    reescritaDirigida?: { correcoes: { local: string; problema: string; instrucao: string }[] };
   }
 ): Promise<ResultadoCapitulo> {
   const runs: string[] = [];
@@ -191,11 +197,18 @@ export async function escreverCapitulo(
   const caminho = path.join(deps.dirManuscrito, `capitulo-${nn}.md`);
   const maxCorrecoes = deps.maxCorrecoes ?? 2;
 
-  if (opts?.reescritaDirigida && !opts.fichaExistente) {
+  if (opts?.textoBase && !opts.fichaExistente) {
     throw new ErroEngine({
       codigo: "REESCRITA_SEM_FICHA",
       classe: "tecnica",
-      mensagem: `reescrita dirigida do capítulo ${capitulo} exige fichaExistente`,
+      mensagem: `texto-base do capítulo ${capitulo} exige fichaExistente`,
+    });
+  }
+  if (opts?.reescritaDirigida && !opts.textoBase) {
+    throw new ErroEngine({
+      codigo: "REESCRITA_SEM_TEXTO_BASE",
+      classe: "tecnica",
+      mensagem: `reescrita dirigida do capítulo ${capitulo} exige textoBase`,
     });
   }
 
@@ -336,11 +349,11 @@ export async function escreverCapitulo(
   if (!compEsc.ok) return bloquearPorCompilacao(compEsc.bloqueios);
   const pacoteEscritor = compEsc.pacote!;
 
-  // Reescrita dirigida usa o texto do disco como base (pula a escrita inicial);
+  // Texto-base (revalidação/reescrita dirigida) pula a escrita inicial;
   // no fluxo normal, o escritor produz a prosa inicial.
   let texto: string;
-  if (opts?.reescritaDirigida) {
-    texto = opts.reescritaDirigida.textoBase;
+  if (opts?.textoBase) {
+    texto = opts.textoBase;
   } else {
     const rEsc = await executarPapel<string>({
       ...base,
@@ -410,7 +423,8 @@ export async function escreverCapitulo(
   };
 
   // Em reescrita dirigida, a PRIMEIRA ação é a correção do avaliador em modo reescrita
-  // (sobre o texto do disco); no fluxo normal, grava a prosa inicial do escritor.
+  // (sobre o texto-base); nos demais fluxos (inclusive revalidação por texto-base),
+  // grava/registra o texto e segue — a decisão é SEMPRE deste loop.
   if (opts?.reescritaDirigida) {
     await corrigirComEscritor(opts.reescritaDirigida.correcoes, "reescrita");
   } else {
@@ -556,13 +570,18 @@ export async function escreverCapitulo(
         const medido = medidos.get(s.sinal);
         const cota = medido?.cota;
         const alvo = cota?.max != null ? `no máximo ${cota.max}` : cota?.min != null ? `no mínimo ${cota.min}` : "dentro da cota do contrato";
-        const exemplos = medido?.exemplos?.length
-          ? ` Trechos flagrados pelo detector: ${medido.exemplos.slice(0, 3).map((e) => JSON.stringify(e)).join(" · ")}`
-          : "";
+        // O escritor corrige as ocorrências que o REVISOR confirmou (citadas uma a
+        // uma — adendo 2); os trechos do detector são só fallback informativo.
+        const citadas = s.ocorrencias_citadas?.length
+          ? ` Ocorrências confirmadas pelo revisor: ${s.ocorrencias_citadas.map((o) => JSON.stringify(o.trecho)).join(" · ")}`
+          : medido?.exemplos?.length
+            ? ` Trechos flagrados pelo detector: ${medido.exemplos.slice(0, 3).map((e) => JSON.stringify(e)).join(" · ")}`
+            : "";
+        const quantas = s.ocorrencias_citadas?.length ?? null;
         return {
           local: "capítulo inteiro",
-          problema: `${s.sinal} = ${s.valor} (alvo: ${alvo}).${exemplos}`,
-          instrucao: `reduza ${s.sinal} até ${alvo} no capítulo todo — funda fragmentos em frases completas e corte reformulações, preservando conteúdo e voz`,
+          problema: `${s.sinal} = ${s.valor}${quantas != null ? ` (${quantas} confirmadas pelo revisor)` : ""} (alvo: ${alvo}).${citadas}`,
+          instrucao: `corrija as ocorrências confirmadas de ${s.sinal} — funda fragmentos em frases completas e corte reformulações, preservando conteúdo e voz`,
         };
       });
 

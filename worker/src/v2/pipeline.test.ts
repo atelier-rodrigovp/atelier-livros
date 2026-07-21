@@ -387,7 +387,15 @@ describe("escreverCapitulo — violação difusa entra em modo reescrita (caso d
       JSON.stringify(
         parecer({
           verdict: "reprovado",
-          sinais: [{ sinal: "sanfona", valor: 9, disposicao: "violacao_confirmada", evidencia: "reformulações em cadeia" }],
+          sinais: [{
+            sinal: "sanfona",
+            valor: 9,
+            disposicao: "violacao_confirmada",
+            evidencia: "reformulações em cadeia",
+            // Regra do adendo 2: cada ocorrência confirmada citada; o resto declarado falso positivo.
+            ocorrencias_citadas: [{ trecho: "não sabia o que dizer, mas não podia ficar parada", posicao: "L:3" }],
+            falsos_positivos: 8,
+          }],
           correcoes: [], // revisor não listou correção cirúrgica — só a violação difusa
         })
       );
@@ -414,7 +422,7 @@ describe("escreverCapitulo — violação difusa entra em modo reescrita (caso d
     expect(chamadasEscritor[1].prompt).toContain("PRESERVE integralmente");
     expect(chamadasEscritor[1].prompt).not.toContain("palavra por palavra");
     // A instrução global carrega o trecho que o detector flagrou (o escritor sabe QUAIS frases contam)
-    expect(chamadasEscritor[1].prompt).toContain("Trechos flagrados pelo detector");
+    expect(chamadasEscritor[1].prompt).toContain("Ocorrências confirmadas pelo revisor");
     expect(chamadasEscritor[1].prompt).toContain("não sabia o que dizer");
   });
 
@@ -431,6 +439,8 @@ describe("escreverCapitulo — violação difusa entra em modo reescrita (caso d
             valor: 9,
             disposicao: "violacao_confirmada" as const,
             evidencia: "violação",
+            ocorrencias_citadas: [{ trecho: "não sabia o que dizer, mas não podia ficar parada" }],
+            falsos_positivos: 8,
           })),
           correcoes: [{ local: "L:1", problema: "reformulação", instrucao: "corte a reformulação" }],
         })
@@ -486,8 +496,8 @@ describe("escreverCapitulo — reescrita dirigida (meta-nota)", () => {
 
     const r = await escreverCapitulo(deps, 3, {
       fichaExistente: ficha(),
+      textoBase: PROSA_OK,
       reescritaDirigida: {
-        textoBase: PROSA_OK,
         correcoes: [{ local: "capítulo 3", problema: "final fraco", instrucao: "feche com uma consequência concreta" }],
       },
     });
@@ -510,7 +520,7 @@ describe("escreverCapitulo — reescrita dirigida (meta-nota)", () => {
 
   it("reescrita dirigida sem fichaExistente lança REESCRITA_SEM_FICHA", async () => {
     await expect(
-      escreverCapitulo(deps, 3, { reescritaDirigida: { textoBase: PROSA_OK, correcoes: [] } })
+      escreverCapitulo(deps, 3, { textoBase: PROSA_OK, reescritaDirigida: { correcoes: [] } })
     ).rejects.toMatchObject({ name: "ErroEngine", codigo: "REESCRITA_SEM_FICHA" });
   });
 });

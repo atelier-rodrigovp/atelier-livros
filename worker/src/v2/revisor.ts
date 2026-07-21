@@ -42,6 +42,30 @@ export function validarParecer(obj: unknown): Parecer {
     if (typeof x?.sinal !== "string" || !DISPOSICOES.has(String(x?.disposicao)) || typeof x?.evidencia !== "string") {
       throw new Error(`sinal indisposto ou inválido: ${JSON.stringify(s).slice(0, 120)}`);
     }
+    // Auditabilidade (adendo 2): violacao_confirmada em sinal de CONTAGEM (valor
+    // numérico > 0) exige as ocorrências citadas uma a uma; disposição parcial
+    // exige a conta fechada (citadas + falsos_positivos = valor medido).
+    if (x.disposicao === "violacao_confirmada" && typeof x.valor === "number" && x.valor > 0) {
+      const citadas = x.ocorrencias_citadas;
+      if (!Array.isArray(citadas) || citadas.length === 0) {
+        throw new Error(
+          `sinal "${x.sinal}": violacao_confirmada exige "ocorrencias_citadas" (lista {trecho, posicao?}) com cada ocorrência julgada defeito real`
+        );
+      }
+      for (const [i, o] of (citadas as unknown[]).entries()) {
+        const oc = o as Record<string, unknown>;
+        if (typeof oc?.trecho !== "string" || !oc.trecho.trim()) {
+          throw new Error(`sinal "${x.sinal}": ocorrencias_citadas[${i}].trecho obrigatório (citação literal)`);
+        }
+      }
+      if (citadas.length < x.valor) {
+        if (typeof x.falsos_positivos !== "number" || citadas.length + x.falsos_positivos !== x.valor) {
+          throw new Error(
+            `sinal "${x.sinal}": ${citadas.length} citada(s) de ${x.valor} medidas — disposição parcial exige "falsos_positivos" = ${x.valor - citadas.length} (citadas + falsos_positivos = valor)`
+          );
+        }
+      }
+    }
   }
   if (!Array.isArray(p.correcoes)) throw new Error("correcoes deve ser lista");
   for (const c of p.correcoes as unknown[]) {
