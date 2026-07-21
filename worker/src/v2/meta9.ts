@@ -13,7 +13,7 @@ import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
 import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
-import { tarefaAvaliadorLivro } from "./tarefas.js";
+import { tarefaAvaliadorLivro, tarefaSinteseArco } from "./tarefas.js";
 import { ErroEngine, type ContratoCompilado, type MapaModelos, type Parecer } from "./tipos.js";
 
 // Acima disso, o manuscrito é avaliado em blocos de capítulos e as avaliações são agregadas.
@@ -47,13 +47,49 @@ export interface ResultadoMeta9 {
   relatorioPath?: string;
 }
 
+// Rubrica do book-bestseller-review (references/scoring-rubric.md): dez dimensões,
+// 8 majors (governam o floor) + 2 modificadores; pesos 1.5×/1×/0.5×; o headline é a
+// média ponderada CALCULADA EM CÓDIGO e o veredito é limitado pelo floor principle.
+export const DIMENSOES_LIVRO = [
+  { chave: "hook_abertura", peso: 1.5, major: true },
+  { chave: "premissa_originalidade", peso: 1.5, major: true },
+  { chave: "estrutura_ritmo", peso: 1, major: true },
+  { chave: "personagens", peso: 1, major: true },
+  { chave: "prosa_oficio", peso: 1, major: true },
+  { chave: "payoff", peso: 1.5, major: true },
+  { chave: "coerencia_consistencia", peso: 1, major: true },
+  { chave: "final", peso: 1, major: true },
+  { chave: "encaixe_mercado", peso: 1, major: false },
+  { chave: "acabamento", peso: 0.5, major: false },
+] as const;
+
+export interface DimensaoAvaliada { nota: number; evidencia: string }
+
 export interface AvaliacaoLivro {
-  schema: "avaliacao-livro/v1";
+  schema: "avaliacao-livro/v2";
+  dimensoes: Record<string, DimensaoAvaliada>;
+  /** headline: média ponderada das 10 dimensões, calculada pelo CÓDIGO */
   nota: number;
+  /** menor nota entre as dimensões majors (floor principle) */
+  floor: { dimensao: string; nota: number };
   pontos_fortes: string[];
   pontos_fracos: string[];
   capitulos_a_reescrever: { capitulo: number; problemas: string[]; instrucoes: string[] }[];
   resumo: string;
+}
+
+/** Média ponderada + floor (determinísticos — o modelo nunca soma a própria nota). */
+export function derivarNotaEFloor(dimensoes: Record<string, DimensaoAvaliada>): { nota: number; floor: { dimensao: string; nota: number } } {
+  let soma = 0;
+  let pesos = 0;
+  let floor: { dimensao: string; nota: number } | null = null;
+  for (const d of DIMENSOES_LIVRO) {
+    const av = dimensoes[d.chave];
+    soma += av.nota * d.peso;
+    pesos += d.peso;
+    if (d.major && (floor === null || av.nota < floor.nota)) floor = { dimensao: d.chave, nota: av.nota };
+  }
+  return { nota: Math.round((soma / pesos) * 10) / 10, floor: floor! };
 }
 
 // ---------------------------------------------------------------------------
@@ -116,12 +152,28 @@ export function consolidarManuscrito(
   return { caminho, hash: hashText(conteudo), palavras: contarPalavras(conteudo) };
 }
 
-/** Validação estrita do JSON do avaliador de livro (schema "avaliacao-livro/v1"). */
+/**
+ * Validação estrita do JSON do avaliador de livro (schema "avaliacao-livro/v2").
+ * Cada uma das dez dimensões exige nota 1–10 e evidência não-vazia (nota sem
+ * evidência é inválida — princípio da rubrica); nota e floor saem do CÓDIGO.
+ */
 export function validarAvaliacaoLivro(obj: unknown): AvaliacaoLivro {
   if (typeof obj !== "object" || obj === null) throw new Error("avaliação não é objeto");
   const o = obj as Record<string, unknown>;
-  if (o.schema !== "avaliacao-livro/v1") throw new Error(`schema inválido: ${String(o.schema)}`);
-  if (typeof o.nota !== "number" || o.nota < 0 || o.nota > 10) throw new Error(`nota inválida: ${String(o.nota)}`);
+  if (o.schema !== "avaliacao-livro/v2") throw new Error(`schema inválido: ${String(o.schema)} (esperado avaliacao-livro/v2)`);
+  const dims = o.dimensoes as Record<string, unknown> | undefined;
+  if (typeof dims !== "object" || dims === null) throw new Error("dimensoes deve ser objeto");
+  const dimensoes: Record<string, DimensaoAvaliada> = {};
+  for (const d of DIMENSOES_LIVRO) {
+    const v = dims[d.chave] as { nota?: unknown; evidencia?: unknown } | undefined;
+    if (!v || typeof v.nota !== "number" || v.nota < 1 || v.nota > 10) {
+      throw new Error(`dimensoes.${d.chave}.nota inválida (esperado número 1–10)`);
+    }
+    if (typeof v.evidencia !== "string" || !v.evidencia.trim()) {
+      throw new Error(`dimensoes.${d.chave}.evidencia obrigatória — nota sem evidência é inválida`);
+    }
+    dimensoes[d.chave] = { nota: v.nota, evidencia: v.evidencia };
+  }
   const listaStr = (v: unknown, campo: string): string[] => {
     if (!Array.isArray(v)) throw new Error(`${campo} deve ser lista`);
     return v.map((x, i) => {
@@ -144,15 +196,20 @@ export function validarAvaliacaoLivro(obj: unknown): AvaliacaoLivro {
       instrucoes: listaStr(x.instrucoes, `capitulos_a_reescrever[${i}].instrucoes`),
     };
   });
-  return { schema: "avaliacao-livro/v1", nota: o.nota, pontos_fortes, pontos_fracos, capitulos_a_reescrever, resumo: o.resumo };
+  const { nota, floor } = derivarNotaEFloor(dimensoes);
+  return { schema: "avaliacao-livro/v2", dimensoes, nota, floor, pontos_fortes, pontos_fracos, capitulos_a_reescrever, resumo: o.resumo };
 }
 
-/** Parecer/v1 mínimo derivado da avaliação de livro (6 eixos com a nota escalada 0–5 = nota/2). */
+/**
+ * Parecer/v1 derivado da avaliação de livro: cada eixo mapeia uma DIMENSÃO REAL da
+ * rubrica (nota/2, evidência da própria dimensão) — nunca uma nota única espelhada.
+ */
 function pareceDeAvaliacao(av: AvaliacaoLivro, meta: number): Parecer {
-  const notaEixo = Math.max(0, Math.min(5, Math.round((av.nota / 2) * 10) / 10));
-  const primeiroForte = av.pontos_fortes[0] ?? av.resumo ?? "avaliação de livro";
-  const eixo = (ev: string) => ({ nota: notaEixo, evidencia: ev || primeiroForte });
-  const evidencias = (av.pontos_fortes.length ? av.pontos_fortes : [av.resumo || primeiroForte])
+  const eixoDe = (chave: string) => {
+    const d = av.dimensoes[chave];
+    return { nota: Math.max(0, Math.min(5, Math.round((d.nota / 2) * 10) / 10)), evidencia: d.evidencia };
+  };
+  const evidencias = (av.pontos_fortes.length ? av.pontos_fortes : [av.resumo])
     .slice(0, 3)
     .map((p) => ({ local: "livro", trecho: p, observacao: "ponto forte identificado na avaliação" }));
   const correcoes = av.capitulos_a_reescrever.flatMap((c) =>
@@ -164,12 +221,12 @@ function pareceDeAvaliacao(av: AvaliacaoLivro, meta: number): Parecer {
   );
   return {
     schema: "parecer/v1",
-    dramatic_progression: eixo(av.pontos_fortes[0] ?? av.resumo),
-    skill_adherence: eixo(av.pontos_fortes[1] ?? primeiroForte),
-    clarity: eixo(av.pontos_fortes[2] ?? primeiroForte),
-    emotional_effect: eixo(primeiroForte),
-    continuity: eixo(primeiroForte),
-    hook_effectiveness: eixo(primeiroForte),
+    dramatic_progression: eixoDe("estrutura_ritmo"),
+    skill_adherence: eixoDe("premissa_originalidade"),
+    clarity: eixoDe("prosa_oficio"),
+    emotional_effect: eixoDe("payoff"),
+    continuity: eixoDe("coerencia_consistencia"),
+    hook_effectiveness: eixoDe("hook_abertura"),
     verdict: av.nota >= meta ? "aprovado" : "reprovado",
     evidencias,
     sinais: [],
@@ -244,13 +301,13 @@ function agruparEmBlocos(
   return blocos;
 }
 
-/** Agrega avaliações de blocos: nota = média ponderada por palavras; reescritas = união. */
-function agregarAvaliacoes(partes: { av: AvaliacaoLivro; palavras: number }[]): AvaliacaoLivro {
-  const totalPalavras = partes.reduce((s, p) => s + p.palavras, 0) || 1;
-  const notaPonderada = partes.reduce((s, p) => s + p.av.nota * p.palavras, 0) / totalPalavras;
+/** União dos capítulos-a-reescrever dos blocos (a síntese de arco pode acrescentar). */
+function unirReescritas(
+  listas: AvaliacaoLivro["capitulos_a_reescrever"][]
+): AvaliacaoLivro["capitulos_a_reescrever"] {
   const porCapitulo = new Map<number, { capitulo: number; problemas: string[]; instrucoes: string[] }>();
-  for (const p of partes) {
-    for (const c of p.av.capitulos_a_reescrever) {
+  for (const lista of listas) {
+    for (const c of lista) {
       const existente = porCapitulo.get(c.capitulo);
       if (existente) {
         existente.problemas.push(...c.problemas);
@@ -260,14 +317,7 @@ function agregarAvaliacoes(partes: { av: AvaliacaoLivro; palavras: number }[]): 
       }
     }
   }
-  return {
-    schema: "avaliacao-livro/v1",
-    nota: Math.round(notaPonderada * 10) / 10,
-    pontos_fortes: partes.flatMap((p) => p.av.pontos_fortes),
-    pontos_fracos: partes.flatMap((p) => p.av.pontos_fracos),
-    capitulos_a_reescrever: [...porCapitulo.values()].sort((a, b) => a.capitulo - b.capitulo),
-    resumo: partes.map((p) => p.av.resumo).join(" "),
-  };
+  return [...porCapitulo.values()].sort((a, b) => a.capitulo - b.capitulo);
 }
 
 async function avaliarLivro(
@@ -280,19 +330,49 @@ async function avaliarLivro(
   if (manuscritoPalavras <= LIMITE_PALAVRAS_BLOCO) {
     return avaliarBloco(deps, meta, manuscritoTexto, "livro completo");
   }
-  // Manuscrito longo: avalia por blocos e agrega.
+  // Manuscrito longo: blocos para leitura integral + SÍNTESE DE ARCO para a visão
+  // do livro inteiro (as dimensões finais saem da síntese, nunca de média de blocos).
   const blocos = agruparEmBlocos(capitulos, LIMITE_PALAVRAS_BLOCO);
-  const partes: { av: AvaliacaoLivro; palavras: number }[] = [];
-  let ultimoRunId = "";
+  const partes: { rotulo: string; av: AvaliacaoLivro }[] = [];
   for (const bloco of blocos) {
     const texto = bloco.map((c) => c.texto.trim()).join("\n\n");
-    const palavras = bloco.reduce((s, c) => s + c.palavras, 0);
     const rotulo = `capítulos ${bloco[0].numero}–${bloco[bloco.length - 1].numero}`;
     const r = await avaliarBloco(deps, meta, texto, rotulo);
-    partes.push({ av: r.av, palavras });
-    ultimoRunId = r.runId;
+    partes.push({ rotulo, av: r.av });
   }
-  return { av: agregarAvaliacoes(partes), runId: ultimoRunId };
+  const materialArco: SecaoContexto[] = [
+    {
+      titulo: "AVALIAÇÕES POR BLOCO",
+      texto: partes
+        .map((p) => `## ${p.rotulo}\n${JSON.stringify({ dimensoes: p.av.dimensoes, pontos_fortes: p.av.pontos_fortes, pontos_fracos: p.av.pontos_fracos, resumo: p.av.resumo }, null, 1)}`)
+        .join("\n\n"),
+      fonte: "avaliacoes-blocos",
+    },
+    { titulo: `PRIMEIRO CAPÍTULO (integral)`, texto: capitulos[0].texto, fonte: "capitulo-1" },
+    { titulo: `ÚLTIMO CAPÍTULO (integral)`, texto: capitulos[capitulos.length - 1].texto, fonte: `capitulo-${capitulos.length}` },
+  ];
+  const comp = compilarPacote({ papel: "revisor_literario", alvo: "livro", contrato: deps.contrato, perfil: deps.perfil, fatos: [...materialArco, ...(deps.docsFactuais ?? [])] });
+  if (!comp.ok) {
+    throw new ErroEngine({ codigo: "AVALIACAO_PACOTE_BLOQUEADO", classe: "qualidade", mensagem: `síntese de arco bloqueada: ${comp.bloqueios.map((b) => b.codigo).join(", ")}` });
+  }
+  const r = await executarPapel<AvaliacaoLivro>({
+    gravador: deps.gravador,
+    provedor: deps.provedor,
+    mapa: deps.mapa,
+    jobId: deps.jobId ?? null,
+    editionId: deps.editionId ?? null,
+    papel: "revisor_literario",
+    alvo: "livro",
+    pacote: comp.pacote!,
+    tarefa: tarefaSinteseArco(partes.length),
+    parse: (t) => validarAvaliacaoLivro(extrairJson(t)),
+  });
+  // Reescritas: união dos blocos + o que a síntese apontou.
+  const av: AvaliacaoLivro = {
+    ...r.valor,
+    capitulos_a_reescrever: unirReescritas([...partes.map((p) => p.av.capitulos_a_reescrever), r.valor.capitulos_a_reescrever]),
+  };
+  return { av, runId: r.runId };
 }
 
 // ---------------------------------------------------------------------------

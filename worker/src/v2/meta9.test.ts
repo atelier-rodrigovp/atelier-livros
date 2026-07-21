@@ -96,10 +96,19 @@ function parecerCapitulo(): string {
   return JSON.stringify(p);
 }
 
+// Fixture no schema v2: todas as dez dimensões com a MESMA nota (a média ponderada
+// calculada pelo código devolve exatamente esse valor; floor = a própria nota).
 function avaliacao(nota: number, reescrever: { capitulo: number; problemas: string[]; instrucoes: string[] }[] = []): string {
+  const chaves = [
+    "hook_abertura", "premissa_originalidade", "estrutura_ritmo", "personagens",
+    "prosa_oficio", "payoff", "coerencia_consistencia", "final", "encaixe_mercado", "acabamento",
+  ];
+  const dimensoes = Object.fromEntries(
+    chaves.map((c) => [c, { nota, evidencia: `evidência localizada de ${c} (L:3, 'a chave girou na fechadura')` }])
+  );
   return JSON.stringify({
-    schema: "avaliacao-livro/v1",
-    nota,
+    schema: "avaliacao-livro/v2",
+    dimensoes,
     pontos_fortes: ["gancho de abertura forte", "progressão clara"],
     pontos_fracos: nota >= 9 ? [] : ["final do capítulo 1 sem consequência"],
     capitulos_a_reescrever: reescrever,

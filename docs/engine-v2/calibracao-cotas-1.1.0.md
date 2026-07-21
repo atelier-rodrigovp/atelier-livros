@@ -1,4 +1,14 @@
-# Calibração de cotas — contratos 1.1.0 (2026-07-21)
+# Calibração de cotas — contratos 1.1.0 (2026-07-21) — **REJEITADA**
+
+> **DECISÃO (auditoria externa validada pelo autor, 2026-07-21):** esta calibração foi
+> REJEITADA e os contratos ativos voltaram a **1.0.0**. Motivo: cota = máximo observado de
+> n=3 amostras NEUTRALIZA o detector (sanfona 1→18) sem rotular ocorrência a ocorrência o
+> que é violação real vs falso positivo. A régua está CONGELADA; recalibração só por
+> processo separado (corpus reproduzível e versionado, ocorrências rotuladas,
+> precisão/recall do detector, holdout) ou decisão explícita do autor. Regra interina: o
+> número do detector nunca confirma violação sozinho — ver
+> `investigacao-sanfona-hoover.md`. Este documento permanece como registro histórico da
+> medição (os números medidos continuam válidos como dados).
 
 **Problema (defeito nº 4 da auditoria de fechamento):** as cotas 1.0.0 eram idênticas nas
 três skills (`sanfona max 1`, `gnômico max 2`) — a régua do dan-brown aplicada à voz

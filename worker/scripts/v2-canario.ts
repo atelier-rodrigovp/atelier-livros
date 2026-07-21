@@ -231,6 +231,28 @@ async function continuarCapitulos(skillId: string, totalCaps: number, ctx: CtxCa
     fasesFinais = await rodarFasesFinais(totalCaps, ctx, deps);
   }
 
+  // Estado canônico RELIDO após as fases finais (editor estrutural pode renumerar;
+  // a meta-nota pode reescrever): o status final de cada capítulo é hash-bound —
+  // conferido contra o sha256 do arquivo ATUAL no disco. "aprovado_com_excecao"
+  // NÃO conta como aprovado pleno no critério 3/3.
+  const estadoFinal = await gravador.carregarEstado();
+  const capitulosFinais: Record<string, unknown>[] = [];
+  for (const [num, cap] of Object.entries(estadoFinal.doc.capitulos).sort((a, b) => Number(a[0]) - Number(b[0]))) {
+    let hashDisco: string | null = null;
+    try {
+      const t = await fs.readFile(path.join(deps.dirManuscrito, `capitulo-${String(num).padStart(2, "0")}.md`), "utf8");
+      hashDisco = createHash("sha256").update(t.replace(/\r\n/g, "\n"), "utf8").digest("hex");
+    } catch { /* arquivo ausente = hash_confere false abaixo */ }
+    capitulosFinais.push({
+      capitulo: Number(num),
+      status: cap.status,
+      text_hash: cap.text_hash,
+      review_id: cap.review_id ?? cap.aprovacao?.review_id ?? null,
+      hash_confere: hashDisco !== null && hashDisco === cap.text_hash,
+    });
+  }
+  const aprovadosPlenos = capitulosFinais.filter((c) => c.status === "aprovado" && c.hash_confere === true).length;
+
   const relatorio = {
     projectId,
     skill: { id: contrato.contrato.id, versao: contrato.contrato.versao, hash: contrato.hash },
@@ -239,7 +261,13 @@ async function continuarCapitulos(skillId: string, totalCaps: number, ctx: CtxCa
     migracaoPendente,
     fundacao: { fios: fundacao.fios, promessa: fundacao.promessa_editorial, runId: ctx.fundacaoRunId },
     capitulos: resultados,
+    capitulos_estado_final: capitulosFinais,
+    aprovados_plenos: aprovadosPlenos,
+    total_capitulos: totalCaps,
+    criterio_3de3: aprovadosPlenos === totalCaps,
     ...(fasesFinais ? { fases_finais: fasesFinais } : {}),
+    nota_metodologica:
+      "canário curto valida a MECÂNICA das fases finais (editor estrutural + meta-nota); nenhuma nota de canário curto conta como evidência de meta atingida",
     executadoEm: new Date().toISOString(),
   };
   const relPath = path.join(dirProjeto, "engine-v2", "canario-relatorio.json");

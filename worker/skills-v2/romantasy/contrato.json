@@ -1,7 +1,7 @@
 {
   "schema": "skill-contract/v1",
   "id": "romantasy",
-  "versao": "1.1.0",
+  "versao": "1.0.0",
   "nome": "Romantasy — fantasia romântica de página-vira (Lena Agarti)",
   "familia_editorial": "romantasy",
   "motor_narrativo": "dois arcos entrelaçados — romance de alto risco + fantasia épica com custo de magia; desejo → obstáculo → marco → gancho cruel",
@@ -17,17 +17,13 @@
     }
   },
   "temporalidade": "linear por marcos: cada capítulo avança um arco (romance OU fantasia), idealmente os dois; um relógio ou arco sempre move; a escada de slow burn ancora degraus a capítulos-alvo",
-  "faixa_palavras": {
-    "min": 2000,
-    "alvo": 2700,
-    "max": 3200
-  },
+  "faixa_palavras": { "min": 2000, "alvo": 2700, "max": 3200 },
   "ritmo": {
     "descricao": "a frase-soco (fragmento de ênfase) é assinatura BookTok — folga na contagem de fragmentos, com pontaria; densidade sem staccato vazio (o staccato medido do gênero é baixo)",
     "cadencia": {
       "curta": 4,
       "enfase": 3,
-      "colados": 2,
+      "colados": 1,
       "staccatoFrac": 0.35,
       "minFrases": 8,
       "clipeNeg": 1,
@@ -37,8 +33,7 @@
       "fragColados": 1,
       "italico": 3,
       "retorica": 2
-    },
-    "calibracao_1_1_0": "corpus: piloto da AUDITORIA-HOOVER-ROMANTASY (SPEC-RM3), caps 01–03 julgados conformes à craft na página (n=3, shas 5b4312775809/1435b5c39350/be449a5d1281; 923–1147 palavras cada); cadência medida: colados 2/1/1→2 (1.0.0=1); fragEnfase (máx 5<6), fragColados (1), anáfora (2), itálico (3), retórica (2), clipeNeg (1) dentro das cotas 1.0.0, mantidas; personificação (máx 1<2) e muleta-coisa (sem medição V2) mantidas"
+    }
   },
   "acao_interioridade": {
     "relacao": "equilibrio",
@@ -61,149 +56,86 @@
   "regras": [
     {
       "id": "anti-gnomico",
-      "texto": "Feche beats em imagem concreta, ação ou consequência; fecho gnômico (máxima/aforismo geral) fica em no máximo 3 por capítulo.",
+      "texto": "Feche beats em imagem concreta, ação ou consequência; fecho gnômico (máxima/aforismo geral) fica em no máximo 2 por capítulo.",
       "tipo": "cota",
-      "cota": {
-        "max": 3,
-        "por": "capitulo"
-      },
-      "papeis": [
-        "escritor",
-        "revisor_literario"
-      ],
-      "calibracao_1_1_0": "corpus: piloto da AUDITORIA-HOOVER-ROMANTASY (SPEC-RM3), caps 01–03 julgados conformes à craft na página (n=3, shas 5b4312775809/1435b5c39350/be449a5d1281; 923–1147 palavras cada); gnômico medido 1/3/1 → máx 3"
+      "cota": { "max": 2, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
     },
     {
       "id": "anti-personificacao",
       "texto": "Prefira agente humano + verbo concreto; personificação de abstração fica em no máximo 2 por capítulo.",
       "tipo": "cota",
-      "cota": {
-        "max": 2,
-        "por": "capitulo"
-      },
-      "papeis": [
-        "escritor",
-        "revisor_literario"
-      ]
+      "cota": { "max": 2, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
     },
     {
       "id": "anti-sanfona",
-      "texto": "Diga cada percepção UMA vez, a melhor; frase-sanfona fica em no máximo 4 por capítulo.",
+      "texto": "Diga cada percepção UMA vez, a melhor; frase-sanfona fica em no máximo 1 por capítulo.",
       "tipo": "cota",
-      "cota": {
-        "max": 4,
-        "por": "capitulo"
-      },
-      "papeis": [
-        "escritor",
-        "revisor_literario"
-      ],
-      "calibracao_1_1_0": "corpus: piloto da AUDITORIA-HOOVER-ROMANTASY (SPEC-RM3), caps 01–03 julgados conformes à craft na página (n=3, shas 5b4312775809/1435b5c39350/be449a5d1281; 923–1147 palavras cada); sanfona medida 2/4/3 → máx 4 (canário reprovado mede 9 — a cota nova ainda discrimina). RESSALVA: corpus com ~metade do comprimento da faixa (2000–3200) — cota em contagem absoluta é conservadora para capítulos na faixa; excesso legítimo vira excecao_valida do revisor"
+      "cota": { "max": 1, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
     },
     {
       "id": "pov-alterna-com-informacao",
       "texto": "Alterne os 2 amantes: nunca 2 capítulos seguidos na mesma cabeça sem justificativa (teto duro 3); troque de POV só com informação nova, nunca recontando a mesma cena pela outra cabeça.",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "arquiteto_cena",
-        "escritor",
-        "editor_estrutural"
-      ]
+      "papeis": ["arquiteto_cena", "escritor", "editor_estrutural"]
     },
     {
       "id": "slow-burn-por-merito",
       "texto": "O slow burn sobe por MARCO da escada, ganho por evento ou escolha — nunca resolução precoce nem salto sem causa; repouso precisa de justificativa.",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "arquiteto_enredo",
-        "arquiteto_cena",
-        "escritor",
-        "revisor_literario"
-      ]
+      "papeis": ["arquiteto_enredo", "arquiteto_cena", "escritor", "revisor_literario"]
     },
     {
       "id": "custo-de-magia-escala",
       "texto": "Toda solução mágica decisiva paga o preço plantado antes e o custo ESCALA vs. usos anteriores (ou é partilhado com preço); poder novo conveniente é deus-ex proibido.",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "arquiteto_enredo",
-        "arquiteto_cena",
-        "escritor",
-        "revisor_literario"
-      ]
+      "papeis": ["arquiteto_enredo", "arquiteto_cena", "escritor", "revisor_literario"]
     },
     {
       "id": "gancho-cruel",
       "texto": "Cada capítulo fecha em gancho cruel (página-vira), de tipo diferente dos 2 capítulos anteriores.",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "arquiteto_cena",
-        "escritor",
-        "revisor_literario"
-      ]
+      "papeis": ["arquiteto_cena", "escritor", "revisor_literario"]
     },
     {
       "id": "frase-soco",
       "texto": "A frase-soco (fragmento de ênfase) é assinatura da voz — use com pontaria, sem virar staccato vazio.",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "escritor",
-        "revisor_literario"
-      ]
+      "papeis": ["escritor", "revisor_literario"]
     },
     {
       "id": "piso-densidade",
       "texto": "Cena vivida: pelo menos 2.000 palavras (alvo 2.200–3.200); abaixo do piso é reprovação, não 'ou justificado' — densidade pela régua das sete camadas, não gordura.",
       "tipo": "cota",
-      "cota": {
-        "min": 2000,
-        "por": "capitulo"
-      },
-      "papeis": [
-        "escritor",
-        "revisor_literario"
-      ]
+      "cota": { "min": 2000, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
     },
     {
       "id": "fair-play-duplo",
       "texto": "Fair-play da trama E do romance: viradas plantadas antes; a química nasce de cena, não de declaração.",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "arquiteto_enredo",
-        "arquiteto_cena",
-        "revisor_literario"
-      ]
+      "papeis": ["arquiteto_enredo", "arquiteto_cena", "revisor_literario"]
     },
     {
       "id": "muleta-coisa",
       "texto": "Nomeie o objeto, o gesto, a sensação: 'coisa'/'algo' genérico fica em no máximo 1 por capítulo.",
       "tipo": "cota",
-      "cota": {
-        "max": 1,
-        "por": "capitulo"
-      },
-      "papeis": [
-        "escritor",
-        "revisor_literario"
-      ]
+      "cota": { "max": 1, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
     },
     {
       "id": "fundacao-dois-arcos",
       "texto": "A Estrutura materializa a MATRIZ POV (o que cada cabeça sabe/esconde do outro e a regra de alternância), a TABELA DE CUSTO DE MAGIA (poder → preço → escala por ato) e a ESCADA DE SLOW BURN (degraus ancorados a capítulos-alvo).",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "arquiteto_enredo"
-      ]
+      "papeis": ["arquiteto_enredo"]
     },
     {
       "id": "arco-avanca",
       "texto": "Cada capítulo avança um arco (romance OU fantasia), idealmente os dois — capítulo que não move nenhum é defeito de montagem.",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "arquiteto_cena",
-        "escritor",
-        "editor_estrutural"
-      ]
+      "papeis": ["arquiteto_cena", "escritor", "editor_estrutural"]
     }
   ],
   "testes_positivos": [
@@ -225,23 +157,8 @@
   "excecoes": [],
   "estruturas_exigidas": {
     "docs": [],
-    "campos_spec": [
-      "Ponto de vista",
-      "Degrau slow burn",
-      "Custo de magia",
-      "Decisão/Ação",
-      "Modo",
-      "Novidade"
-    ]
+    "campos_spec": ["Ponto de vista", "Degrau slow burn", "Custo de magia", "Decisão/Ação", "Modo", "Novidade"]
   },
-  "referencias": [
-    "references/voz-e-oficio.md",
-    "references/processo-de-capitulo.md"
-  ],
-  "modelos_positivos": [],
-  "calibracao": {
-    "data": "2026-07-21",
-    "metodo": "cotas derivadas do corpus aprovado (v2-calibrar-cotas.ts, detectores reais medirSinais; método: max(cota 1.0.0, máximo observado no corpus aprovado); relatório: docs/engine-v2/calibracao-cotas-1.1.0.md).",
-    "n_aprovado": 3
-  }
+  "referencias": ["references/voz-e-oficio.md", "references/processo-de-capitulo.md"],
+  "modelos_positivos": []
 }

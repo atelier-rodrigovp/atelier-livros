@@ -1,7 +1,7 @@
 {
   "schema": "skill-contract/v1",
   "id": "hoover-mcfadden",
-  "versao": "1.1.0",
+  "versao": "1.0.0",
   "nome": "Hoover–McFadden — suspense intimista com narradora não-confiável",
   "familia_editorial": "suspense_intimista",
   "motor_narrativo": "cena vivida em 1ª pessoa → relógio aperta → omissão/revelação da narradora → gancho",
@@ -10,28 +10,23 @@
     "pessoa": "primeira"
   },
   "temporalidade": "relógio comprimido: DIA/HORA no topo de cada capítulo e sempre avança; 3 relógios NOMEADOS (janela cirúrgica / doença da narradora / antagonista), cada um com dono e deadline, ≥1 move por capítulo; fio-M de memória intercalado em itálico",
-  "faixa_palavras": {
-    "min": 2000,
-    "alvo": 2400,
-    "max": 2800
-  },
+  "faixa_palavras": { "min": 2000, "alvo": 2400, "max": 2800 },
   "ritmo": {
     "descricao": "frase curta e cheia é ASSINATURA — a contagem de fragmentos é a voz e ganha folga; a régua contra staccato vazio fica na densidade, nos pares colados e na anáfora; ritmo rápido pela tensão e pelo gancho, nunca por encurtar a cena",
     "cadencia": {
       "curta": 4,
       "enfase": 3,
-      "colados": 16,
+      "colados": 8,
       "staccatoFrac": 0.55,
       "minFrases": 8,
-      "clipeNeg": 5,
-      "anafora": 6,
+      "clipeNeg": 3,
+      "anafora": 2,
       "epigrama": 1,
-      "fragEnfase": 24,
+      "fragEnfase": 20,
       "fragColados": 6,
-      "italico": 10,
+      "italico": 3,
       "retorica": 2
-    },
-    "calibracao_1_1_0": "corpus: benchmark hoover 2026-07-18 PASSA 3/3, bench-hoover caps 01–03 (n=3, shas 934039ab6617/6581e727f42e/ac8f1939536d); cadência medida: colados 16/4/7→16, clipeNeg 5/4/1→5, anáfora 6/5/5→6, fragEnfase 24/13/11→24 (1.0.0=20), itálico 6/2/10→10 (1.0.0=3); fragColados (máx 3<6) e retórica (0) mantidos"
+    }
   },
   "acao_interioridade": {
     "relacao": "interioridade_dominante",
@@ -56,125 +51,73 @@
   "regras": [
     {
       "id": "anti-gnomico-empilhado",
-      "texto": "Converta máximas decorativas em imagem concreta, ação ou consequência; fecho gnômico fica em no máximo 4 por capítulo. A régua: a personagem está sangrando (fica) ou o narrador está se admirando (sai).",
+      "texto": "Converta máximas decorativas em imagem concreta, ação ou consequência; fecho gnômico fica em no máximo 2 por capítulo. A régua: a personagem está sangrando (fica) ou o narrador está se admirando (sai).",
       "tipo": "cota",
-      "cota": {
-        "max": 4,
-        "por": "capitulo"
-      },
-      "papeis": [
-        "escritor",
-        "revisor_literario"
-      ],
-      "calibracao_1_1_0": "corpus: benchmark hoover 2026-07-18 PASSA 3/3, bench-hoover caps 01–03 (n=3, shas 934039ab6617/6581e727f42e/ac8f1939536d); gnômico medido 4/3/2 → máx 4 (cota 1.0.0=2, herdada do dan-brown, reprovava o corpus aprovado — mesma classe do CR4)"
+      "cota": { "max": 2, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
     },
     {
       "id": "anti-personificacao-abstracao",
-      "texto": "Personificação de ABSTRAÇÃO ('a culpa me obrigou') fica em no máximo 4 por capítulo. Não confunda com reação física em 1ª pessoa ('meu peito apertou') nem com imagem afetiva isolada — essas são a voz.",
+      "texto": "Personificação de ABSTRAÇÃO ('a culpa me obrigou') fica em no máximo 2 por capítulo. Não confunda com reação física em 1ª pessoa ('meu peito apertou') nem com imagem afetiva isolada — essas são a voz.",
       "tipo": "cota",
-      "cota": {
-        "max": 4,
-        "por": "capitulo"
-      },
-      "papeis": [
-        "escritor",
-        "revisor_literario"
-      ],
-      "calibracao_1_1_0": "corpus: benchmark hoover 2026-07-18 PASSA 3/3, bench-hoover caps 01–03 (n=3, shas 934039ab6617/6581e727f42e/ac8f1939536d); personificação medida 2/4/4 → máx 4"
+      "cota": { "max": 2, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
     },
     {
       "id": "anti-sanfona",
-      "texto": "Diga cada percepção UMA vez, a melhor; frase-sanfona fica em no máximo 13 por capítulo. Não confunda com interioridade que AVANÇA (cada frase acrescenta) nem com enumeração descritiva concreta.",
+      "texto": "Diga cada percepção UMA vez, a melhor; frase-sanfona fica em no máximo 1 por capítulo. Não confunda com interioridade que AVANÇA (cada frase acrescenta) nem com enumeração descritiva concreta.",
       "tipo": "cota",
-      "cota": {
-        "max": 13,
-        "por": "capitulo"
-      },
-      "papeis": [
-        "escritor",
-        "revisor_literario"
-      ],
-      "calibracao_1_1_0": "corpus: benchmark hoover 2026-07-18 PASSA 3/3, bench-hoover caps 01–03 (n=3, shas 934039ab6617/6581e727f42e/ac8f1939536d); sanfona medida 13/10/4 → máx 13. RESSALVA: contarSanfona conta enumeração/acúmulo confessional como sanfona (o revisor do canário já notou os falsos positivos); cota é teto anti-degeneração"
+      "cota": { "max": 1, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
     },
     {
       "id": "primeira-pessoa-presente",
       "texto": "1ª pessoa no PRESENTE nos capítulos da narradora — pretérito é defeito de voz; o fio-M de memória entra em itálico, como voz secundária que contrapõe o presente.",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "escritor",
-        "revisor_literario"
-      ]
+      "papeis": ["escritor", "revisor_literario"]
     },
     {
       "id": "interioridade-e-feature",
       "texto": "A personagem sangra na página: interioridade contínua, 1ª pessoa emocional e metáfora sentimental isolada são a VOZ — proteja-as; não imponha piso de declarativas nem teto de interioridade (lição CR4).",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "escritor",
-        "revisor_literario"
-      ]
+      "papeis": ["escritor", "revisor_literario"]
     },
     {
       "id": "relogio-move",
       "texto": "Pelo menos 1 dos 3 relógios nomeados move por capítulo, com dono e deadline visíveis na cena; Dia/Hora corrente avança em toda spec.",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "arquiteto_cena",
-        "escritor",
-        "auditor_factual"
-      ]
+      "papeis": ["arquiteto_cena", "escritor", "auditor_factual"]
     },
     {
       "id": "pista-antes-do-pagamento",
       "texto": "Nenhuma revelação sem pista registrada na Tabela de Pistas: semente antes do pagamento — o twist se sustenta na releitura, sem trapaça.",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "arquiteto_enredo",
-        "arquiteto_cena",
-        "revisor_literario"
-      ]
+      "papeis": ["arquiteto_enredo", "arquiteto_cena", "revisor_literario"]
     },
     {
       "id": "narradora-fair-play",
       "texto": "A omissão/distorção da narradora é jogável: o leitor tem o que ela percebe AGORA; a spec declara o que ela omite ou enquadra neste capítulo.",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "arquiteto_cena",
-        "escritor",
-        "revisor_literario"
-      ]
+      "papeis": ["arquiteto_cena", "escritor", "revisor_literario"]
     },
     {
       "id": "piso-densidade",
       "texto": "Cena vivida: capítulos da narradora com pelo menos 2.000 palavras (alvo 2.000–2.800). Densidade é mais cena vivida, não mais palavras; o fio-M é isento do piso.",
       "tipo": "cota",
-      "cota": {
-        "min": 2000,
-        "por": "capitulo"
-      },
-      "papeis": [
-        "escritor",
-        "revisor_literario"
-      ]
+      "cota": { "min": 2000, "por": "capitulo" },
+      "papeis": ["escritor", "revisor_literario"]
     },
     {
       "id": "gancho-varia",
       "texto": "O capítulo fecha em gancho depois de a cena ter sido vivida, de tipo diferente dos 2 capítulos anteriores.",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "arquiteto_cena",
-        "escritor",
-        "revisor_literario"
-      ]
+      "papeis": ["arquiteto_cena", "escritor", "revisor_literario"]
     },
     {
       "id": "custo-emocional-aterrissado",
       "texto": "A dor tem consequência na cena e na trama — emoção crua com custo aterrissado, nunca melodrama gratuito.",
       "tipo": "alvo_positivo",
-      "papeis": [
-        "escritor",
-        "revisor_literario"
-      ]
+      "papeis": ["escritor", "revisor_literario"]
     }
   ],
   "testes_positivos": [
@@ -196,29 +139,9 @@
   ],
   "excecoes": [],
   "estruturas_exigidas": {
-    "docs": [
-      "matriz-de-relogios.md",
-      "regras-da-narradora.md"
-    ],
-    "campos_spec": [
-      "Dia/Hora",
-      "Relógios",
-      "Pistas",
-      "Gancho",
-      "Narradora",
-      "Decisão/Ação",
-      "Modo",
-      "Novidade"
-    ]
+    "docs": ["matriz-de-relogios.md", "regras-da-narradora.md"],
+    "campos_spec": ["Dia/Hora", "Relógios", "Pistas", "Gancho", "Narradora", "Decisão/Ação", "Modo", "Novidade"]
   },
-  "referencias": [
-    "references/voz-e-oficio.md",
-    "references/processo-de-capitulo.md"
-  ],
-  "modelos_positivos": [],
-  "calibracao": {
-    "data": "2026-07-21",
-    "metodo": "cotas derivadas do corpus aprovado (v2-calibrar-cotas.ts, detectores reais medirSinais; método: max(cota 1.0.0, máximo observado no corpus aprovado); relatório: docs/engine-v2/calibracao-cotas-1.1.0.md).",
-    "n_aprovado": 3
-  }
+  "referencias": ["references/voz-e-oficio.md", "references/processo-de-capitulo.md"],
+  "modelos_positivos": []
 }

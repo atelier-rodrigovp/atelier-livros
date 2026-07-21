@@ -145,18 +145,17 @@ describe("IDENTIDADE PRESERVADA (anti-CR4) — as skills NÃO são normalizadas 
     c.regras.find((r) => r.tipo === "cota" && (re.test(r.id) || re.test(r.texto)));
 
   it("dan-brown tem cotas anti-tique E piso de declarativas", () => {
-    // Valores 1.1.0 calibrados por corpus aprovado (docs/engine-v2/calibracao-cotas-1.1.0.md)
-    expect(cotaDe(db, /gnomico|gnômico/i)?.cota).toMatchObject({ max: 4, por: "capitulo" });
-    expect(cotaDe(db, /personificacao|personificação/i)?.cota).toMatchObject({ max: 3, por: "capitulo" });
-    expect(cotaDe(db, /sanfona/i)?.cota).toMatchObject({ max: 18, por: "capitulo" });
+    expect(cotaDe(db, /gnomico|gnômico/i)?.cota).toMatchObject({ max: 2, por: "capitulo" });
+    expect(cotaDe(db, /personificacao|personificação/i)?.cota).toMatchObject({ max: 2, por: "capitulo" });
+    expect(cotaDe(db, /sanfona/i)?.cota).toMatchObject({ max: 1, por: "capitulo" });
     expect(cotaDe(db, /declarativ/i)?.cota).toMatchObject({ min: 50, por: "capitulo" });
   });
 
   it("hoover tem SÓ o anti-tique universal — SEM piso de declarativas nem teto de interioridade (lição CR4)", () => {
     // anti-tique universal presente
-    expect(cotaDe(hoover, /gnomico|gnômico/i)?.cota).toMatchObject({ max: 4, por: "capitulo" });
-    expect(cotaDe(hoover, /personificacao|personificação/i)?.cota).toMatchObject({ max: 4, por: "capitulo" });
-    expect(cotaDe(hoover, /sanfona/i)?.cota).toMatchObject({ max: 13, por: "capitulo" });
+    expect(cotaDe(hoover, /gnomico|gnômico/i)?.cota).toMatchObject({ max: 2, por: "capitulo" });
+    expect(cotaDe(hoover, /personificacao|personificação/i)?.cota).toMatchObject({ max: 2, por: "capitulo" });
+    expect(cotaDe(hoover, /sanfona/i)?.cota).toMatchObject({ max: 1, por: "capitulo" });
     // NENHUMA cota de piso de declarativas
     expect(cotaDe(hoover, /declarativ/i)).toBeUndefined();
     // NENHUMA cota cujo ALVO seja interioridade nem metáfora (são FEATURE aqui;
@@ -201,11 +200,9 @@ describe("IDENTIDADE PRESERVADA (anti-CR4) — as skills NÃO são normalizadas 
     expect(cad(db)).not.toBe(cad(hoover));
     expect(cad(db)).not.toBe(cad(roman));
     expect(cad(hoover)).not.toBe(cad(roman));
-    // e a diferença segue o corpus medido de cada voz (calibração 1.1.0): o hoover
-    // tem a maior folga de fragmento; o dan-brown aprovado é mais staccato que a
-    // romantasy (frase-soco da romantasy é pontual, não densa).
+    // e a diferença é a documentada: hoover tem folga de fragmento (voz), dan-brown não
     expect(hoover.ritmo.cadencia?.fragEnfase).toBeGreaterThan(db.ritmo.cadencia?.fragEnfase ?? 0);
-    expect(db.ritmo.cadencia?.fragEnfase).toBeGreaterThan(roman.ritmo.cadencia?.fragEnfase ?? 0);
+    expect(roman.ritmo.cadencia?.fragEnfase).toBeGreaterThan(db.ritmo.cadencia?.fragEnfase ?? 0);
     expect(hoover.ritmo.cadencia?.staccatoFrac).toBeGreaterThan(db.ritmo.cadencia?.staccatoFrac ?? 0);
   });
 

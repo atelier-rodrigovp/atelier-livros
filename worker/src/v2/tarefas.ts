@@ -94,12 +94,43 @@ export function tarefaRevisor(capitulo: number, resumoSinais: string, contrato: 
     `## SINAIS MEDIDOS (medições determinísticas reais — disponha cada um)`,
     resumoSinais,
     `Para cada sinal medido acima, inclua um item em "sinais" com disposicao: "violacao_confirmada" (o sinal é defeito real AQUI), "excecao_valida" (a cena justifica; explique), "falso_positivo" (o detector errou; explique) ou "necessita_decisao_humana".`,
+    `REGRA DOS SINAIS DE CONTAGEM (sanfona, gnômico, personificação, metáfora, cadência): o NÚMERO do detector NUNCA confirma violação sozinho — detectores por regex supercontam (enumerações e acúmulos legítimos contam como tique). Para dispor "violacao_confirmada" você deve CITAR na "evidencia" cada ocorrência que julgou defeito real (trecho literal) e justificar semanticamente; ocorrência que você não citar conta como falso positivo. Se, lidas as ocorrências, nenhuma for defeito real, a disposição correta é "falso_positivo" mesmo com contagem acima da cota.`,
     `"necessita_decisao_humana" é RARO: reserve para escolha genuinamente autoral (voz, exceção de contrato, rumo da trama). Defeito de ofício corrigível (tique, cota estourada, cena morta) é "violacao_confirmada" + entrada em "correcoes" + veredito "reprovado" — a correção dirigida resolve sem parar a produção.`,
     `REGRAS DO VEREDITO:`,
     `- "aprovado" exige evidência POSITIVA em "evidencias" (o que está vivo e funciona, localizado) — ausência de defeito não basta.`,
     `- Qualquer "violacao_confirmada" exige entrada correspondente em "correcoes" e veredito "reprovado".`,
     `- Capítulo competente mas MORTO (sem evento, sem avanço) reprova mesmo dentro das cotas.`,
     `- Julgue aderência à skill pelo contrato do pacote (testes positivos: ${contrato.testes_positivos.slice(0, 4).join("; ") || "—"}).`,
+  ].join("\n");
+}
+
+/**
+ * Avaliador de livro (meta-nota): porta a rubrica REAL do book-bestseller-review —
+ * dez dimensões independentes (8 majors + 2 modificadores), cada uma com evidência
+ * citada do manuscrito. O CÓDIGO calcula a média ponderada e aplica o floor
+ * principle (meta9.ts) — o modelo nunca soma a própria nota.
+ */
+export function tarefaAvaliadorLivro(meta: number, contrato: SkillContract): string {
+  return [
+    `Avalie o LIVRO COMPLETO (seção MANUSCRITO) como um editor comercial adversarial, na rubrica de prontidão bestseller.`,
+    `Responda APENAS JSON no schema "avaliacao-livro/v2": { "schema":"avaliacao-livro/v2", "dimensoes": { "hook_abertura":{"nota":1-10,"evidencia":string}, "premissa_originalidade":{...}, "estrutura_ritmo":{...}, "personagens":{...}, "prosa_oficio":{...}, "payoff":{...}, "coerencia_consistencia":{...}, "final":{...}, "encaixe_mercado":{...}, "acabamento":{...} }, "pontos_fortes": [string], "pontos_fracos": [string], "capitulos_a_reescrever": [{"capitulo": number, "problemas": [string], "instrucoes": [string]}], "resumo": string }.`,
+    `REGRAS DA RUBRICA:`,
+    `- Cada dimensão exige EVIDÊNCIA com citação/localização específica do manuscrito — nota sem evidência é inválida.`,
+    `- Sem inflação: 7 já é um livro genuinamente competitivo; primeiras versões honestas ficam entre 4 e 6; reserve 9–10 para força excepcional REAL naquela dimensão.`,
+    `- Avalie o que está NA PÁGINA, não o potencial.`,
+    `- Julgue aderência de gênero pelo contrato do pacote (família: ${contrato.familia_editorial}).`,
+    `- "capitulos_a_reescrever": APENAS capítulos cuja reescrita muda a nota do livro, com problemas localizados e instruções objetivas.`,
+    `- NÃO calcule média nem veredito — o sistema calcula (meta do projeto: ${meta}).`,
+  ].join("\n");
+}
+
+/** Síntese de arco (manuscritos longos): consolida avaliações de blocos numa visão do livro inteiro. */
+export function tarefaSinteseArco(totalBlocos: number): string {
+  return [
+    `Você recebeu as avaliações por BLOCO (${totalBlocos} blocos, seção AVALIAÇÕES POR BLOCO) e o material de arco (primeiro e último capítulo integrais + fichas).`,
+    `Produza a avaliação FINAL do livro inteiro no MESMO schema "avaliacao-livro/v2" (dimensões com evidência).`,
+    `As dimensões de ARCO (estrutura_ritmo, payoff, coerencia_consistencia, final) devem julgar o TODO — progressão entre blocos, promessas plantadas vs pagas, consistência cruzada — não a média dos blocos.`,
+    `Responda APENAS o JSON.`,
   ].join("\n");
 }
 
@@ -126,18 +157,6 @@ export function tarefaEditorEstrutural(totalCaps: number, contrato: SkillContrac
     `- "reordenacao": "nova_ordem" traz TODOS os números de 1 a ${totalCaps} (menos os cortados) exatamente uma vez, na nova sequência.`,
     `- Na dúvida, responda [{"tipo":"nenhuma","capitulos":[],"justificativa":"estrutura sólida; sem corte nem reordenação"}].`,
     `Julgue pela família editorial "${contrato.familia_editorial}" e pelo motor narrativo "${contrato.motor_narrativo}".`,
-    `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
-  ].join("\n");
-}
-
-/** Avaliador de livro completo (meta-nota): parecer comercial no papel revisor_literario, alvo "livro". */
-export function tarefaAvaliadorLivro(meta: number, contrato: SkillContract): string {
-  return [
-    `Avalie o LIVRO COMPLETO (seção MANUSCRITO) como um crítico comercial. Meta de nota: ${meta.toFixed(1)}.`,
-    `Responda APENAS JSON no schema "avaliacao-livro/v1": { "schema":"avaliacao-livro/v1", "nota": number (0 a 10, uma casa decimal), "pontos_fortes": [string], "pontos_fracos": [string], "capitulos_a_reescrever": [{"capitulo": number, "problemas": [string], "instrucoes": [string]}], "resumo": string }.`,
-    `A nota deve ser FUNDAMENTADA nos critérios comerciais: progressão dramática, força do gancho de abertura e dos ganchos de capítulo, clareza, emoção e originalidade.`,
-    `"capitulos_a_reescrever": inclua um capítulo APENAS quando reescrevê-lo muda a nota do livro — não liste capítulo que já funciona. As "instrucoes" devem ser objetivas e LOCALIZADAS (o que mudar e onde), uma por problema.`,
-    `Julgue a identidade pela família "${contrato.familia_editorial}" (testes positivos: ${contrato.testes_positivos.slice(0, 4).join("; ") || "—"}).`,
     `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
   ].join("\n");
 }
