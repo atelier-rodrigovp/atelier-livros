@@ -1,7 +1,7 @@
 {
   "schema": "skill-contract/v1",
   "id": "dan-brown",
-  "versao": "1.0.0",
+  "versao": "1.1.0",
   "nome": "Dan Brown — thriller de enigma e conspiração",
   "familia_editorial": "thriller_enigma",
   "motor_narrativo": "pergunta → obstáculo → revelação → corte",
@@ -18,23 +18,28 @@
     }
   },
   "temporalidade": "relógio comprimido (12–48h): Dia/Hora corrente avança em todo capítulo; ameaça contínua e visível na cena",
-  "faixa_palavras": { "min": 1300, "alvo": 1700, "max": 2200 },
+  "faixa_palavras": {
+    "min": 1300,
+    "alvo": 1700,
+    "max": 2200
+  },
   "ritmo": {
     "descricao": "capítulo curto e propulsivo; UMA virada; corte no pico com troca de fio; cadência longa de Regra 4 (frase declarativa domina, fragmento é raro e pontual)",
     "cadencia": {
       "curta": 4,
       "enfase": 3,
-      "colados": 1,
+      "colados": 9,
       "staccatoFrac": 0.35,
       "minFrases": 8,
-      "clipeNeg": 1,
-      "anafora": 1,
+      "clipeNeg": 3,
+      "anafora": 2,
       "epigrama": 1,
-      "fragEnfase": 2,
-      "fragColados": 0,
+      "fragEnfase": 15,
+      "fragColados": 3,
       "italico": 3,
       "retorica": 2
-    }
+    },
+    "calibracao_1_1_0": "corpus: benchmark A/B dan-brown 2026-07-18, caps 05/37/38 do 53abdade (n=3, shas 94b727a5d7bb/35f506e057fc/f556d452820e); cadência medida (diagnosticarCadencia): colados 9/5/3→9, clipeNeg 2/0/3→3, anáfora 2/2/1→2, fragEnfase 13/6/15→15, fragColados 1/0/3→3; itálico (máx 2) e retórica (máx 2) dentro das cotas 1.0.0, mantidas"
   },
   "acao_interioridade": {
     "relacao": "acao_dominante",
@@ -57,85 +62,145 @@
   "regras": [
     {
       "id": "fecho-concreto-gnomico",
-      "texto": "Feche beats em imagem concreta, ação ou consequência; o fecho gnômico (máxima/aforismo geral) fica em no máximo 2 por capítulo — vale também para fala de personagem que só fala em epigrama.",
+      "texto": "Feche beats em imagem concreta, ação ou consequência; o fecho gnômico (máxima/aforismo geral) fica em no máximo 4 por capítulo — vale também para fala de personagem que só fala em epigrama.",
       "tipo": "cota",
-      "cota": { "max": 2, "por": "capitulo" },
-      "papeis": ["escritor", "revisor_literario"]
+      "cota": {
+        "max": 4,
+        "por": "capitulo"
+      },
+      "papeis": [
+        "escritor",
+        "revisor_literario"
+      ],
+      "calibracao_1_1_0": "corpus: benchmark A/B dan-brown 2026-07-18, caps 05/37/38 do 53abdade (n=3, shas 94b727a5d7bb/35f506e057fc/f556d452820e); gnômico medido 1/1/4 → máx 4 (cota 1.0.0=2 reprovava o próprio corpus aprovado)"
     },
     {
       "id": "agente-humano-personificacao",
-      "texto": "Prefira agente humano + verbo concreto; personificação de abstração ('a razão decidiu') fica em no máximo 2 por capítulo, nunca duas na mesma página.",
+      "texto": "Prefira agente humano + verbo concreto; personificação de abstração ('a razão decidiu') fica em no máximo 3 por capítulo, nunca duas na mesma página.",
       "tipo": "cota",
-      "cota": { "max": 2, "por": "capitulo" },
-      "papeis": ["escritor", "revisor_literario"]
+      "cota": {
+        "max": 3,
+        "por": "capitulo"
+      },
+      "papeis": [
+        "escritor",
+        "revisor_literario"
+      ],
+      "calibracao_1_1_0": "corpus: benchmark A/B dan-brown 2026-07-18, caps 05/37/38 do 53abdade (n=3, shas 94b727a5d7bb/35f506e057fc/f556d452820e); personificação medida 1/3/2 → máx 3"
     },
     {
       "id": "uma-vez-sanfona",
-      "texto": "Diga cada percepção UMA vez, a melhor; a frase-sanfona (mesma percepção reformulada em apostos encadeados) fica em no máximo 1 por capítulo.",
+      "texto": "Diga cada percepção UMA vez, a melhor; a frase-sanfona (mesma percepção reformulada em apostos encadeados) fica em no máximo 18 por capítulo.",
       "tipo": "cota",
-      "cota": { "max": 1, "por": "capitulo" },
-      "papeis": ["escritor", "revisor_literario"]
+      "cota": {
+        "max": 18,
+        "por": "capitulo"
+      },
+      "papeis": [
+        "escritor",
+        "revisor_literario"
+      ],
+      "calibracao_1_1_0": "corpus: benchmark A/B dan-brown 2026-07-18, caps 05/37/38 do 53abdade (n=3, shas 94b727a5d7bb/35f506e057fc/f556d452820e); sanfona medida 3/7/18 → máx 18. RESSALVA: contarSanfona superconta apostos/enumerações concretas (spread 3–18 no aprovado); a cota vira teto anti-degeneração — o julgamento fino é do revisor, que recebe o valor e os exemplos"
     },
     {
       "id": "piso-declarativas",
       "texto": "Maioria de frases declarativas simples (SVO, sem subordinação dupla): pelo menos 50% das frases do capítulo — o leitor lê ATRAVÉS da frase para o evento.",
       "tipo": "cota",
-      "cota": { "min": 50, "por": "capitulo" },
-      "papeis": ["escritor", "revisor_literario"]
+      "cota": {
+        "min": 50,
+        "por": "capitulo"
+      },
+      "papeis": [
+        "escritor",
+        "revisor_literario"
+      ],
+      "calibracao_1_1_0": "corpus: benchmark A/B dan-brown 2026-07-18, caps 05/37/38 do 53abdade (n=3, shas 94b727a5d7bb/35f506e057fc/f556d452820e); declarativas medidas 64,7%/52,8%/51,6% → piso 50 mantido (abaixo do mínimo aprovado 51,6%)"
     },
     {
       "id": "fair-play-honesto",
       "texto": "A câmera está na cabeça do POV: tudo o que ele percebe/pensa AGORA, o leitor percebe agora. Falso gancho (sonegar o que o POV já sabe) é proibido.",
       "tipo": "alvo_positivo",
-      "papeis": ["arquiteto_cena", "escritor", "revisor_literario"]
+      "papeis": [
+        "arquiteto_cena",
+        "escritor",
+        "revisor_literario"
+      ]
     },
     {
       "id": "exposicao-dramatizada",
       "texto": "Toda informação entra a serviço de um problema da cena agora — por conflito, descoberta ou perda. Zero palestra ou info-dump.",
       "tipo": "alvo_positivo",
-      "papeis": ["arquiteto_cena", "escritor"]
+      "papeis": [
+        "arquiteto_cena",
+        "escritor"
+      ]
     },
     {
       "id": "corte-no-pico",
       "texto": "Corte no PICO (antes da resolução) com TROCA de fio; o capítulo termina em gancho honesto.",
       "tipo": "alvo_positivo",
-      "papeis": ["arquiteto_cena", "escritor", "editor_estrutural"]
+      "papeis": [
+        "arquiteto_cena",
+        "escritor",
+        "editor_estrutural"
+      ]
     },
     {
       "id": "relogio-avanca",
       "texto": "Dia/Hora corrente avança em todo capítulo — o relógio comprimido é canônico e a ameaça fica visível na cena.",
       "tipo": "alvo_positivo",
-      "papeis": ["arquiteto_cena", "escritor", "auditor_factual"]
+      "papeis": [
+        "arquiteto_cena",
+        "escritor",
+        "auditor_factual"
+      ]
     },
     {
       "id": "fato-vs-dossie",
       "texto": "Todo fato do mundo real usado no capítulo consta em dossie-factual.md como VERIFICADO, ou está marcado como hipótese na prosa — o dossiê é a única fonte de 'real' do livro.",
       "tipo": "alvo_positivo",
-      "papeis": ["escritor", "auditor_factual", "revisor_literario"]
+      "papeis": [
+        "escritor",
+        "auditor_factual",
+        "revisor_literario"
+      ]
     },
     {
       "id": "sem-coincidencia",
       "texto": "Causalidade, não conveniência: toda revelação tem pista plantada antes; a salvação vem de habilidade ou objeto pré-estabelecido.",
       "tipo": "alvo_positivo",
-      "papeis": ["arquiteto_enredo", "arquiteto_cena", "revisor_literario"]
+      "papeis": [
+        "arquiteto_enredo",
+        "arquiteto_cena",
+        "revisor_literario"
+      ]
     },
     {
       "id": "rotacao-de-fios",
       "texto": "Alterne os fios de POV da matriz: nunca 4 capítulos seguidos no mesmo fio sem justificativa (teto duro 5); fio recorrente não some por mais de 3 capítulos; nos últimos 10, nenhum fio acima de 65%.",
       "tipo": "alvo_positivo",
-      "papeis": ["arquiteto_cena", "editor_estrutural"]
+      "papeis": [
+        "arquiteto_cena",
+        "editor_estrutural"
+      ]
     },
     {
       "id": "narrador-invisivel",
       "texto": "O narrador não opina nem decora: sem máxima do narrador, sem adjetivo moral/estético em objeto físico ('facho honesto'), metáfora nunca em cadeia.",
       "tipo": "proibicao",
-      "papeis": ["escritor", "revisor_literario"]
+      "papeis": [
+        "escritor",
+        "revisor_literario"
+      ]
     },
     {
       "id": "interioridade-funcional",
       "texto": "Interioridade funcional e rasa de propósito: 1–2 linhas por beat, coladas a estímulo externo; o custo aparece em ação e escolha — o motor do capítulo é externo.",
       "tipo": "alvo_positivo",
-      "papeis": ["escritor", "revisor_literario"]
+      "papeis": [
+        "escritor",
+        "revisor_literario"
+      ]
     }
   ],
   "testes_positivos": [
@@ -157,9 +222,25 @@
   ],
   "excecoes": [],
   "estruturas_exigidas": {
-    "docs": ["dossie-factual.md"],
-    "campos_spec": ["Fio de POV", "Dia/Hora", "Decisão/Ação", "Modo", "Novidade"]
+    "docs": [
+      "dossie-factual.md"
+    ],
+    "campos_spec": [
+      "Fio de POV",
+      "Dia/Hora",
+      "Decisão/Ação",
+      "Modo",
+      "Novidade"
+    ]
   },
-  "referencias": ["references/voz-e-oficio.md", "references/metamodelo-thriller.md"],
-  "modelos_positivos": []
+  "referencias": [
+    "references/voz-e-oficio.md",
+    "references/metamodelo-thriller.md"
+  ],
+  "modelos_positivos": [],
+  "calibracao": {
+    "data": "2026-07-21",
+    "metodo": "cotas derivadas do corpus aprovado (v2-calibrar-cotas.ts, detectores reais medirSinais; método: max(cota 1.0.0, máximo observado no corpus aprovado); relatório: docs/engine-v2/calibracao-cotas-1.1.0.md).",
+    "n_aprovado": 3
+  }
 }
