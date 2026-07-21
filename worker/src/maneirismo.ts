@@ -263,6 +263,8 @@ function frasesRotuladas(texto: string): { fr: string[]; narr: boolean[] } {
 
 export interface CadenciaTique {
   nome: string;
+  /** chave do campo correspondente em OrcamentoCadencia (p/ casar com contratos V2) */
+  chave?: keyof OrcamentoCadencia;
   n: number;
   alvo: number;
   acima: boolean;
@@ -375,19 +377,19 @@ export function diagnosticarCadencia(texto: string, orc: OrcamentoCadencia = ORC
   const italicos = [...t.matchAll(RE_ITALICO)].map((m) => m[2]);
   const retoricas = fr.filter((f, i) => narr[i] && /[?]["'”’)\]]*$/.test(f));
 
-  const mk = (nome: string, n: number, alvo: number, exemplos: string[], densidade?: number): CadenciaTique =>
-    ({ nome, n, alvo, acima: n > alvo, exemplos: ex(exemplos), densidade });
+  const mk = (nome: string, chave: keyof OrcamentoCadencia, n: number, alvo: number, exemplos: string[], densidade?: number): CadenciaTique =>
+    ({ nome, chave, n, alvo, acima: n > alvo, exemplos: ex(exemplos), densidade });
 
   const tiques: CadenciaTique[] = [
-    mk("fragmentos colados (≤4 palavras)", colados, orc.colados, coladosEx),
-    { nome: "staccato (frases curtas)", n: curtas, alvo: Math.round(nNarr * orc.staccatoFrac), acima: staccatoAcima, exemplos: [], densidade: staccatoPct },
-    mk("clipe de negação curto", clipes.length, orc.clipeNeg, clipes),
-    mk("anáfora (frases coladas, mesmo início)", anafora, orc.anafora, anaforaEx),
-    mk("epigrama antitético", epi.length, orc.epigrama, epi),
-    mk("fragmento de ênfase (Regra 4 ≤1–2)", frag.length, orc.fragEnfase, frag),
-    mk("fragmentos de ênfase COLADOS (Regra 4: nunca dois)", fragColados, orc.fragColados, []),
-    mk("pensamento em itálico (Regra 4 ≤2–3)", italicos.length, orc.italico, italicos),
-    mk("pergunta retórica (Regra 4 ≤1–2)", retoricas.length, orc.retorica, retoricas),
+    mk("fragmentos colados (≤4 palavras)", "colados", colados, orc.colados, coladosEx),
+    { nome: "staccato (frases curtas)", chave: "staccatoFrac", n: curtas, alvo: Math.round(nNarr * orc.staccatoFrac), acima: staccatoAcima, exemplos: [], densidade: staccatoPct },
+    mk("clipe de negação curto", "clipeNeg", clipes.length, orc.clipeNeg, clipes),
+    mk("anáfora (frases coladas, mesmo início)", "anafora", anafora, orc.anafora, anaforaEx),
+    mk("epigrama antitético", "epigrama", epi.length, orc.epigrama, epi),
+    mk("fragmento de ênfase (Regra 4 ≤1–2)", "fragEnfase", frag.length, orc.fragEnfase, frag),
+    mk("fragmentos de ênfase COLADOS (Regra 4: nunca dois)", "fragColados", fragColados, orc.fragColados, []),
+    mk("pensamento em itálico (Regra 4 ≤2–3)", "italico", italicos.length, orc.italico, italicos),
+    mk("pergunta retórica (Regra 4 ≤1–2)", "retorica", retoricas.length, orc.retorica, retoricas),
   ];
   return { frases: fr.length, staccatoPct, fragDialogo, tiques, acima: tiques.some((q) => q.acima) };
 }

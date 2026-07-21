@@ -41,10 +41,31 @@ export function tarefaEscritor(ficha: SceneSpec, contrato: SkillContract): strin
   ].join("\n");
 }
 
-/** Escritor em modo correção: lista cirúrgica, nunca reescrita cega. */
-export function tarefaEscritorCorrecao(capitulo: number, correcoes: { local: string; problema: string; instrucao: string }[], textoAtual: string): string {
+export type ModoCorrecao = "cirurgico" | "reescrita";
+
+/**
+ * Escritor em modo correção. Dois modos, escolhidos pelo PIPELINE (nunca pelo modelo):
+ * - "cirurgico": lista localizada; preserva todo o resto palavra por palavra.
+ * - "reescrita": há instrução global (cadência/cota difusa no capítulo inteiro) —
+ *   "preserve tudo palavra por palavra" seria incompatível com a meta; preserva
+ *   eventos, fatos, diálogo e estrutura da ficha; reescreve a superfície da prosa.
+ */
+export function tarefaEscritorCorrecao(
+  capitulo: number,
+  correcoes: { local: string; problema: string; instrucao: string }[],
+  textoAtual: string,
+  modo: ModoCorrecao = "cirurgico"
+): string {
+  const cabecalho =
+    modo === "reescrita"
+      ? [
+          `Reescreva o capítulo ${capitulo} abaixo para eliminar os problemas listados.`,
+          `PRESERVE integralmente: os eventos e a ordem deles, os fatos, as falas de diálogo (conteúdo) e a estrutura da cena (objetivo, virada, gancho).`,
+          `REESCREVA livremente a superfície da prosa (frases, cadência, imagens) até cumprir as metas globais listadas — fundir fragmentos, cortar reformulações e trocar fechos são permitidos e esperados.`,
+        ]
+      : [`Revise o capítulo ${capitulo} abaixo aplicando SOMENTE as correções listadas. Preserve todo o resto palavra por palavra.`];
   return [
-    `Revise o capítulo ${capitulo} abaixo aplicando SOMENTE as correções listadas. Preserve todo o resto palavra por palavra.`,
+    ...cabecalho,
     `## CORREÇÕES`,
     ...correcoes.map((c, i) => `${i + 1}. [${c.local}] ${c.problema} → ${c.instrucao}`),
     `## TEXTO ATUAL`,

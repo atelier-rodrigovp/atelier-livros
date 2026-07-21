@@ -106,6 +106,24 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     throw new ErroEngine({ codigo: "TOTAL_CAPITULOS_INDEFINIDO", classe: "configuracao", mensagem: "total de capítulos não definido no projeto nem no payload" });
   }
 
+  // Docs factuais do contrato (ex.: dossie-factual.md do dan-brown, matriz-de-relogios
+  // do hoover): quando existem no projeto, entram VERBATIM no pacote do revisor e do
+  // auditor — antes o auditor julgava contradição sem o dossiê (gap admitido na F9).
+  const docsFactuais: { titulo: string; texto: string; fonte: string }[] = [];
+  for (const doc of contrato.contrato.estruturas_exigidas?.docs ?? []) {
+    for (const c of [path.join(dirProjeto, "fundacao", doc), path.join(dirProjeto, doc)]) {
+      try {
+        const t = await fs.readFile(c, "utf8");
+        if (t.trim()) {
+          docsFactuais.push({ titulo: `DOC FACTUAL: ${doc}`, texto: t, fonte: doc });
+          break;
+        }
+      } catch {
+        /* doc ausente neste layout — tenta o próximo; ausência é sinalizada pelos gates de fundação */
+      }
+    }
+  }
+
   const deps: DepsPipeline = {
     gravador,
     persistencia,
@@ -117,6 +135,7 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     projectId,
     editionId: job.edition_id ?? null,
     jobId: job.id,
+    docsFactuais,
   };
 
   await atualizarProgresso(job.id, {

@@ -322,24 +322,158 @@ describe("escreverCapitulo — aprovação sem evidência rebaixa", () => {
   });
 });
 
-describe("escreverCapitulo — auditoria factual", () => {
-  it("contradição bloqueante reprova mesmo com parecer aprovado", async () => {
+describe("escreverCapitulo — auditoria factual alimenta correção (caso do canário dan-brown)", () => {
+  it("contradição bloqueante + revisor sem correções → tentativa de correção dirigida; auditor limpo aprova", async () => {
     provedor.enfileirar("arquiteto_cena", JSON.stringify(ficha()));
     provedor.enfileirar("contextualizador", CTX_OK);
     provedor.enfileirar("escritor", PROSA_OK);
-    provedor.enfileirar("revisor_literario", JSON.stringify(parecer())); // aprovado com evidência
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecer())); // aprovado com evidência, SEM correções
     provedor.enfileirar("auditor_factual", AUDITOR_CONTRADICAO);
+    // A correção derivada do AUDITOR alimenta o escritor (antes: beco sem uma tentativa)
+    provedor.enfileirar("escritor", PROSA_CORRIGIDA);
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecer()));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    const r = await escreverCapitulo(deps, 3);
+
+    expect(r.status).toBe("aprovado");
+    expect(r.problemas.some((p) => p.startsWith("contradição factual comprovada"))).toBe(true);
+    expect(r.textHash).toBe(hashText(PROSA_CORRIGIDA));
+
+    // O prompt da correção carrega a contradição do auditor (local + fato + instrução)
+    const chamadasEscritor = provedor.chamadas.filter((c) => c.papel === "escritor");
+    expect(chamadasEscritor).toHaveLength(2);
+    expect(chamadasEscritor[1].prompt).toContain("contradição factual");
+    expect(chamadasEscritor[1].prompt).toContain("O registro de 1987 existe no consulado");
+    // Sem instrução global de cadência → modo cirúrgico
+    expect(chamadasEscritor[1].prompt).toContain("SOMENTE as correções listadas");
+  });
+
+  it("contradição persistente esgota o orçamento e reprova COM as tentativas no ledger", async () => {
+    provedor.enfileirar("arquiteto_cena", JSON.stringify(ficha()));
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_OK);
+    for (let i = 0; i < 3; i++) {
+      provedor.enfileirar("revisor_literario", JSON.stringify(parecer())); // nunca lista correções
+      provedor.enfileirar("auditor_factual", AUDITOR_CONTRADICAO); // contradição persiste
+      if (i < 2) provedor.enfileirar("escritor", i === 0 ? PROSA_CORRIGIDA : PROSA_OK);
+    }
 
     const r = await escreverCapitulo(deps, 3);
 
     expect(r.status).toBe("reprovado");
-    expect(r.problemas.some((p) => p.startsWith("contradição factual comprovada"))).toBe(true);
-
+    // 1 escrita + 2 correções (orçamento default maxCorrecoes=2) — não morre sem tentativa
+    expect(provedor.chamadas.filter((c) => c.papel === "escritor")).toHaveLength(3);
     const reviews = lerJsonl("reviews.jsonl");
     expect(reviews).toHaveLength(1);
     expect(reviews[0].registro).toMatchObject({ verdict: "reprovado" });
     const estado = await disco.lerEstado("proj-1");
     expect(estado?.doc.bloqueios.some((b) => b.codigo === "QUALIDADE_REPROVADA")).toBe(true);
+  });
+});
+
+describe("escreverCapitulo — violação difusa entra em modo reescrita (caso do canário hoover)", () => {
+  const PROSA_SANFONA = [
+    "## Capítulo 3",
+    "",
+    "Marina não sabia o que dizer, mas não podia ficar parada diante do arquivista. Ela não entendia o registro, mas não ousava perguntar nada ali dentro. O arquivista atendeu o telefone na sala ao lado. Ela fotografou a linha com o nome do irmão. A chave girou na fechadura.",
+  ].join("\n");
+
+  it("violacao_confirmada de sinal medido → instrução global com trechos flagrados + modo reescrita; platô de 1 rodada é tolerado", async () => {
+    deps.maxCorrecoes = 3;
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_SANFONA);
+    const parecerSanfona = () =>
+      JSON.stringify(
+        parecer({
+          verdict: "reprovado",
+          sinais: [{ sinal: "sanfona", valor: 9, disposicao: "violacao_confirmada", evidencia: "reformulações em cadeia" }],
+          correcoes: [], // revisor não listou correção cirúrgica — só a violação difusa
+        })
+      );
+    // Rodada 1: reprovado (saldo 1) → corrige (reescrita). Rodada 2: mesmo saldo (platô 1,
+    // tolerado) → corrige de novo. Rodada 3: mesmo saldo (platô 2) → para reprovado.
+    provedor.enfileirar("revisor_literario", parecerSanfona());
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+    provedor.enfileirar("escritor", PROSA_SANFONA);
+    provedor.enfileirar("revisor_literario", parecerSanfona());
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+    provedor.enfileirar("escritor", PROSA_SANFONA);
+    provedor.enfileirar("revisor_literario", parecerSanfona());
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    const r = await escreverCapitulo(deps, 3, { fichaExistente: ficha() });
+
+    expect(r.status).toBe("reprovado");
+    const chamadasEscritor = provedor.chamadas.filter((c) => c.papel === "escritor");
+    // 1 escrita + 2 correções: o anti-loop por saldo tolerou 1 rodada de platô
+    // (a regra antiga 9→9 matava na 1ª) e parou na 2ª sem melhora líquida.
+    expect(chamadasEscritor).toHaveLength(3);
+    // Modo reescrita orientada, nunca "preserve palavra por palavra"
+    expect(chamadasEscritor[1].prompt).toContain("Reescreva o capítulo");
+    expect(chamadasEscritor[1].prompt).toContain("PRESERVE integralmente");
+    expect(chamadasEscritor[1].prompt).not.toContain("palavra por palavra");
+    // A instrução global carrega o trecho que o detector flagrou (o escritor sabe QUAIS frases contam)
+    expect(chamadasEscritor[1].prompt).toContain("Trechos flagrados pelo detector");
+    expect(chamadasEscritor[1].prompt).toContain("não sabia o que dizer");
+  });
+
+  it("melhora líquida entre rodadas zera o platô e a correção continua", async () => {
+    deps.maxCorrecoes = 3;
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_SANFONA);
+    const parecerViol = (n: number) =>
+      JSON.stringify(
+        parecer({
+          verdict: "reprovado",
+          sinais: Array.from({ length: n }, (_, i) => ({
+            sinal: i === 0 ? "sanfona" : `sinal_${i}`,
+            valor: 9,
+            disposicao: "violacao_confirmada" as const,
+            evidencia: "violação",
+          })),
+          correcoes: [{ local: "L:1", problema: "reformulação", instrucao: "corte a reformulação" }],
+        })
+      );
+    // saldos 3 → 3 (platô 1) → 2 (melhora, platô zera) → aprovação na 4ª rodada
+    provedor.enfileirar("revisor_literario", parecerViol(3));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+    provedor.enfileirar("escritor", PROSA_SANFONA);
+    provedor.enfileirar("revisor_literario", parecerViol(3));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+    provedor.enfileirar("escritor", PROSA_SANFONA);
+    provedor.enfileirar("revisor_literario", parecerViol(2));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+    provedor.enfileirar("escritor", PROSA_CORRIGIDA);
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecer()));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    const r = await escreverCapitulo(deps, 3, { fichaExistente: ficha() });
+
+    expect(r.status).toBe("aprovado");
+    expect(provedor.chamadas.filter((c) => c.papel === "escritor")).toHaveLength(4);
+    expect(r.textHash).toBe(hashText(PROSA_CORRIGIDA));
+  });
+});
+
+describe("escreverCapitulo — docs factuais no pacote", () => {
+  it("dossie-factual entra no pacote do revisor e do auditor (não no do escritor)", async () => {
+    deps.docsFactuais = [
+      { titulo: "DOC FACTUAL: dossie-factual.md", texto: "O manuscrito de 1987 tem 214 páginas numeradas.", fonte: "dossie-factual.md" },
+    ];
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_OK);
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecer()));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    const r = await escreverCapitulo(deps, 3, { fichaExistente: ficha() });
+    expect(r.status).toBe("aprovado");
+
+    const prompt = (papel: string) => provedor.chamadas.find((c) => c.papel === papel)?.prompt ?? "";
+    expect(prompt("revisor_literario")).toContain("DOC FACTUAL: dossie-factual.md");
+    expect(prompt("revisor_literario")).toContain("214 páginas numeradas");
+    expect(prompt("auditor_factual")).toContain("214 páginas numeradas");
+    expect(prompt("escritor")).not.toContain("214 páginas numeradas");
   });
 });
 

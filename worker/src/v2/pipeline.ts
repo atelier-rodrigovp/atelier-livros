@@ -25,6 +25,7 @@ import {
   tarefaEscritor,
   tarefaEscritorCorrecao,
   tarefaRevisor,
+  type ModoCorrecao,
 } from "./tarefas.js";
 import type {
   ContratoCompilado,
@@ -48,6 +49,8 @@ export interface DepsPipeline {
   fundacaoEsperada?: Record<string, string>;
   instrucoesAutor?: Instrucao[];
   maxCorrecoes?: number; // default 2 — tentativas de correção dirigida por capítulo
+  /** Docs factuais do projeto (ex.: dossie-factual.md) — entram no pacote do revisor e do auditor. */
+  docsFactuais?: SecaoContexto[];
 }
 
 export interface ResultadoCapitulo {
@@ -351,14 +354,15 @@ export async function escreverCapitulo(
     }).filter((g) => !g.passou);
 
   const corrigirComEscritor = async (
-    correcoes: { local: string; problema: string; instrucao: string }[]
+    correcoes: { local: string; problema: string; instrucao: string }[],
+    modo: ModoCorrecao = "cirurgico"
   ): Promise<void> => {
     const r = await executarPapel<string>({
       ...base,
       papel: "escritor",
       alvo: alvoCap,
       pacote: pacoteEscritor,
-      tarefa: tarefaEscritorCorrecao(capitulo, correcoes, texto),
+      tarefa: tarefaEscritorCorrecao(capitulo, correcoes, texto, modo),
       parse: parseProsa,
     });
     runs.push(r.runId);
@@ -390,7 +394,12 @@ export async function escreverCapitulo(
   // 5–7. SINAIS + REVISÃO + AUDITORIA + DECISÃO (loop de correção dirigida)
   // -------------------------------------------------------------------------
   let correcoesFeitas = 0;
-  let violacoesAnterior: number | null = null;
+  // Anti-loop por SALDO: total ponderado de violações (revisor + auditor) entre
+  // rodadas, com tolerância de 1 rodada em platô — exigir queda estrita por
+  // contagem matava capítulos recuperáveis (9→9 = fim, mesmo com orçamento).
+  let saldoAnterior: number | null = null;
+  let rodadasSemMelhora = 0;
+  const docsFactuais = deps.docsFactuais ?? [];
 
   for (;;) {
     // 5. Sinais medidos + parecer do revisor literário
@@ -399,7 +408,7 @@ export async function escreverCapitulo(
 
     const compRev = compilar("revisor_literario", alvoCap, {
       ficha,
-      fatos: [...fatos, secaoTexto],
+      fatos: [...docsFactuais, ...fatos, secaoTexto],
       repeticoesRecentes,
     });
     if (!compRev.ok) return bloquearPorCompilacao(compRev.bloqueios);
@@ -418,7 +427,7 @@ export async function escreverCapitulo(
     let verdictEfetivo = conferencia.verdictEfetivo;
 
     // 6. Auditoria factual — contradição comprovada é GATE universal
-    const compAud = compilar("auditor_factual", alvoCap, { ficha, fatos: [...fatos, secaoTexto] });
+    const compAud = compilar("auditor_factual", alvoCap, { ficha, fatos: [...docsFactuais, ...fatos, secaoTexto] });
     if (!compAud.ok) return bloquearPorCompilacao(compAud.bloqueios);
     const rAud = await executarPapel<SaidaAuditor>({
       ...base,
@@ -480,28 +489,62 @@ export async function escreverCapitulo(
       return { capitulo, status: "necessita_decisao_humana", textHash, reviewId, gatesFalhos: [], problemas, runs };
     }
 
-    // Reprovado: correção dirigida se há instruções, orçamento e convergência
+    // Reprovado: correção dirigida se há instruções, orçamento e convergência.
+    // O saldo pondera TODAS as fontes de reprovação (violações do revisor +
+    // contradições bloqueantes e conhecimento indevido do auditor).
     const violacoes = parecer.sinais.filter((s) => s.disposicao === "violacao_confirmada").length;
-    const semConvergencia = violacoesAnterior !== null && violacoes >= violacoesAnterior;
-    if (parecer.correcoes.length > 0 && correcoesFeitas < maxCorrecoes && !semConvergencia) {
-      violacoesAnterior = violacoes;
+    const saldo = violacoes + 2 * contradicoesBloqueantes.length + auditoria.conhecimento_indevido.length;
+    if (saldoAnterior !== null && saldo >= saldoAnterior) rodadasSemMelhora++;
+    else rodadasSemMelhora = 0;
+    const semConvergencia = rodadasSemMelhora >= 2; // duas rodadas sem melhora líquida = parar
+
+    // Achados do AUDITOR viram correções para o escritor (antes, um capítulo com
+    // contradição trivialmente corrigível morria sem UMA tentativa quando o
+    // revisor não listava correções — caso do canário dan-brown).
+    const correcoesAuditor = [
+      ...contradicoesBloqueantes.map((c) => ({
+        local: `trecho: "${c.trecho_do_capitulo.slice(0, 160)}"`,
+        problema: `contradição factual: viola o fato estabelecido "${c.fato_estabelecido}"`,
+        instrucao: "corrija o trecho para respeitar o fato estabelecido, preservando a cena e a voz",
+      })),
+      ...auditoria.conhecimento_indevido.map((k) => ({
+        local: `trecho: "${k.trecho.slice(0, 160)}"`,
+        problema: `conhecimento indevido: ${k.quem} não pode saber "${k.sabe_o_que_nao_deveria}"`,
+        instrucao: "reescreva o trecho para que a informação não seja revelada por quem não a tem",
+      })),
+    ];
+
+    // Violação difusa (ex.: cadência/cota estourada no capítulo inteiro) não se
+    // resolve com lista cirúrgica: cada violação confirmada vira também uma
+    // instrução global com a cota-alvo do contrato E os trechos que o detector
+    // flagrou — o escritor precisa saber QUAIS frases contam (achados do canário
+    // hoover).
+    const medidos = new Map(sinais.map((s) => [s.sinal, s]));
+    const globais = parecer.sinais
+      .filter((s) => s.disposicao === "violacao_confirmada")
+      .map((s) => {
+        const medido = medidos.get(s.sinal);
+        const cota = medido?.cota;
+        const alvo = cota?.max != null ? `no máximo ${cota.max}` : cota?.min != null ? `no mínimo ${cota.min}` : "dentro da cota do contrato";
+        const exemplos = medido?.exemplos?.length
+          ? ` Trechos flagrados pelo detector: ${medido.exemplos.slice(0, 3).map((e) => JSON.stringify(e)).join(" · ")}`
+          : "";
+        return {
+          local: "capítulo inteiro",
+          problema: `${s.sinal} = ${s.valor} (alvo: ${alvo}).${exemplos}`,
+          instrucao: `reduza ${s.sinal} até ${alvo} no capítulo todo — funda fragmentos em frases completas e corte reformulações, preservando conteúdo e voz`,
+        };
+      });
+
+    const todasCorrecoes = [...parecer.correcoes, ...correcoesAuditor, ...globais];
+    if (todasCorrecoes.length > 0 && correcoesFeitas < maxCorrecoes && !semConvergencia) {
+      saldoAnterior = saldo;
       correcoesFeitas++;
-      // Violação difusa (ex.: cadência estourada no capítulo inteiro) não se resolve
-      // com lista cirúrgica: cada violação confirmada vira também uma instrução
-      // global com a cota-alvo do contrato (achado do canário hoover).
-      const cotas = new Map(sinais.map((s) => [s.sinal, s.cota]));
-      const globais = parecer.sinais
-        .filter((s) => s.disposicao === "violacao_confirmada")
-        .map((s) => {
-          const cota = cotas.get(s.sinal);
-          const alvo = cota?.max != null ? `no máximo ${cota.max}` : cota?.min != null ? `no mínimo ${cota.min}` : "dentro da cota do contrato";
-          return {
-            local: "capítulo inteiro",
-            problema: `${s.sinal} = ${s.valor} (alvo: ${alvo})`,
-            instrucao: `reduza ${s.sinal} até ${alvo} no capítulo todo — funda fragmentos em frases completas e corte reformulações, preservando conteúdo e voz`,
-          };
-        });
-      await corrigirComEscritor([...parecer.correcoes, ...globais]);
+      // Instrução global presente = meta difusa: modo REESCRITA ORIENTADA (preserva
+      // eventos/fatos/diálogo/estrutura, reescreve a superfície). Sem meta global,
+      // modo cirúrgico. A escolha é do pipeline, nunca do modelo.
+      const modo: ModoCorrecao = globais.length > 0 ? "reescrita" : "cirurgico";
+      await corrigirComEscritor(todasCorrecoes, modo);
       gatesFalhos = await garantirGates();
       if (gatesFalhos.length) return bloquearPorGates(gatesFalhos);
       continue; // re-roda sinais + revisor + auditor no texto corrigido
