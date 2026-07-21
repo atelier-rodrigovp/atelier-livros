@@ -217,16 +217,24 @@ export async function escreverCapitulo(
   // -------------------------------------------------------------------------
   // 1. FICHA (arquiteto_cena) — ou usa a existente
   // -------------------------------------------------------------------------
-  // Versão da ficha derivada do estado canônico: retomada gera versão nova,
-  // nunca colide com a unique(project, capítulo, versão) (achado do canário 6).
+  // Versão da ficha derivada do MÁXIMO entre estado canônico e banco: o estado
+  // só registra spec_versao quando o escritor conclui, então queda entre gravar
+  // a ficha e escrever o capítulo deixaria spec órfã no banco e a retomada
+  // colidiria com a unique(project, capítulo, versão) (achados dos canários 6 e 7).
   const estadoParaSpec = await deps.gravador.carregarEstado();
-  const specVersao = (estadoParaSpec.doc.capitulos[String(capitulo)]?.spec_versao ?? 0) + 1;
+  const versaoConhecida = Math.max(
+    estadoParaSpec.doc.capitulos[String(capitulo)]?.spec_versao ?? 0,
+    await deps.persistencia.maiorVersaoSpec(deps.projectId, capitulo)
+  );
+  let specVersao: number;
   let ficha: SceneSpec;
   if (opts?.fichaExistente) {
-    // Limitação documentada: a interface de persistência não tem consulta de spec;
-    // ficha existente é assumida como já persistida — o pipeline não re-insere.
+    // Ficha existente já está persistida (o pipeline não re-insere); o estado
+    // referencia a última versão conhecida.
+    specVersao = Math.max(versaoConhecida, 1);
     ficha = opts.fichaExistente;
   } else {
+    specVersao = versaoConhecida + 1;
     const comp = compilar("arquiteto_cena", `spec:${capitulo}`);
     if (!comp.ok) return bloquearPorCompilacao(comp.bloqueios);
     const r = await executarPapel<SceneSpec>({

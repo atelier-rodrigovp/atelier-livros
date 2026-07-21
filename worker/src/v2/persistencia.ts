@@ -32,6 +32,8 @@ export interface PersistenciaV2 {
   atualizarRun(id: string, patch: Partial<RunRegistro>): Promise<void>;
   inserirReview(review: ReviewRegistro): Promise<string>;
   inserirSpec(spec: SpecRegistro): Promise<string>;
+  /** Maior versão de spec já persistida para (projeto, capítulo); 0 se nenhuma. */
+  maiorVersaoSpec(projectId: string, capitulo: number): Promise<number>;
   lerEstado(projectId: string): Promise<EstadoCanonico | null>;
   /** Grava com versao+1 (optimistic lock); ErroConcorrencia se a versão esperada divergir. */
   gravarEstado(estado: EstadoCanonico): Promise<void>;
@@ -102,6 +104,21 @@ export class SupabasePersistencia implements PersistenciaV2 {
       .single();
     this.conferir(error, "engine_scene_specs.insert");
     return (data as { id: string }).id;
+  }
+
+  async maiorVersaoSpec(projectId: string, capitulo: number): Promise<number> {
+    const { sb, OWNER } = await this.cliente();
+    const { data, error } = await sb
+      .from("engine_scene_specs")
+      .select("versao")
+      .eq("project_id", projectId)
+      .eq("capitulo", capitulo)
+      .eq("owner", OWNER)
+      .order("versao", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    this.conferir(error, "engine_scene_specs.select");
+    return (data as { versao: number } | null)?.versao ?? 0;
   }
 
   async lerEstado(projectId: string): Promise<EstadoCanonico | null> {
@@ -234,6 +251,18 @@ export class DiscoPersistencia implements PersistenciaV2 {
     const id = spec.id ?? randomUUID();
     this.anexar("specs.jsonl", { op: "insert", registro: { ...spec, id } });
     return id;
+  }
+
+  async maiorVersaoSpec(projectId: string, capitulo: number): Promise<number> {
+    let maior = 0;
+    for (const linha of this.lerJsonl("specs.jsonl")) {
+      if (linha.op !== "insert") continue;
+      const r = linha.registro as { project_id?: string; capitulo?: number; versao?: number };
+      if (r.project_id === projectId && r.capitulo === capitulo && typeof r.versao === "number" && r.versao > maior) {
+        maior = r.versao;
+      }
+    }
+    return maior;
   }
 
   async lerEstado(projectId: string): Promise<EstadoCanonico | null> {
