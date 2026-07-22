@@ -77,6 +77,26 @@ export function validarParecer(obj: unknown): Parecer {
   return p as unknown as Parecer;
 }
 
+/**
+ * Parecer INCOMPLETO (sinal medido fora da cota sem disposição) é falha de
+ * protocolo do revisor, não julgamento do texto: usada no `parse` do executor
+ * de papel, lança para acionar o retry técnico com instrução corretiva.
+ * `conferirParecer` mantém a mesma checagem como segunda rede (fail-closed)
+ * caso o parecer incompleto escape por outro caminho.
+ */
+export function exigirDisposicaoCompleta(parecer: Parecer, sinaisMedidos: SinalMedido[]): Parecer {
+  const dispostos = new Set(parecer.sinais.map((s) => s.sinal));
+  const omitidos = sinaisMedidos.filter((m) => m.fora_da_cota && !dispostos.has(m.sinal));
+  if (omitidos.length > 0) {
+    throw new Error(
+      `parecer incompleto — todo sinal FORA DA COTA exige disposição no array "sinais". Faltou dispor: ${omitidos
+        .map((m) => `"${m.sinal}" (valor ${m.valor})`)
+        .join(", ")}. Julgue cada um (violacao_confirmada com ocorrencias_citadas, excecao_valida, falso_positivo ou necessita_decisao_humana) e reenvie o parecer completo.`
+    );
+  }
+  return parecer;
+}
+
 export interface ConsistenciaParecer {
   ok: boolean;
   problemas: string[];

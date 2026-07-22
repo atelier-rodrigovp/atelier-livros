@@ -2,7 +2,8 @@
 // ocorrências citadas uma a uma; disposição parcial exige a conta fechada. A regra
 // vive em validarParecer (parse → retry técnico do revisor), verificável por código.
 import { describe, expect, it } from "vitest";
-import { validarParecer } from "./revisor.js";
+import { exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
+import type { SinalMedido } from "./sinais.js";
 import type { Parecer } from "./tipos.js";
 
 function base(sinais: unknown[]): unknown {
@@ -95,5 +96,33 @@ describe("validarParecer — auditabilidade dos sinais de contagem", () => {
     expect(() =>
       validarParecer(base([{ sinal: "sanfona", valor: 13, disposicao: "falso_positivo", evidencia: "descrição concreta por acúmulo, não reformulação" }]))
     ).not.toThrow();
+  });
+});
+
+// Parecer incompleto = falha de PROTOCOLO do revisor → retry técnico no parse
+// (caso real do canário hoover: 18 sinais dispostos, 1 fora da cota omitido
+// reprovava o capítulo inteiro em vez de re-pedir o parecer).
+describe("exigirDisposicaoCompleta — sinal fora da cota omitido aciona retry do revisor", () => {
+  const medido = (sinal: string, valor: number, fora: boolean): SinalMedido =>
+    ({ sinal, valor, fora_da_cota: fora } as SinalMedido);
+
+  const parecerCom = (sinais: unknown[]): Parecer =>
+    validarParecer(base(sinais)) as Parecer;
+
+  it("lança nomeando o sinal omitido (mensagem vira instrução corretiva do retry)", () => {
+    const p = parecerCom([{ sinal: "sanfona", valor: 7, disposicao: "falso_positivo", evidencia: "e" }]);
+    expect(() =>
+      exigirDisposicaoCompleta(p, [medido("sanfona", 7, true), medido("cadencia.fragmentos colados (≤4 palavras)", 10, true)])
+    ).toThrow(/cadencia\.fragmentos colados .* \(valor 10\)/);
+  });
+
+  it("passa quando todo sinal fora da cota está disposto", () => {
+    const p = parecerCom([{ sinal: "sanfona", valor: 7, disposicao: "falso_positivo", evidencia: "e" }]);
+    expect(exigirDisposicaoCompleta(p, [medido("sanfona", 7, true), medido("gnomico", 1, false)])).toBe(p);
+  });
+
+  it("sinal DENTRO da cota não exige disposição", () => {
+    const p = parecerCom([]);
+    expect(() => exigirDisposicaoCompleta(p, [medido("gnomico", 1, false)])).not.toThrow();
   });
 });

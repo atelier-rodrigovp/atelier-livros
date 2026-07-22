@@ -15,7 +15,7 @@ import { hashJsonCanonico } from "./hash.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
-import { conferirParecer, validarParecer } from "./revisor.js";
+import { conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
 import { medirSinais, resumoSinais } from "./sinais.js";
 import { validarSpec } from "./spec.js";
 import {
@@ -462,7 +462,9 @@ export async function escreverCapitulo(
       alvo: alvoCap,
       pacote: compRev.pacote!,
       tarefa: tarefaRevisor(capitulo, resumoSinais(sinais), deps.contrato.contrato),
-      parse: (t) => validarParecer(extrairJson(t)),
+      // Parecer que omite disposição de sinal fora da cota = protocolo violado →
+      // retry técnico do REVISOR (com o sinal nomeado), não reprova do capítulo.
+      parse: (t) => exigirDisposicaoCompleta(validarParecer(extrairJson(t)), sinais),
     });
     runs.push(rRev.runId);
     const parecer = rRev.valor;
