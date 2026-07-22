@@ -78,6 +78,39 @@ export function validarParecer(obj: unknown): Parecer {
 }
 
 /**
+ * Casamento TOLERANTE de nome de sinal. Os rótulos medidos carregam acento,
+ * ponto e parêntese explicativo ("cadencia.anáfora (frases coladas, mesmo
+ * início)"); exigir a string exata do revisor reprovava pareceres completos por
+ * grafia — o canário romantasy queimou as 2 tentativas do papel assim. Compara
+ * o nome sem acento/pontuação/parêntese; o parêntese é só glosa humana.
+ */
+export function normalizarNomeSinal(s: string): string {
+  return String(s)
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Acha a disposição do sinal medido: igualdade normalizada e, se falhar, um
+ * ÚNICO candidato cujo nome normalizado contenha o outro (cobre o revisor que
+ * responde "anafora" em vez de "cadencia anafora"). Ambiguidade não casa.
+ */
+function acharDisposto(sinalMedido: string, sinais: SinalDisposto[]): SinalDisposto | undefined {
+  const alvo = normalizarNomeSinal(sinalMedido);
+  const exato = sinais.find((s) => normalizarNomeSinal(s.sinal) === alvo);
+  if (exato) return exato;
+  const parciais = sinais.filter((s) => {
+    const n = normalizarNomeSinal(s.sinal);
+    return n.length > 2 && (alvo.includes(n) || n.includes(alvo));
+  });
+  return parciais.length === 1 ? parciais[0] : undefined;
+}
+
+/**
  * Parecer INCOMPLETO (sinal medido fora da cota sem disposição) é falha de
  * protocolo do revisor, não julgamento do texto: usada no `parse` do executor
  * de papel, lança para acionar o retry técnico com instrução corretiva.
@@ -85,8 +118,7 @@ export function validarParecer(obj: unknown): Parecer {
  * caso o parecer incompleto escape por outro caminho.
  */
 export function exigirDisposicaoCompleta(parecer: Parecer, sinaisMedidos: SinalMedido[]): Parecer {
-  const dispostos = new Set(parecer.sinais.map((s) => s.sinal));
-  const omitidos = sinaisMedidos.filter((m) => m.fora_da_cota && !dispostos.has(m.sinal));
+  const omitidos = sinaisMedidos.filter((m) => m.fora_da_cota && !acharDisposto(m.sinal, parecer.sinais));
   if (omitidos.length > 0) {
     throw new Error(
       `parecer incompleto — todo sinal FORA DA COTA exige disposição no array "sinais". Faltou dispor: ${omitidos
@@ -122,10 +154,9 @@ export function conferirParecer(parecer: Parecer, sinaisMedidos: SinalMedido[]):
     verdict = "reprovado";
   }
 
-  const dispostos = new Map<string, SinalDisposto>(parecer.sinais.map((s) => [s.sinal, s]));
   for (const m of sinaisMedidos) {
     if (!m.fora_da_cota) continue;
-    if (!dispostos.has(m.sinal)) {
+    if (!acharDisposto(m.sinal, parecer.sinais)) {
       problemas.push(`sinal fora da cota sem disposição: ${m.sinal} (${m.valor})`);
       verdict = verdict === "necessita_decisao_humana" ? verdict : "reprovado";
     }
@@ -142,10 +173,10 @@ export function conferirParecer(parecer: Parecer, sinaisMedidos: SinalMedido[]):
   // Escalação a decisão humana só por sinal FORA DA COTA (ou pelo próprio verdict
   // do revisor). Sinal dentro da cota do contrato disposto como "decisão humana"
   // vira anotação — cota é do contrato; dentro dela, produção não para.
-  const foraDaCota = new Set(sinaisMedidos.filter((m) => m.fora_da_cota).map((m) => m.sinal));
+  const foraDaCota = new Set(sinaisMedidos.filter((m) => m.fora_da_cota).map((m) => normalizarNomeSinal(m.sinal)));
   for (const s of parecer.sinais) {
     if (s.disposicao !== "necessita_decisao_humana") continue;
-    if (foraDaCota.has(s.sinal)) {
+    if (foraDaCota.has(normalizarNomeSinal(s.sinal))) {
       verdict = "necessita_decisao_humana";
     } else {
       problemas.push(`anotação (sem pausa): ${s.sinal} dentro da cota disposto como decisão humana — ${s.evidencia.slice(0, 80)}`);

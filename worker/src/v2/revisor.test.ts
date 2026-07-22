@@ -125,4 +125,23 @@ describe("exigirDisposicaoCompleta — sinal fora da cota omitido aciona retry d
     const p = parecerCom([]);
     expect(() => exigirDisposicaoCompleta(p, [medido("gnomico", 1, false)])).not.toThrow();
   });
+
+  // Caso real do canário romantasy: o rótulo medido carrega acento, ponto e
+  // parêntese de glosa; exigir a string exata queimou as 2 tentativas do papel.
+  it("casa o nome do sinal com grafia tolerante (acento/ponto/parêntese)", () => {
+    const rotulo = "cadencia.anáfora (frases coladas, mesmo início)";
+    for (const escrito of [rotulo, "cadencia.anafora", "anáfora", "Cadencia Anafora"]) {
+      const p = parecerCom([{ sinal: escrito, valor: 3, disposicao: "excecao_valida", evidencia: "batidas distintas" }]);
+      expect(() => exigirDisposicaoCompleta(p, [medido(rotulo, 3, true)])).not.toThrow();
+    }
+  });
+
+  it("nome ambíguo NÃO casa (fail-closed)", () => {
+    const p = parecerCom([
+      { sinal: "cadencia.fragmento de ênfase", valor: 3, disposicao: "excecao_valida", evidencia: "e" },
+      { sinal: "cadencia.fragmentos de ênfase COLADOS", valor: 2, disposicao: "excecao_valida", evidencia: "e" },
+    ]);
+    // "cadencia enfase" é subcadeia de ambos os dispostos → ambíguo → segue omitido
+    expect(() => exigirDisposicaoCompleta(p, [medido("cadencia.enfase", 9, true)])).toThrow(/cadencia\.enfase/);
+  });
 });
