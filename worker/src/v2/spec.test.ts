@@ -129,6 +129,16 @@ describe("validarSpec — anti-ghostwriting", () => {
     expect(s.avisos).toEqual([]);
   });
 
+  // Caso real do canário hoover: fato devolvido como objeto explodia com
+  // "v.trim is not a function" — mensagem inútil para o retry do arquiteto.
+  it("campo não-string vira erro acionável, não TypeError", () => {
+    const f = fichaValida();
+    (f.fatos_obrigatorios as unknown[])[0] = { fato: "Marina em coma" };
+    const r = validarSpec(f, contratoBase);
+    expect(r.ok).toBe(false);
+    expect(r.erros.join()).toContain("fatos_obrigatorios[0]: deve ser texto simples (recebido object)");
+  });
+
   // Caso real do canário hoover: falso positivo de personificação num objetivo com
   // agente humano travava a ficha em loop determinístico (3 tentativas idênticas).
   it("falso positivo de personificação em objetivo NÃO bloqueia a ficha", () => {

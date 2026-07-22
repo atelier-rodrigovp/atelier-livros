@@ -42,6 +42,11 @@ export interface SinaisGhostwriting {
 export function sinaisGhostwriting(campo: string, valor: string): SinaisGhostwriting {
   const bloqueantes: string[] = [];
   const avisos: string[] = [];
+  // Campo não-string (ex.: fato como objeto/número) — erro ACIONÁVEL para o retry
+  // do arquiteto, em vez de "v.trim is not a function" (caso real do canário hoover).
+  if (typeof valor !== "string") {
+    return { bloqueantes: [`${campo}: deve ser texto simples (recebido ${Array.isArray(valor) ? "lista" : typeof valor})`], avisos };
+  }
   const v = valor.trim();
   if (!v) return { bloqueantes, avisos };
 
