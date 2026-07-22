@@ -38,6 +38,24 @@ const STATUS_CAP: Record<string, { label: string; variant: BadgeVariant; title?:
   },
 };
 
+// Rótulos legíveis da fase do estado canônico (doc.fase).
+// Ordem lógica: escrita → revisao_final → consolidacao → avaliacao → concluido.
+const FASE_LABEL: Record<string, string> = {
+  fundacao: "fundação",
+  estrutura: "estrutura",
+  escrita: "escrita",
+  revisao_final: "revisão final",
+  consolidacao: "consolidação",
+  avaliacao: "avaliação final",
+  concluido: "concluído",
+  bloqueado: "bloqueado",
+};
+
+const MODO_CORRECAO_LABEL: Record<string, string> = {
+  cirurgico: "cirúrgico",
+  reescrita: "reescrita",
+};
+
 const EIXOS = [
   ["dramatic_progression", "Progressão dramática"],
   ["skill_adherence", "Aderência à skill"],
@@ -183,7 +201,7 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
   const [estado, setEstado] = useState<EstadoCanonicoV2 | null>(null);
   const [runs, setRuns] = useState<RunV2[]>([]);
   const [reviews, setReviews] = useState<ReviewV2[]>([]);
-  const [capSel, setCapSel] = useState<number | null>(null);
+  const [capSel, setCapSel] = useState<number | "livro" | null>(null);
 
   const carregar = useCallback(async () => {
     try {
@@ -251,7 +269,13 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
 
   const doc = estado.doc;
   const caps = Object.entries(doc.capitulos ?? {}).sort((a, b) => Number(a[0]) - Number(b[0]));
-  const reviewSel = capSel != null ? reviews.find((r) => r.capitulo === capSel) : undefined;
+  const reviewsLivro = reviews.filter((r) => r.capitulo === null);
+  const reviewSel =
+    capSel == null
+      ? undefined
+      : capSel === "livro"
+        ? reviewsLivro[0]
+        : reviews.find((r) => r.capitulo === capSel);
 
   return (
     <div className="space-y-4">
@@ -262,7 +286,7 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <Badge>{doc.fase}</Badge>
+            <Badge>{FASE_LABEL[doc.fase] ?? doc.fase}</Badge>
             <Badge variant="outline">engine {estado.engine_version}</Badge>
             {doc.skill && (
               <Badge variant="secondary" title={`hash da skill: ${doc.skill.hash}`}>
@@ -309,6 +333,19 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
             </div>
           )}
 
+          {!!reviewsLivro.length && (
+            <button
+              type="button"
+              onClick={() => setCapSel("livro")}
+              className="flex w-full items-center justify-between gap-2 rounded-md border p-2.5 text-left text-sm transition-colors hover:bg-accent"
+            >
+              <span className="font-medium">Parecer do livro</span>
+              <Badge variant={verdictVariant(reviewsLivro[0].verdict)}>
+                {reviewsLivro[0].verdict.replace(/_/g, " ")}
+              </Badge>
+            </button>
+          )}
+
           {!!doc.bloqueios?.length && (
             <div>
               <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -342,6 +379,7 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
                         <th className="px-2 py-1.5 font-medium">Modelo</th>
                         <th className="px-2 py-1.5 font-medium">Alvo</th>
                         <th className="px-2 py-1.5 font-medium">Status</th>
+                        <th className="px-2 py-1.5 font-medium">Modo</th>
                         <th className="px-2 py-1.5 font-medium">Tent.</th>
                         <th className="px-2 py-1.5 font-medium">Duração</th>
                         <th className="px-2 py-1.5 font-medium">Tokens</th>
@@ -352,6 +390,7 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
                     <tbody>
                       {runs.map((r) => {
                         const sb = runStatusBadge(r.status);
+                        const modo = (r.payload as { modo_correcao?: string } | null)?.modo_correcao;
                         return (
                           <tr key={r.id} className="border-b last:border-0">
                             <td className="px-2 py-1.5 font-medium">{r.papel}</td>
@@ -361,6 +400,7 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
                             </td>
                             <td className="px-2 py-1.5">{r.alvo ?? "—"}</td>
                             <td className="px-2 py-1.5"><Badge variant={sb.variant}>{sb.label}</Badge></td>
+                            <td className="px-2 py-1.5">{modo ? MODO_CORRECAO_LABEL[modo] ?? modo : "—"}</td>
                             <td className="px-2 py-1.5 tabular-nums">{r.attempt}</td>
                             <td className="px-2 py-1.5 tabular-nums">{duracao(r)}</td>
                             <td className="px-2 py-1.5 tabular-nums">
@@ -386,17 +426,74 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
         </CardContent>
       </Card>
 
+      {doc.edicao_estrutural && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Edição estrutural</CardTitle>
+            <CardDescription>Propostas do editor_estrutural aplicadas ao manuscrito.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2.5 text-sm">
+            <p>
+              <span className="font-medium tabular-nums">{doc.edicao_estrutural.propostas}</span> propostas ·{" "}
+              <span className="font-medium tabular-nums">{doc.edicao_estrutural.aplicadas}</span> aplicadas
+            </p>
+            {!!doc.edicao_estrutural.detalhe?.length && (
+              <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                {doc.edicao_estrutural.detalhe.map((d, i) => (
+                  <li key={i}>{d}</li>
+                ))}
+              </ul>
+            )}
+            <p className="text-xs text-muted-foreground">{fmtData(doc.edicao_estrutural.em)}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {doc.avaliacao && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Nota bestseller</CardTitle>
+            <CardDescription>Avaliação comercial do livro completo (book-bestseller-review).</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2.5">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <span className="text-3xl font-semibold tabular-nums">
+                {doc.avaliacao.nota != null ? doc.avaliacao.nota.toFixed(1) : "—"}
+              </span>
+              <span className="text-sm text-muted-foreground">
+                / meta {doc.avaliacao.meta.toFixed(1)}
+              </span>
+              {doc.avaliacao.nota != null && (
+                <Badge variant={doc.avaliacao.nota >= doc.avaliacao.meta ? "success" : "warning"}>
+                  {doc.avaliacao.nota >= doc.avaliacao.meta ? "meta atingida" : "abaixo da meta"}
+                </Badge>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {doc.avaliacao.iteracoes} iteração(ões) · {fmtData(doc.avaliacao.em)}
+            </p>
+            {doc.avaliacao.relatorio_path && (
+              <p className="text-xs text-muted-foreground">
+                Relatório: <code>{doc.avaliacao.relatorio_path}</code>
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <Dialog open={capSel != null} onOpenChange={(o) => !o && setCapSel(null)}>
         <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Capítulo {capSel} — parecer</DialogTitle>
+            <DialogTitle>{capSel === "livro" ? "Parecer do livro" : `Capítulo ${capSel} — parecer`}</DialogTitle>
             <DialogDescription>Parecer estruturado mais recente do revisor da Engine V2.</DialogDescription>
           </DialogHeader>
           {reviewSel ? (
             <ParecerCapitulo review={reviewSel} />
           ) : (
             <p className="text-sm text-muted-foreground">
-              Nenhum parecer V2 registrado para este capítulo.
+              {capSel === "livro"
+                ? "Nenhum parecer V2 do livro registrado ainda."
+                : "Nenhum parecer V2 registrado para este capítulo."}
             </p>
           )}
         </DialogContent>

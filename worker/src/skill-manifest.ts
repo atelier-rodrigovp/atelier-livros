@@ -21,12 +21,18 @@ export interface SkillManifestResult {
 // Windows podem materializá-los em CRLF. Para arquivos textuais isso não é
 // drift da skill; binários continuam comparados byte a byte.
 const TEXT_EXTENSIONS = new Set([".md", ".py", ".json", ".txt", ".yaml", ".yml"]);
-const sha256 = (buf: Buffer, filePath: string) => {
+/**
+ * Hash canônico de arquivo de skill: texto é normalizado para LF ANTES do hash.
+ * Exportado para o GERADOR do manifest usar a MESMA canonicalização — o manifest
+ * 1.0.9 nasceu com hash sobre CRLF bruto e reprovava o próprio arquivo fonte.
+ */
+export const sha256Skill = (buf: Buffer, filePath: string): string => {
   const canonical = TEXT_EXTENSIONS.has(path.extname(filePath).toLowerCase())
     ? Buffer.from(buf.toString("utf8").replace(/\r\n/g, "\n"), "utf8")
     : buf;
   return createHash("sha256").update(canonical).digest("hex");
 };
+const sha256 = sha256Skill;
 
 export async function verifySkillManifest(
   manifest: SkillManifest,

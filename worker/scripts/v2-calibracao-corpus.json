@@ -1,0 +1,19 @@
+{
+  "comentario": "Corpus da calibração de cotas 1.1.0. 'aprovado' = prosa que o próprio projeto/autor validou (benchmarks de estilo 2026-07-18); 'contraste' = prosa reprovada ou pré-correção, medida só para conferir que a cota derivada ainda discrimina. Caminhos fora do repo (atelier-work) — o relatório versionado registra hash e medições de cada amostra.",
+  "amostras": [
+    { "skill": "dan-brown", "grupo": "aprovado", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/bench-estilo/53abdade-full/manuscrito/capitulo-05.md", "origem": "benchmark A/B dan-brown 2026-07-18 (cap-05 regenerado e aceito; HANDOFF-CORRECAO-ESTILO.md §3)" },
+    { "skill": "dan-brown", "grupo": "aprovado", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/bench-estilo/53abdade-full/manuscrito/capitulo-37.md", "origem": "benchmark A/B dan-brown 2026-07-18 (cap-37, pior baseline → aprovado 3/3)" },
+    { "skill": "dan-brown", "grupo": "aprovado", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/bench-estilo/53abdade-full/manuscrito/capitulo-38.md", "origem": "benchmark A/B dan-brown 2026-07-18 (cap-38 regenerado e aceito)" },
+    { "skill": "dan-brown", "grupo": "contraste", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/canario-v2-dan-brown-8b11072c/manuscrito/capitulo-01.md", "origem": "canário V2 dan-brown 2026-07-21 (cap reprovado)" },
+    { "skill": "hoover-mcfadden", "grupo": "aprovado", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/bench-hoover/manuscrito/capitulo-01.md", "origem": "benchmark hoover 2026-07-18 (PASSA 3/3; HANDOFF-CORRECAO-ESTILO.md §4)" },
+    { "skill": "hoover-mcfadden", "grupo": "aprovado", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/bench-hoover/manuscrito/capitulo-02.md", "origem": "benchmark hoover 2026-07-18 (PASSA 3/3)" },
+    { "skill": "hoover-mcfadden", "grupo": "aprovado", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/bench-hoover/manuscrito/capitulo-03.md", "origem": "benchmark hoover 2026-07-18 (PASSA 3/3)" },
+    { "skill": "hoover-mcfadden", "grupo": "contraste", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/bench-hoover/_baseline-bh/cap-01.baseline.md", "origem": "baseline pré-correção do benchmark hoover (reprovado na régua 2026-07-18)" },
+    { "skill": "hoover-mcfadden", "grupo": "contraste", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/bench-hoover/_baseline-bh/cap-02.baseline.md", "origem": "baseline pré-correção do benchmark hoover" },
+    { "skill": "hoover-mcfadden", "grupo": "contraste", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/canario-v2-hoover-mcfadden-aa8af83f/manuscrito/capitulo-01.md", "origem": "canário V2 hoover 2026-07-21 (cap reprovado; parecer sanfona 15)" },
+    { "skill": "romantasy", "grupo": "aprovado", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/calibracao-v2-corpus/romantasy/cap-01.md", "origem": "piloto da AUDITORIA-HOOVER-ROMANTASY (SPEC-RM3, n=3) — julgado conforme à craft na página (POV com ganho, custo pago, burn por mérito); única prosa romantasy avaliada positivamente que existe" },
+    { "skill": "romantasy", "grupo": "aprovado", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/calibracao-v2-corpus/romantasy/cap-02.md", "origem": "piloto da AUDITORIA-HOOVER-ROMANTASY (SPEC-RM3, n=3)" },
+    { "skill": "romantasy", "grupo": "aprovado", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/calibracao-v2-corpus/romantasy/cap-03.md", "origem": "piloto da AUDITORIA-HOOVER-ROMANTASY (SPEC-RM3, n=3)" },
+    { "skill": "romantasy", "grupo": "contraste", "caminho": "C:/Users/Rodrigo Paiva/atelier-work/canario-v2-romantasy-5f59a08b/manuscrito/capitulo-01.md", "origem": "canário V2 romantasy 2026-07-21 (cap reprovado)" }
+  ]
+}

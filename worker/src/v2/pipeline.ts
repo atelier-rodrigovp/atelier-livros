@@ -15,7 +15,7 @@ import { hashJsonCanonico } from "./hash.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
-import { conferirParecer, validarParecer } from "./revisor.js";
+import { conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
 import { medirSinais, resumoSinais } from "./sinais.js";
 import { validarSpec } from "./spec.js";
 import {
@@ -25,13 +25,15 @@ import {
   tarefaEscritor,
   tarefaEscritorCorrecao,
   tarefaRevisor,
+  type ModoCorrecao,
 } from "./tarefas.js";
-import type {
-  ContratoCompilado,
-  MapaModelos,
-  Parecer,
-  ResultadoGate,
-  SceneSpec,
+import {
+  ErroEngine,
+  type ContratoCompilado,
+  type MapaModelos,
+  type Parecer,
+  type ResultadoGate,
+  type SceneSpec,
 } from "./tipos.js";
 
 export interface DepsPipeline {
@@ -48,6 +50,8 @@ export interface DepsPipeline {
   fundacaoEsperada?: Record<string, string>;
   instrucoesAutor?: Instrucao[];
   maxCorrecoes?: number; // default 2 — tentativas de correção dirigida por capítulo
+  /** Docs factuais do projeto (ex.: dossie-factual.md) — entram no pacote do revisor e do auditor. */
+  docsFactuais?: SecaoContexto[];
 }
 
 export interface ResultadoCapitulo {
@@ -172,6 +176,18 @@ export async function escreverCapitulo(
     fichaExistente?: SceneSpec;
     anteriores?: { numero: number; trecho: string }[];
     trechosAnteriores?: SecaoContexto[];
+    /**
+     * Texto-base (revalidação/meta-nota): usa o texto dado (normalmente o do disco) em
+     * vez de escrever prosa nova — o fluxo de gates/sinais/revisor/auditor/decisão roda
+     * IDÊNTICO (caminho único de decisão; scripts nunca reimplementam aprovação).
+     * Exige fichaExistente.
+     */
+    textoBase?: string;
+    /**
+     * Reescrita dirigida (meta-nota): sobre o textoBase, aplica as correções do avaliador
+     * em modo "reescrita" como 1ª ação, seguindo depois o fluxo normal. Exige textoBase.
+     */
+    reescritaDirigida?: { correcoes: { local: string; problema: string; instrucao: string }[] };
   }
 ): Promise<ResultadoCapitulo> {
   const runs: string[] = [];
@@ -180,6 +196,21 @@ export async function escreverCapitulo(
   const nn = String(capitulo).padStart(2, "0");
   const caminho = path.join(deps.dirManuscrito, `capitulo-${nn}.md`);
   const maxCorrecoes = deps.maxCorrecoes ?? 2;
+
+  if (opts?.textoBase && !opts.fichaExistente) {
+    throw new ErroEngine({
+      codigo: "REESCRITA_SEM_FICHA",
+      classe: "tecnica",
+      mensagem: `texto-base do capítulo ${capitulo} exige fichaExistente`,
+    });
+  }
+  if (opts?.reescritaDirigida && !opts.textoBase) {
+    throw new ErroEngine({
+      codigo: "REESCRITA_SEM_TEXTO_BASE",
+      classe: "tecnica",
+      mensagem: `reescrita dirigida do capítulo ${capitulo} exige textoBase`,
+    });
+  }
 
   // Base comum das execuções de papel (ledger completo por chamada).
   const base = {
@@ -318,16 +349,23 @@ export async function escreverCapitulo(
   if (!compEsc.ok) return bloquearPorCompilacao(compEsc.bloqueios);
   const pacoteEscritor = compEsc.pacote!;
 
-  const rEsc = await executarPapel<string>({
-    ...base,
-    papel: "escritor",
-    alvo: alvoCap,
-    pacote: pacoteEscritor,
-    tarefa: tarefaEscritor(ficha, deps.contrato.contrato),
-    parse: parseProsa,
-  });
-  runs.push(rEsc.runId);
-  let texto = rEsc.valor;
+  // Texto-base (revalidação/reescrita dirigida) pula a escrita inicial;
+  // no fluxo normal, o escritor produz a prosa inicial.
+  let texto: string;
+  if (opts?.textoBase) {
+    texto = opts.textoBase;
+  } else {
+    const rEsc = await executarPapel<string>({
+      ...base,
+      papel: "escritor",
+      alvo: alvoCap,
+      pacote: pacoteEscritor,
+      tarefa: tarefaEscritor(ficha, deps.contrato.contrato),
+      parse: parseProsa,
+    });
+    runs.push(rEsc.runId);
+    texto = rEsc.valor;
+  }
 
   const gravarERegistrar = async (t: string): Promise<void> => {
     gravarAtomico(caminho, t);
@@ -337,7 +375,6 @@ export async function escreverCapitulo(
       spec_hash: specHash,
     });
   };
-  await gravarERegistrar(texto);
 
   // -------------------------------------------------------------------------
   // 4. GATES UNIVERSAIS — com UMA rodada de correção dirigida por passagem
@@ -351,15 +388,17 @@ export async function escreverCapitulo(
     }).filter((g) => !g.passou);
 
   const corrigirComEscritor = async (
-    correcoes: { local: string; problema: string; instrucao: string }[]
+    correcoes: { local: string; problema: string; instrucao: string }[],
+    modo: ModoCorrecao = "cirurgico"
   ): Promise<void> => {
     const r = await executarPapel<string>({
       ...base,
       papel: "escritor",
       alvo: alvoCap,
       pacote: pacoteEscritor,
-      tarefa: tarefaEscritorCorrecao(capitulo, correcoes, texto),
+      tarefa: tarefaEscritorCorrecao(capitulo, correcoes, texto, modo),
       parse: parseProsa,
+      payload: { modo_correcao: modo }, // auditável no ledger (a UI mostra o modo por tentativa)
     });
     runs.push(r.runId);
     texto = r.valor;
@@ -383,6 +422,15 @@ export async function escreverCapitulo(
     return { capitulo, status: "bloqueado", textHash: hashText(texto), gatesFalhos: falhos, problemas, runs };
   };
 
+  // Em reescrita dirigida, a PRIMEIRA ação é a correção do avaliador em modo reescrita
+  // (sobre o texto-base); nos demais fluxos (inclusive revalidação por texto-base),
+  // grava/registra o texto e segue — a decisão é SEMPRE deste loop.
+  if (opts?.reescritaDirigida) {
+    await corrigirComEscritor(opts.reescritaDirigida.correcoes, "reescrita");
+  } else {
+    await gravarERegistrar(texto);
+  }
+
   let gatesFalhos = await garantirGates();
   if (gatesFalhos.length) return bloquearPorGates(gatesFalhos);
 
@@ -390,7 +438,12 @@ export async function escreverCapitulo(
   // 5–7. SINAIS + REVISÃO + AUDITORIA + DECISÃO (loop de correção dirigida)
   // -------------------------------------------------------------------------
   let correcoesFeitas = 0;
-  let violacoesAnterior: number | null = null;
+  // Anti-loop por SALDO: total ponderado de violações (revisor + auditor) entre
+  // rodadas, com tolerância de 1 rodada em platô — exigir queda estrita por
+  // contagem matava capítulos recuperáveis (9→9 = fim, mesmo com orçamento).
+  let saldoAnterior: number | null = null;
+  let rodadasSemMelhora = 0;
+  const docsFactuais = deps.docsFactuais ?? [];
 
   for (;;) {
     // 5. Sinais medidos + parecer do revisor literário
@@ -399,7 +452,7 @@ export async function escreverCapitulo(
 
     const compRev = compilar("revisor_literario", alvoCap, {
       ficha,
-      fatos: [...fatos, secaoTexto],
+      fatos: [...docsFactuais, ...fatos, secaoTexto],
       repeticoesRecentes,
     });
     if (!compRev.ok) return bloquearPorCompilacao(compRev.bloqueios);
@@ -409,7 +462,9 @@ export async function escreverCapitulo(
       alvo: alvoCap,
       pacote: compRev.pacote!,
       tarefa: tarefaRevisor(capitulo, resumoSinais(sinais), deps.contrato.contrato),
-      parse: (t) => validarParecer(extrairJson(t)),
+      // Parecer que omite disposição de sinal fora da cota = protocolo violado →
+      // retry técnico do REVISOR (com o sinal nomeado), não reprova do capítulo.
+      parse: (t) => exigirDisposicaoCompleta(validarParecer(extrairJson(t)), sinais),
     });
     runs.push(rRev.runId);
     const parecer = rRev.valor;
@@ -418,7 +473,7 @@ export async function escreverCapitulo(
     let verdictEfetivo = conferencia.verdictEfetivo;
 
     // 6. Auditoria factual — contradição comprovada é GATE universal
-    const compAud = compilar("auditor_factual", alvoCap, { ficha, fatos: [...fatos, secaoTexto] });
+    const compAud = compilar("auditor_factual", alvoCap, { ficha, fatos: [...docsFactuais, ...fatos, secaoTexto] });
     if (!compAud.ok) return bloquearPorCompilacao(compAud.bloqueios);
     const rAud = await executarPapel<SaidaAuditor>({
       ...base,
@@ -480,28 +535,67 @@ export async function escreverCapitulo(
       return { capitulo, status: "necessita_decisao_humana", textHash, reviewId, gatesFalhos: [], problemas, runs };
     }
 
-    // Reprovado: correção dirigida se há instruções, orçamento e convergência
+    // Reprovado: correção dirigida se há instruções, orçamento e convergência.
+    // O saldo pondera TODAS as fontes de reprovação (violações do revisor +
+    // contradições bloqueantes e conhecimento indevido do auditor).
     const violacoes = parecer.sinais.filter((s) => s.disposicao === "violacao_confirmada").length;
-    const semConvergencia = violacoesAnterior !== null && violacoes >= violacoesAnterior;
-    if (parecer.correcoes.length > 0 && correcoesFeitas < maxCorrecoes && !semConvergencia) {
-      violacoesAnterior = violacoes;
+    const saldo = violacoes + 2 * contradicoesBloqueantes.length + auditoria.conhecimento_indevido.length;
+    if (saldoAnterior !== null && saldo >= saldoAnterior) rodadasSemMelhora++;
+    else rodadasSemMelhora = 0;
+    const semConvergencia = rodadasSemMelhora >= 2; // duas rodadas sem melhora líquida = parar
+
+    // Achados do AUDITOR viram correções para o escritor (antes, um capítulo com
+    // contradição trivialmente corrigível morria sem UMA tentativa quando o
+    // revisor não listava correções — caso do canário dan-brown).
+    const correcoesAuditor = [
+      ...contradicoesBloqueantes.map((c) => ({
+        local: `trecho: "${c.trecho_do_capitulo.slice(0, 160)}"`,
+        problema: `contradição factual: viola o fato estabelecido "${c.fato_estabelecido}"`,
+        instrucao: "corrija o trecho para respeitar o fato estabelecido, preservando a cena e a voz",
+      })),
+      ...auditoria.conhecimento_indevido.map((k) => ({
+        local: `trecho: "${k.trecho.slice(0, 160)}"`,
+        problema: `conhecimento indevido: ${k.quem} não pode saber "${k.sabe_o_que_nao_deveria}"`,
+        instrucao: "reescreva o trecho para que a informação não seja revelada por quem não a tem",
+      })),
+    ];
+
+    // Violação difusa (ex.: cadência/cota estourada no capítulo inteiro) não se
+    // resolve com lista cirúrgica: cada violação confirmada vira também uma
+    // instrução global com a cota-alvo do contrato E os trechos que o detector
+    // flagrou — o escritor precisa saber QUAIS frases contam (achados do canário
+    // hoover).
+    const medidos = new Map(sinais.map((s) => [s.sinal, s]));
+    const globais = parecer.sinais
+      .filter((s) => s.disposicao === "violacao_confirmada")
+      .map((s) => {
+        const medido = medidos.get(s.sinal);
+        const cota = medido?.cota;
+        const alvo = cota?.max != null ? `no máximo ${cota.max}` : cota?.min != null ? `no mínimo ${cota.min}` : "dentro da cota do contrato";
+        // O escritor corrige as ocorrências que o REVISOR confirmou (citadas uma a
+        // uma — adendo 2); os trechos do detector são só fallback informativo.
+        const citadas = s.ocorrencias_citadas?.length
+          ? ` Ocorrências confirmadas pelo revisor: ${s.ocorrencias_citadas.map((o) => JSON.stringify(o.trecho)).join(" · ")}`
+          : medido?.exemplos?.length
+            ? ` Trechos flagrados pelo detector: ${medido.exemplos.slice(0, 3).map((e) => JSON.stringify(e)).join(" · ")}`
+            : "";
+        const quantas = s.ocorrencias_citadas?.length ?? null;
+        return {
+          local: "capítulo inteiro",
+          problema: `${s.sinal} = ${s.valor}${quantas != null ? ` (${quantas} confirmadas pelo revisor)` : ""} (alvo: ${alvo}).${citadas}`,
+          instrucao: `corrija as ocorrências confirmadas de ${s.sinal} — funda fragmentos em frases completas e corte reformulações, preservando conteúdo e voz`,
+        };
+      });
+
+    const todasCorrecoes = [...parecer.correcoes, ...correcoesAuditor, ...globais];
+    if (todasCorrecoes.length > 0 && correcoesFeitas < maxCorrecoes && !semConvergencia) {
+      saldoAnterior = saldo;
       correcoesFeitas++;
-      // Violação difusa (ex.: cadência estourada no capítulo inteiro) não se resolve
-      // com lista cirúrgica: cada violação confirmada vira também uma instrução
-      // global com a cota-alvo do contrato (achado do canário hoover).
-      const cotas = new Map(sinais.map((s) => [s.sinal, s.cota]));
-      const globais = parecer.sinais
-        .filter((s) => s.disposicao === "violacao_confirmada")
-        .map((s) => {
-          const cota = cotas.get(s.sinal);
-          const alvo = cota?.max != null ? `no máximo ${cota.max}` : cota?.min != null ? `no mínimo ${cota.min}` : "dentro da cota do contrato";
-          return {
-            local: "capítulo inteiro",
-            problema: `${s.sinal} = ${s.valor} (alvo: ${alvo})`,
-            instrucao: `reduza ${s.sinal} até ${alvo} no capítulo todo — funda fragmentos em frases completas e corte reformulações, preservando conteúdo e voz`,
-          };
-        });
-      await corrigirComEscritor([...parecer.correcoes, ...globais]);
+      // Instrução global presente = meta difusa: modo REESCRITA ORIENTADA (preserva
+      // eventos/fatos/diálogo/estrutura, reescreve a superfície). Sem meta global,
+      // modo cirúrgico. A escolha é do pipeline, nunca do modelo.
+      const modo: ModoCorrecao = globais.length > 0 ? "reescrita" : "cirurgico";
+      await corrigirComEscritor(todasCorrecoes, modo);
       gatesFalhos = await garantirGates();
       if (gatesFalhos.length) return bloquearPorGates(gatesFalhos);
       continue; // re-roda sinais + revisor + auditor no texto corrigido

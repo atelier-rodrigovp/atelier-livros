@@ -148,6 +148,10 @@ export interface SinalDisposto {
   valor: number | string;         // medição do detector
   disposicao: Disposicao;
   evidencia: string;              // trecho/linha localizados
+  /** violacao_confirmada em sinal de contagem exige as ocorrências julgadas reais, citadas uma a uma */
+  ocorrencias_citadas?: { trecho: string; posicao?: string }[];
+  /** disposição parcial: nº de ocorrências medidas julgadas falso positivo (citadas + falsos = valor) */
+  falsos_positivos?: number;
 }
 
 export interface EvidenciaLocalizada {
@@ -291,10 +295,23 @@ export interface CapituloEstado {
 
 export interface EstadoCanonicoDoc {
   schema: "engine-state/v1";
-  fase: "fundacao" | "estrutura" | "escrita" | "revisao_final" | "concluido" | "bloqueado";
+  // Ordem lógica: escrita → revisao_final → consolidacao → avaliacao → concluido.
+  fase:
+    | "fundacao"
+    | "estrutura"
+    | "escrita"
+    | "revisao_final"
+    | "consolidacao"
+    | "avaliacao"
+    | "concluido"
+    | "bloqueado";
   skill?: { id: string; versao: string; hash: string };
   fundacao?: { versao: string; hash: string; docs: Record<string, string> }; // doc → sha256
   total_capitulos?: number;
+  // Edição estrutural (editor_estrutural PROPÕE; o pipeline aplica os cortes/reordenações).
+  edicao_estrutural?: { run_id?: string; propostas: number; aplicadas: number; detalhe: string[]; em: string };
+  // Meta-nota (avaliação de livro): última nota alcançada e o alvo comercial.
+  avaliacao?: { nota?: number; meta: number; iteracoes: number; relatorio_path?: string; em: string };
   capitulos: Record<string, CapituloEstado>;
   // status_anterior: guarda o status do capítulo antes do bloqueio, para restauração fiel
   bloqueios: { codigo: string; alvo: string; detalhe: string; desde: string; status_anterior?: CapituloStatusV2 }[];

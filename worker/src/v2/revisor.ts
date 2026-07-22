@@ -42,6 +42,30 @@ export function validarParecer(obj: unknown): Parecer {
     if (typeof x?.sinal !== "string" || !DISPOSICOES.has(String(x?.disposicao)) || typeof x?.evidencia !== "string") {
       throw new Error(`sinal indisposto ou inválido: ${JSON.stringify(s).slice(0, 120)}`);
     }
+    // Auditabilidade (adendo 2): violacao_confirmada em sinal de CONTAGEM (valor
+    // numérico > 0) exige as ocorrências citadas uma a uma; disposição parcial
+    // exige a conta fechada (citadas + falsos_positivos = valor medido).
+    if (x.disposicao === "violacao_confirmada" && typeof x.valor === "number" && x.valor > 0) {
+      const citadas = x.ocorrencias_citadas;
+      if (!Array.isArray(citadas) || citadas.length === 0) {
+        throw new Error(
+          `sinal "${x.sinal}": violacao_confirmada exige "ocorrencias_citadas" (lista {trecho, posicao?}) com cada ocorrência julgada defeito real`
+        );
+      }
+      for (const [i, o] of (citadas as unknown[]).entries()) {
+        const oc = o as Record<string, unknown>;
+        if (typeof oc?.trecho !== "string" || !oc.trecho.trim()) {
+          throw new Error(`sinal "${x.sinal}": ocorrencias_citadas[${i}].trecho obrigatório (citação literal)`);
+        }
+      }
+      if (citadas.length < x.valor) {
+        if (typeof x.falsos_positivos !== "number" || citadas.length + x.falsos_positivos !== x.valor) {
+          throw new Error(
+            `sinal "${x.sinal}": ${citadas.length} citada(s) de ${x.valor} medidas — disposição parcial exige "falsos_positivos" = ${x.valor - citadas.length} (citadas + falsos_positivos = valor)`
+          );
+        }
+      }
+    }
   }
   if (!Array.isArray(p.correcoes)) throw new Error("correcoes deve ser lista");
   for (const c of p.correcoes as unknown[]) {
@@ -51,6 +75,26 @@ export function validarParecer(obj: unknown): Parecer {
     }
   }
   return p as unknown as Parecer;
+}
+
+/**
+ * Parecer INCOMPLETO (sinal medido fora da cota sem disposição) é falha de
+ * protocolo do revisor, não julgamento do texto: usada no `parse` do executor
+ * de papel, lança para acionar o retry técnico com instrução corretiva.
+ * `conferirParecer` mantém a mesma checagem como segunda rede (fail-closed)
+ * caso o parecer incompleto escape por outro caminho.
+ */
+export function exigirDisposicaoCompleta(parecer: Parecer, sinaisMedidos: SinalMedido[]): Parecer {
+  const dispostos = new Set(parecer.sinais.map((s) => s.sinal));
+  const omitidos = sinaisMedidos.filter((m) => m.fora_da_cota && !dispostos.has(m.sinal));
+  if (omitidos.length > 0) {
+    throw new Error(
+      `parecer incompleto — todo sinal FORA DA COTA exige disposição no array "sinais". Faltou dispor: ${omitidos
+        .map((m) => `"${m.sinal}" (valor ${m.valor})`)
+        .join(", ")}. Julgue cada um (violacao_confirmada com ocorrencias_citadas, excecao_valida, falso_positivo ou necessita_decisao_humana) e reenvie o parecer completo.`
+    );
+  }
+  return parecer;
 }
 
 export interface ConsistenciaParecer {

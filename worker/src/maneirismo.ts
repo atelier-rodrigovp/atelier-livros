@@ -263,10 +263,14 @@ function frasesRotuladas(texto: string): { fr: string[]; narr: boolean[] } {
 
 export interface CadenciaTique {
   nome: string;
+  /** chave do campo correspondente em OrcamentoCadencia (p/ casar com contratos V2) */
+  chave?: keyof OrcamentoCadencia;
   n: number;
   alvo: number;
   acima: boolean;
   exemplos: string[];
+  /** TODAS as ocorrências (auditabilidade — adendo 2); exemplos é a amostra curta */
+  todosExemplos?: string[];
   densidade?: number; // % quando aplicável (staccato)
 }
 export interface ResultadoCadencia {
@@ -375,19 +379,19 @@ export function diagnosticarCadencia(texto: string, orc: OrcamentoCadencia = ORC
   const italicos = [...t.matchAll(RE_ITALICO)].map((m) => m[2]);
   const retoricas = fr.filter((f, i) => narr[i] && /[?]["'”’)\]]*$/.test(f));
 
-  const mk = (nome: string, n: number, alvo: number, exemplos: string[], densidade?: number): CadenciaTique =>
-    ({ nome, n, alvo, acima: n > alvo, exemplos: ex(exemplos), densidade });
+  const mk = (nome: string, chave: keyof OrcamentoCadencia, n: number, alvo: number, exemplos: string[], densidade?: number): CadenciaTique =>
+    ({ nome, chave, n, alvo, acima: n > alvo, exemplos: ex(exemplos), todosExemplos: exemplos.map((s) => s.slice(0, 110)), densidade });
 
   const tiques: CadenciaTique[] = [
-    mk("fragmentos colados (≤4 palavras)", colados, orc.colados, coladosEx),
-    { nome: "staccato (frases curtas)", n: curtas, alvo: Math.round(nNarr * orc.staccatoFrac), acima: staccatoAcima, exemplos: [], densidade: staccatoPct },
-    mk("clipe de negação curto", clipes.length, orc.clipeNeg, clipes),
-    mk("anáfora (frases coladas, mesmo início)", anafora, orc.anafora, anaforaEx),
-    mk("epigrama antitético", epi.length, orc.epigrama, epi),
-    mk("fragmento de ênfase (Regra 4 ≤1–2)", frag.length, orc.fragEnfase, frag),
-    mk("fragmentos de ênfase COLADOS (Regra 4: nunca dois)", fragColados, orc.fragColados, []),
-    mk("pensamento em itálico (Regra 4 ≤2–3)", italicos.length, orc.italico, italicos),
-    mk("pergunta retórica (Regra 4 ≤1–2)", retoricas.length, orc.retorica, retoricas),
+    mk("fragmentos colados (≤4 palavras)", "colados", colados, orc.colados, coladosEx),
+    { nome: "staccato (frases curtas)", chave: "staccatoFrac", n: curtas, alvo: Math.round(nNarr * orc.staccatoFrac), acima: staccatoAcima, exemplos: [], densidade: staccatoPct },
+    mk("clipe de negação curto", "clipeNeg", clipes.length, orc.clipeNeg, clipes),
+    mk("anáfora (frases coladas, mesmo início)", "anafora", anafora, orc.anafora, anaforaEx),
+    mk("epigrama antitético", "epigrama", epi.length, orc.epigrama, epi),
+    mk("fragmento de ênfase (Regra 4 ≤1–2)", "fragEnfase", frag.length, orc.fragEnfase, frag),
+    mk("fragmentos de ênfase COLADOS (Regra 4: nunca dois)", "fragColados", fragColados, orc.fragColados, []),
+    mk("pensamento em itálico (Regra 4 ≤2–3)", "italico", italicos.length, orc.italico, italicos),
+    mk("pergunta retórica (Regra 4 ≤1–2)", "retorica", retoricas.length, orc.retorica, retoricas),
   ];
   return { frases: fr.length, staccatoPct, fragDialogo, tiques, acima: tiques.some((q) => q.acima) };
 }
@@ -409,7 +413,7 @@ export function cadenciaAcima(texto: string, orc: OrcamentoCadencia = ORC_CADENC
 // vem do humano, não do número. Regra prática: n>2 no mesmo capítulo = tique provável.
 const _RE_COP_GNOMICA = /\b(é|era|foi|seria|são|eram|está|estava|estavam|houve|havia|vira|virava|significa|significava)\b/i;
 const _RE_NOME_PROPRIO = /\b[A-ZÁÉÍÓÚÂÊÔÃÕ][a-záéíóúâêôãõ]{2,}/;
-export interface CausalGnomicoSinal { n: number; exemplos: string[]; limiar: number; acima: boolean }
+export interface CausalGnomicoSinal { n: number; exemplos: string[]; todos: string[]; limiar: number; acima: boolean }
 export const LIMIAR_CAUSAL_GNOMICO = 2; // >2 no mesmo capítulo = tique provável (só sinaliza)
 export function contarCausalGnomico(texto: string): CausalGnomicoSinal {
   const t = semHeadings(texto ?? "");
@@ -427,7 +431,7 @@ export function contarCausalGnomico(texto: string): CausalGnomicoSinal {
     if (/\d/.test(cl)) continue;             // dígito ⇒ fato concreto
     exemplos.push(("porque " + cl).slice(0, 90));
   }
-  return { n: exemplos.length, exemplos: exemplos.slice(0, 5), limiar: LIMIAR_CAUSAL_GNOMICO, acima: exemplos.length > LIMIAR_CAUSAL_GNOMICO };
+  return { n: exemplos.length, exemplos: exemplos.slice(0, 5), todos: [...exemplos], limiar: LIMIAR_CAUSAL_GNOMICO, acima: exemplos.length > LIMIAR_CAUSAL_GNOMICO };
 }
 
 // INTERIORIDADE SEM EVENTO (heurística — SINALIZA, não bloqueia): capítulo
@@ -791,7 +795,8 @@ export interface GnomicoSinal {
   n: number;               // total (narração + diálogo)
   narracao: number;
   dialogo: number;
-  exemplos: string[];
+  exemplos: string[];      // amostra curta (compat.)
+  todos: string[];         // TODAS as ocorrências (auditabilidade — adendo 2)
   limiar: number;
   acima: boolean;
 }
@@ -811,13 +816,15 @@ export function contarGnomico(texto: string): GnomicoSinal {
   // O causal ("…porque esperar era uma maneira de mentir") soma sem dupla
   // contagem quando a frase inteira já foi marcada acima: dedup por frase.
   const causal = contarCausalGnomico(texto);
-  const causalNovos = causal.exemplos.filter((ex) => !exemplos.some((e) => e.includes(ex.slice(7, 40))));
+  const causalNovos = causal.todos.filter((ex) => !exemplos.some((e) => e.includes(ex.slice(7, 40))));
   const n = exemplos.length + causalNovos.length;
+  const todos = exemplos.concat(causalNovos);
   return {
     n,
     narracao: narracao + causalNovos.length, // o causal ignora diálogo por construção
     dialogo,
-    exemplos: exemplos.concat(causalNovos).slice(0, 6),
+    exemplos: todos.slice(0, 6),
+    todos,
     limiar: LIMIAR_GNOMICO,
     acima: n > LIMIAR_GNOMICO,
   };
@@ -845,7 +852,7 @@ const _IDIOMATISMOS = [
   /casa\s+ca[íi]/iu, /porta\s+(abriu|fechou|bateu)/iu,
 ];
 
-export interface PersonificacaoSinal { n: number; por1000: number; exemplos: string[]; acima: boolean }
+export interface PersonificacaoSinal { n: number; por1000: number; exemplos: string[]; todos: string[]; acima: boolean }
 export const LIMIAR_PERSONIFICACAO_1000 = 1.5; // meta: ≤1/1000 (folga de sinal: 1.5)
 
 export function contarPersonificacao(texto: string): PersonificacaoSinal {
@@ -863,7 +870,7 @@ export function contarPersonificacao(texto: string): PersonificacaoSinal {
   }
   const palavras = (semHeadings(texto ?? "").match(/[\p{L}\d’'-]+/gu) ?? []).length;
   const por1000 = palavras ? Math.round((exemplos.length / palavras) * 10000) / 10 : 0;
-  return { n: exemplos.length, por1000, exemplos: exemplos.slice(0, 6), acima: por1000 > LIMIAR_PERSONIFICACAO_1000 };
+  return { n: exemplos.length, por1000, exemplos: exemplos.slice(0, 6), todos: [...exemplos], acima: por1000 > LIMIAR_PERSONIFICACAO_1000 };
 }
 
 // --- D3: FRASE-SANFONA (a mesma percepção reformulada em cadeia). Três moldes
@@ -872,7 +879,7 @@ export function contarPersonificacao(texto: string): PersonificacaoSinal {
 //     aposto (≥2 travessões internos OU ≥3 vírgulas fora de enumeração).
 //     Guarda anti-enumeração: segmentos curtos (≤3 palavras) entre vírgulas
 //     sem cópula = lista legítima, não sanfona.
-export interface SanfonaSinal { n: number; exemplos: string[]; limiar: number; acima: boolean }
+export interface SanfonaSinal { n: number; exemplos: string[]; todos: string[]; limiar: number; acima: boolean }
 export const LIMIAR_SANFONA = 1; // meta: ≤1/capítulo
 
 function _ehEnumeracao(s: string): boolean {
@@ -897,7 +904,7 @@ export function contarSanfona(texto: string): SanfonaSinal {
     if (escadaDeQue || negReformula || (apostoDenso && (negacoes >= 1 || _RE_COP_GNOMICA.test(s))))
       exemplos.push(s.trim().slice(0, 110));
   }
-  return { n: exemplos.length, exemplos: exemplos.slice(0, 5), limiar: LIMIAR_SANFONA, acima: exemplos.length > LIMIAR_SANFONA };
+  return { n: exemplos.length, exemplos: exemplos.slice(0, 5), todos: [...exemplos], limiar: LIMIAR_SANFONA, acima: exemplos.length > LIMIAR_SANFONA };
 }
 
 // --- D4: ADJETIVO AVALIATIVO em objeto físico ("facho honesto", "papel estúpido").
@@ -980,7 +987,7 @@ export function sinalDialogoInterioridade(texto: string, doisOuMaisEmCena = true
 //     Absorve os gatilhos explícitos; o símile-andaime ("como se") mantém seu
 //     teto próprio nos MOLDES — aqui medimos DENSIDADE e CADEIA.
 const _RE_METAFORA = /(?<![\p{L}\d_])(como\s+se|como\s+quem|feito\s+\p{L}|igual\s+a\s|como\s+uma?\s)/giu;
-export interface MetaforaSinal { n: number; por300: number; cadeias: number; exemplos: string[]; acima: boolean }
+export interface MetaforaSinal { n: number; por300: number; cadeias: number; exemplos: string[]; todos: string[]; acima: boolean }
 export function contarMetaforaElaborada(texto: string): MetaforaSinal {
   const t = semHeadings(texto ?? "");
   const posicoes: number[] = [];
@@ -995,7 +1002,7 @@ export function contarMetaforaElaborada(texto: string): MetaforaSinal {
   let cadeias = 0;
   for (let i = 1; i < posicoes.length; i++) if (posicoes[i] - posicoes[i - 1] < 300) cadeias++;
   const por300 = palavras ? Math.round((posicoes.length / palavras) * 300 * 100) / 100 : 0;
-  return { n: posicoes.length, por300, cadeias, exemplos: exemplos.slice(0, 5), acima: por300 > 1 || cadeias > 0 };
+  return { n: posicoes.length, por300, cadeias, exemplos: exemplos.slice(0, 5), todos: [...exemplos], acima: por300 > 1 || cadeias > 0 };
 }
 
 // --- AGREGADOR: sinais legíveis para o prompt do revisor (mesmo formato dos

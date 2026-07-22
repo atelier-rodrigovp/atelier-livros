@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { EstadoCanonico, ReviewRegistro, RunRegistro, SpecRegistro } from "./tipos.js";
+import type { EstadoCanonico, ReviewRegistro, RunRegistro, SceneSpec, SpecRegistro } from "./tipos.js";
 
 /** Tabelas da engine V2 ainda não criadas no banco (DDL manual pendente). */
 export class TabelasV2AusentesError extends Error {
@@ -34,6 +34,8 @@ export interface PersistenciaV2 {
   inserirSpec(spec: SpecRegistro): Promise<string>;
   /** Maior versão de spec já persistida para (projeto, capítulo); 0 se nenhuma. */
   maiorVersaoSpec(projectId: string, capitulo: number): Promise<number>;
+  /** Ficha (scene-spec) da MAIOR versão persistida para (projeto, capítulo); null se nenhuma. */
+  lerFichaMaisRecente(projectId: string, capitulo: number): Promise<SceneSpec | null>;
   lerEstado(projectId: string): Promise<EstadoCanonico | null>;
   /** Grava com versao+1 (optimistic lock); ErroConcorrencia se a versão esperada divergir. */
   gravarEstado(estado: EstadoCanonico): Promise<void>;
@@ -67,9 +69,14 @@ export class SupabasePersistencia implements PersistenciaV2 {
     return { sb, OWNER };
   }
 
-  /** Retenta SÓ falha transitória de rede (backoff 2s/8s/30s); erro de banco propaga direto. */
+  /**
+   * Retenta SÓ falha transitória de rede; erro de banco propaga direto.
+   * Backoff 2s/8s/30s/60s/120s — uma oscilação de minutos no Supabase matava um
+   * runner de horas (canário hoover 2026-07-21 perdeu a prosa do capítulo em
+   * memória por esgotar 3 retries em ~40s).
+   */
   private async comRede<T>(fn: () => Promise<T>): Promise<T> {
-    const esperas = [2000, 8000, 30000];
+    const esperas = [2000, 8000, 30000, 60000, 120000];
     for (let tentativa = 0; ; tentativa++) {
       try {
         return await fn();
@@ -148,6 +155,23 @@ export class SupabasePersistencia implements PersistenciaV2 {
         .maybeSingle();
       this.conferir(error, "engine_scene_specs.select");
       return (data as { versao: number } | null)?.versao ?? 0;
+    });
+  }
+
+  async lerFichaMaisRecente(projectId: string, capitulo: number): Promise<SceneSpec | null> {
+    return this.comRede(async () => {
+      const { sb, OWNER } = await this.cliente();
+      const { data, error } = await sb
+        .from("engine_scene_specs")
+        .select("ficha")
+        .eq("project_id", projectId)
+        .eq("capitulo", capitulo)
+        .eq("owner", OWNER)
+        .order("versao", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      this.conferir(error, "engine_scene_specs.select_ficha");
+      return (data as { ficha: SceneSpec } | null)?.ficha ?? null;
     });
   }
 
@@ -299,6 +323,20 @@ export class DiscoPersistencia implements PersistenciaV2 {
       }
     }
     return maior;
+  }
+
+  async lerFichaMaisRecente(projectId: string, capitulo: number): Promise<SceneSpec | null> {
+    let maior = 0;
+    let ficha: SceneSpec | null = null;
+    for (const linha of this.lerJsonl("specs.jsonl")) {
+      if (linha.op !== "insert") continue;
+      const r = linha.registro as { project_id?: string; capitulo?: number; versao?: number; ficha?: SceneSpec };
+      if (r.project_id === projectId && r.capitulo === capitulo && typeof r.versao === "number" && r.versao >= maior && r.ficha) {
+        maior = r.versao;
+        ficha = r.ficha;
+      }
+    }
+    return ficha;
   }
 
   async lerEstado(projectId: string): Promise<EstadoCanonico | null> {

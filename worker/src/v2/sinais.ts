@@ -31,9 +31,16 @@ export interface SinalMedido {
   exemplos: string[];
 }
 
-/** Extrai cota declarada no contrato por convenção de id ("cota.gnomico", "piso.declarativas"...). */
-function cotaDeclarada(c: SkillContract, id: string): { min?: number; max?: number } | undefined {
-  const r = c.regras.find((x) => x.id === id && x.tipo === "cota");
+/**
+ * Extrai a cota declarada no contrato para um sinal: regra tipo "cota" cujo id
+ * contém o nome do sinal (ids reais: "fecho-concreto-gnomico", "anti-sanfona",
+ * "piso-declarativas"…). A convenção antiga exigia id EXATO "cota.gnomico" —
+ * nenhum contrato usava, então nenhuma cota de contagem chegava aos sinais e
+ * `fora_da_cota` era sempre false (defeito 11 da auditoria de fechamento).
+ */
+function cotaDeclarada(c: SkillContract, sinal: string): { min?: number; max?: number } | undefined {
+  const chave = sinal.toLowerCase();
+  const r = c.regras.find((x) => x.tipo === "cota" && x.id.toLowerCase().includes(chave));
   return r?.cota ? { min: r.cota.min, max: r.cota.max } : undefined;
 }
 
@@ -47,35 +54,38 @@ export function medirSinais(texto: string, contrato: SkillContract): SinalMedido
   const out: SinalMedido[] = [];
 
   const gn = contarGnomico(texto);
-  out.push(medir("gnomico", gn.n, gn.exemplos, cotaDeclarada(contrato, "cota.gnomico")));
+  out.push(medir("gnomico", gn.n, gn.todos, cotaDeclarada(contrato, "gnomico")));
 
   const pe = contarPersonificacao(texto);
-  out.push(medir("personificacao", pe.n, pe.exemplos, cotaDeclarada(contrato, "cota.personificacao")));
+  out.push(medir("personificacao", pe.n, pe.todos, cotaDeclarada(contrato, "personificacao")));
 
   const sa = contarSanfona(texto);
-  out.push(medir("sanfona", sa.n, sa.exemplos, cotaDeclarada(contrato, "cota.sanfona")));
+  out.push(medir("sanfona", sa.n, sa.todos, cotaDeclarada(contrato, "sanfona")));
 
   const de = percentDeclarativasSimples(texto);
-  out.push(medir("declarativas_pct", de.pct, [], cotaDeclarada(contrato, "piso.declarativas")));
+  out.push(medir("declarativas_pct", de.pct, [], cotaDeclarada(contrato, "declarativas")));
 
   const me = contarMetaforaElaborada(texto);
   const cotaMet = contrato.politica_metafora.cota_por_capitulo != null
     ? { max: contrato.politica_metafora.cota_por_capitulo }
-    : cotaDeclarada(contrato, "cota.metafora");
-  out.push(medir("metafora_elaborada", me.n, me.exemplos, cotaMet));
+    : cotaDeclarada(contrato, "metafora");
+  out.push(medir("metafora_elaborada", me.n, me.todos, cotaMet));
 
   const di = sinalDialogoInterioridade(texto);
   const pisoDialogo = contrato.politica_dialogo.piso_percentual;
   out.push(medir("dialogo_pct", di.dialogoPct, [], pisoDialogo != null ? { min: pisoDialogo } : undefined));
-  out.push(medir("interioridade_run", di.maxInterioridadeSeguida, [], cotaDeclarada(contrato, "teto.interioridade_run")));
+  out.push(medir("interioridade_run", di.maxInterioridadeSeguida, [], cotaDeclarada(contrato, "interioridade")));
 
   // Cadência: orçamento default sobrescrito campo-a-campo pelo contrato (ritmo.cadencia).
   const orc: OrcamentoCadencia = { ...ORC_CADENCIA, ...(contrato.ritmo.cadencia ?? {}) } as OrcamentoCadencia;
   const cad = diagnosticarCadencia(texto, orc);
   for (const t of cad.tiques) {
-    // Só vira "fora da cota" se o contrato declarou cadência; senão é medição informativa.
-    const declarou = contrato.ritmo.cadencia != null && t.nome in (contrato.ritmo.cadencia ?? {});
-    out.push({ sinal: `cadencia.${t.nome}`, valor: t.n, cota: declarou ? { max: t.alvo } : undefined, fora_da_cota: declarou && t.acima, exemplos: t.exemplos.slice(0, 3) });
+    // Só vira "fora da cota" se o contrato declarou a CHAVE deste tique (t.chave,
+    // ex.: "fragEnfase"); senão é medição informativa. Comparar pelo rótulo humano
+    // (t.nome) nunca casava — cadência declarada jamais saía da cota (defeito da
+    // auditoria de fechamento).
+    const declarou = t.chave != null && contrato.ritmo.cadencia != null && t.chave in (contrato.ritmo.cadencia ?? {});
+    out.push({ sinal: `cadencia.${t.nome}`, valor: t.n, cota: declarou ? { max: t.alvo } : undefined, fora_da_cota: declarou && t.acima, exemplos: t.todosExemplos ?? t.exemplos });
   }
 
   // Tamanho do capítulo (sinal, não gate — decisão da F6).
@@ -89,14 +99,19 @@ export function medirSinais(texto: string, contrato: SkillContract): SinalMedido
   return out;
 }
 
-/** Resumo textual dos sinais para o prompt do revisor (medições reais, não opinião). */
+/**
+ * Resumo textual dos sinais para o prompt do revisor (medições reais, não opinião).
+ * TODAS as ocorrências medidas são listadas, numeradas (adendo 2: o revisor só pode
+ * confirmar violação citando cada ocorrência — para isso precisa vê-las todas).
+ */
 export function resumoSinais(sinais: SinalMedido[]): string {
-  const linhas = sinais.map((s) => {
+  const linhas: string[] = [];
+  for (const s of sinais) {
     const cota = s.cota
       ? ` (cota${s.cota.min != null ? ` mín ${s.cota.min}` : ""}${s.cota.max != null ? ` máx ${s.cota.max}` : ""}${s.fora_da_cota ? " — FORA" : ""})`
       : "";
-    const ex = s.exemplos.length ? ` · ex.: ${s.exemplos.slice(0, 2).map((e) => JSON.stringify(e)).join(" ")}` : "";
-    return `- ${s.sinal}: ${s.valor}${cota}${ex}`;
-  });
+    linhas.push(`- ${s.sinal}: ${s.valor}${cota}`);
+    s.exemplos.forEach((e, i) => linhas.push(`    ${i + 1}. ${JSON.stringify(e)}`));
+  }
   return linhas.join("\n");
 }

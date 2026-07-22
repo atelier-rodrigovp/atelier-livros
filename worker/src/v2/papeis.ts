@@ -24,6 +24,8 @@ export interface ExecucaoPapel<T> {
   parentRunId?: string | null;
   maxTentativas?: number;               // default 2 (1 retry técnico com instrução corretiva)
   timeoutMs?: number;
+  /** Metadados auditáveis da chamada (ex.: modo_correcao) — vão ao run do ledger. */
+  payload?: Record<string, unknown>;
 }
 
 export interface ResultadoPapel<T> {
@@ -54,6 +56,7 @@ export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPa
       parent_run_id: parent ?? null,
       attempt: tentativa,
       evidencias: [],
+      ...(e.payload ? { payload: e.payload } : {}),
     });
 
     const correcao = tentativa > 1
@@ -67,6 +70,9 @@ export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPa
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await e.gravador.falharRun(runId, { codigo: "PROVEDOR_FALHOU", classe: "infra", mensagem: msg });
+      // Limite do plano Max: NÃO é falha do papel — atravessa sem retry técnico
+      // (retry local não ajuda; o loop do worker pausa com retry_at sem contar tentativa).
+      if ((err as Error)?.name === "LimiteMaxError") throw err;
       if (tentativa === max) {
         throw new ErroEngine({ codigo: "PROVEDOR_FALHOU", classe: "infra", mensagem: `papel ${e.papel} falhou após ${max} tentativas: ${msg}` });
       }

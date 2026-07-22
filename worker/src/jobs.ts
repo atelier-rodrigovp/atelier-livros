@@ -423,18 +423,43 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
 
   if (resultado.tipo === "concluir") {
     const b = resultado.briefing;
-    const merged = { ...b, idea, qa, _interview: { completo: true, avisos: resultado.avisos } };
+    // Campos AUTORITATIVOS do wizard V2 nunca são descartados/sobrescritos pela
+    // entrevista: decisões do autor, canário de voz aprovado e a skill validada
+    // pelo canário. Se a entrevista sugerir outra skill, a sugestão fica
+    // registrada para reconfirmação (novo canário de voz), nunca aplicada.
+    const canarioAprovado = (briefing as any).canario_voz?.aprovado === true;
+    const skillSugerida = b.skill_escrita ?? null;
+    const skillAutoritativa = canarioAprovado ? (proj.skill_escrita ?? null) : (skillSugerida ?? proj.skill_escrita ?? null);
+    const avisos = [...(resultado.avisos ?? [])];
+    if (canarioAprovado && skillSugerida && skillSugerida !== proj.skill_escrita) {
+      avisos.push(
+        `a entrevista sugeriu a skill "${skillSugerida}", mas a skill "${proj.skill_escrita}" foi validada pelo canário de voz — troca exige reconfirmação com novo canário`
+      );
+    }
+    const merged = {
+      ...b,
+      idea,
+      qa,
+      ...((briefing as any).decisoes_autor !== undefined ? { decisoes_autor: (briefing as any).decisoes_autor } : {}),
+      ...((briefing as any).canario_voz !== undefined ? { canario_voz: (briefing as any).canario_voz } : {}),
+      ...(canarioAprovado && skillSugerida && skillSugerida !== proj.skill_escrita
+        ? { skill_sugerida_pela_entrevista: skillSugerida }
+        : {}),
+      _interview: { completo: true, avisos },
+    };
     await must(
       sb.from("projects").update({
         briefing: merged,
         genero: b.genero ?? proj.genero ?? null,
         serie: b.serie ?? proj.serie ?? null,
         volume: b.volume ?? proj.volume ?? 1,
-        total_capitulos: b.num_capitulos ?? proj.total_capitulos ?? null,
+        // Wizard V2 é AUTORITATIVO para total_capitulos (mesma regra de skill/
+        // decisões/canário): a entrevista só define quando o wizard não definiu.
+        total_capitulos: proj.total_capitulos ?? b.num_capitulos ?? null,
         paginas_alvo: b.paginas_alvo ?? proj.paginas_alvo ?? null,
         piso_palavras: b.piso_palavras ?? proj.piso_palavras ?? 1400,
         meta_nota: b.meta_nota ?? proj.meta_nota ?? 9.0,
-        skill_escrita: b.skill_escrita ?? proj.skill_escrita ?? null,
+        skill_escrita: skillAutoritativa,
         idioma_origem: b.idioma ?? proj.idioma_origem ?? "pt-BR",
       }).eq("owner", OWNER).eq("id", job.project_id!)
     );
@@ -443,6 +468,7 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
     await setProgress(job.id, { fase: "ENTREVISTA", completo: true });
   } else {
     const perguntas = resultado.perguntas;
+    // Base = briefing do banco (preserva decisoes_autor/canario_voz por construção).
     const merged = { ...briefing, idea, qa, _interview: { completo: false, pending: perguntas, avisos: resultado.avisos } };
     await must(sb.from("projects").update({ briefing: merged }).eq("owner", OWNER).eq("id", job.project_id!));
     await setProgress(job.id, { fase: "ENTREVISTA", perguntas: perguntas.length });

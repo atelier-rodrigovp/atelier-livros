@@ -18,14 +18,21 @@ import {
 
 type Fase = EstadoCanonicoDoc["fase"];
 
-/** Transições de fase permitidas (regressão só escrita ← revisao_final). */
+/**
+ * Transições de fase permitidas.
+ * Fluxo: escrita → revisao_final → consolidacao → avaliacao → concluido.
+ * Regressões: escrita ← revisao_final (reescrita de capítulo) e escrita ← avaliacao
+ * (a meta-nota manda reescrever capítulos). Bloqueado retoma para qualquer fase útil.
+ */
 const TRANSICOES_VALIDAS: Record<Fase, Fase[]> = {
   fundacao: ["estrutura", "bloqueado"],
   estrutura: ["escrita", "bloqueado"],
   escrita: ["revisao_final", "bloqueado"],
-  revisao_final: ["concluido", "escrita", "bloqueado"],
+  revisao_final: ["consolidacao", "concluido", "escrita", "bloqueado"],
+  consolidacao: ["avaliacao", "bloqueado"],
+  avaliacao: ["concluido", "escrita", "bloqueado"],
   concluido: ["bloqueado"],
-  bloqueado: ["fundacao", "estrutura", "escrita", "revisao_final", "concluido"],
+  bloqueado: ["fundacao", "estrutura", "escrita", "revisao_final", "consolidacao", "avaliacao", "concluido"],
 };
 
 const MAX_TENTATIVAS_CONCORRENCIA = 3;
@@ -309,6 +316,54 @@ export class Gravador {
     }
     await this.mutarEstado((doc) => {
       doc.fase = fase;
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Edição estrutural e meta-nota (fechamento do loop, F3)
+  // -------------------------------------------------------------------------
+
+  /** Registra o resultado da edição estrutural (propostas do editor + o que o pipeline aplicou). */
+  async registrarEdicaoEstrutural(dados: {
+    run_id?: string;
+    propostas: number;
+    aplicadas: number;
+    detalhe: string[];
+  }): Promise<void> {
+    await this.mutarEstado((doc) => {
+      doc.edicao_estrutural = { ...dados, em: this.agora() };
+    });
+  }
+
+  /** Registra a última avaliação de livro (nota × meta × iterações + caminho do relatório). */
+  async registrarAvaliacao(dados: {
+    nota?: number;
+    meta: number;
+    iteracoes: number;
+    relatorio_path?: string;
+  }): Promise<void> {
+    await this.mutarEstado((doc) => {
+      doc.avaliacao = { ...dados, em: this.agora() };
+    });
+  }
+
+  /**
+   * Re-keia doc.capitulos pelo mapa {número antigo → número novo} produzido pela
+   * edição estrutural (corte + reordenação) e ajusta total_capitulos. Capítulos
+   * ausentes do mapa (cortados) são descartados. Mapa vazio = no-op.
+   */
+  async aplicarMapaCapitulos(mapa: Record<number, number>): Promise<void> {
+    const entradas = Object.entries(mapa);
+    if (entradas.length === 0) return;
+    await this.mutarEstado((doc) => {
+      const antigo = doc.capitulos;
+      const novo: Record<string, CapituloEstado> = {};
+      for (const [de, para] of entradas) {
+        const est = antigo[String(de)];
+        if (est) novo[String(para)] = est;
+      }
+      doc.capitulos = novo;
+      doc.total_capitulos = Object.keys(novo).length;
     });
   }
 }

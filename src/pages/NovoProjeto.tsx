@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Check, Loader2, Sparkles, Wand2 } from "lucide-react";
+import { ArrowLeft, Check, Loader2, Plus, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -32,16 +32,83 @@ const RELACAO_SIMPLES: Record<string, string> = {
   equilibrio: "Emoção e ação andam juntas — o desejo corre por baixo de cada cena.",
 };
 
-function ComparadorEstilos() {
-  return (
-    <details className="rounded-xl border bg-card">
-      <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium">
-        Comparar estilos de escrita
-      </summary>
-      <div className="grid grid-cols-1 gap-4 border-t p-4 sm:grid-cols-3">
-        {CONTRATOS.map((c) => (
-          <div key={c.id} className="space-y-2.5 rounded-lg border p-3 text-sm">
-            <p className="font-serif font-semibold leading-snug">{c.nome}</p>
+// Skill do contrato V2 → skill_escrita da V1 (é essa que o worker resolve em ~/.claude/skills/).
+const SKILL_V1_MAP: Record<string, string> = {
+  "dan-brown": "skill-dan-brown",
+  "hoover-mcfadden": "hoover-mcfadden",
+  romantasy: "skill-romantasy",
+};
+const SKILL_ID_REVERSO: Record<string, string> = Object.fromEntries(
+  Object.entries(SKILL_V1_MAP).map(([id, v1]) => [v1, id])
+);
+
+// Estimativa de palavras + validação de nº de capítulos contra o contrato escolhido.
+function validarCapitulos(
+  n: number,
+  contrato?: (typeof CONTRATOS)[number]
+): { erro: string | null; palavras: number | null } {
+  const erro =
+    !Number.isFinite(n) || n < 12 || n > 100
+      ? "O número de capítulos precisa ficar entre 12 e 100."
+      : null;
+  const palavras = contrato ? n * contrato.faixa_palavras.alvo : null;
+  return { erro, palavras };
+}
+
+// Avisos não bloqueantes: exigências estruturais do contrato escolhido.
+function avisosContrato(c: (typeof CONTRATOS)[number]): string[] {
+  const avisos: string[] = [];
+  const rot = (c.pov as { rotacao?: { fios_min: number; fios_max: number } }).rotacao;
+  avisos.push(
+    rot
+      ? `Esta skill exige ${rot.fios_min}–${rot.fios_max} fios narrativos em rotação.`
+      : "Esta skill usa POV único, sem rotação de fios."
+  );
+  if (c.estruturas_exigidas?.docs?.length) {
+    avisos.push(`A fundação vai gerar: ${c.estruturas_exigidas.docs.join(", ")}.`);
+  }
+  return avisos;
+}
+
+function ComparadorEstilos({
+  selecionavel = false,
+  selecionado,
+  onSelecionar,
+}: {
+  selecionavel?: boolean;
+  selecionado?: string | null;
+  onSelecionar?: (id: string) => void;
+}) {
+  const grade = (
+    <div className="grid grid-cols-1 gap-4 border-t p-4 sm:grid-cols-3">
+      {CONTRATOS.map((c) => {
+        const sel = selecionavel && selecionado === c.id;
+        return (
+          <div
+            key={c.id}
+            role={selecionavel ? "button" : undefined}
+            tabIndex={selecionavel ? 0 : undefined}
+            onClick={selecionavel ? () => onSelecionar?.(c.id) : undefined}
+            onKeyDown={
+              selecionavel
+                ? (e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onSelecionar?.(c.id);
+                    }
+                  }
+                : undefined
+            }
+            className={cn(
+              "space-y-2.5 rounded-lg border p-3 text-sm transition-colors",
+              selecionavel && "cursor-pointer hover:border-primary/50",
+              sel && "border-primary bg-primary/5"
+            )}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-serif font-semibold leading-snug">{c.nome}</p>
+              {sel && <Check className="h-4 w-4 shrink-0 text-primary" />}
+            </div>
             <p className="text-xs text-muted-foreground">
               {FAMILIA_SIMPLES[c.familia_editorial] ?? c.familia_editorial}
             </p>
@@ -69,9 +136,73 @@ function ComparadorEstilos() {
               {c.faixa_palavras.alvo.toLocaleString("pt-BR")}).
             </p>
           </div>
-        ))}
-      </div>
-    </details>
+        );
+      })}
+    </div>
+  );
+
+  if (!selecionavel) {
+    return (
+      <details className="rounded-xl border bg-card">
+        <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium">
+          Comparar estilos de escrita
+        </summary>
+        {grade}
+      </details>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border bg-card">
+      <p className="px-4 py-3 text-sm font-medium">Escolha a skill de escrita *</p>
+      {grade}
+    </div>
+  );
+}
+
+// Engine V2 vs V1 — dois cards de escolha, V2 recomendada por padrão.
+function EscolhaEngine({
+  valor,
+  onChange,
+}: {
+  valor: "v2" | "v1";
+  onChange: (v: "v2" | "v1") => void;
+}) {
+  const opcoes = [
+    {
+      id: "v2" as const,
+      titulo: "Engine V2 (recomendada)",
+      desc: "Papéis separados com auditoria por hash e contratos de estilo versionados.",
+    },
+    {
+      id: "v1" as const,
+      titulo: "Engine clássica (V1)",
+      desc: "Pipeline clássico de escrita, sem separação de papéis por hash.",
+    },
+  ];
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {opcoes.map((op) => {
+        const sel = valor === op.id;
+        return (
+          <button
+            key={op.id}
+            type="button"
+            onClick={() => onChange(op.id)}
+            className={cn(
+              "rounded-xl border p-4 text-left text-sm transition-colors",
+              sel ? "border-primary bg-primary/5" : "hover:bg-accent"
+            )}
+          >
+            <span className="flex items-center gap-1.5 font-medium">
+              {sel && <Check className="h-3.5 w-3.5 text-primary" />}
+              {op.titulo}
+            </span>
+            <p className="mt-1 text-xs text-muted-foreground">{op.desc}</p>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -89,10 +220,26 @@ export default function NovoProjeto() {
   const [params, setParams] = useSearchParams();
   // Retomada por URL: ?projeto=<id> sobrevive a refresh e permite voltar do Dashboard.
   const projetoParam = params.get("projeto");
-  const [fase, setFase] = useState<"ideia" | "entrevista">(projetoParam ? "entrevista" : "ideia");
+  const [fase, setFase] = useState<"ideia" | "canario" | "entrevista">(
+    projetoParam ? "entrevista" : "ideia"
+  );
   const [titulo, setTitulo] = useState("");
   const [ideia, setIdeia] = useState("");
   const [iniciando, setIniciando] = useState(false);
+
+  // Engine V2: escolha de engine/skill/capítulos/decisões, feita na fase "ideia".
+  const [engineEscolhida, setEngineEscolhida] = useState<"v2" | "v1">("v2");
+  const [skillEscolhida, setSkillEscolhida] = useState<string | null>(null);
+  const [totalCapitulos, setTotalCapitulos] = useState(40);
+  const [decisoesAutor, setDecisoesAutor] = useState<string[]>([]);
+  const [novaDecisao, setNovaDecisao] = useState("");
+
+  // Canário de voz (fase "canario", só engine V2).
+  const [canarioJobId, setCanarioJobId] = useState<string | null>(null);
+  const [canarioTexto, setCanarioTexto] = useState<string | null>(null);
+  const [canarioErro, setCanarioErro] = useState<string | null>(null);
+  const [gerandoCanario, setGerandoCanario] = useState(false);
+  const [trocandoSkill, setTrocandoSkill] = useState(false);
 
   const [projectId, setProjectId] = useState<string | null>(projetoParam);
   const [pendentes, setPendentes] = useState<Pergunta[]>([]);
@@ -190,21 +337,176 @@ export default function NovoProjeto() {
     }
   }
 
+  // Retomada por URL: projeto V2 sem canário aprovado volta para a fase do canário
+  // (não direto pra entrevista). Roda uma única vez, na montagem.
+  useEffect(() => {
+    if (!projetoParam) return;
+    (async () => {
+      const { data } = await supabase
+        .from("projects")
+        .select("engine_mode,skill_escrita,total_capitulos,briefing")
+        .eq("id", projetoParam)
+        .maybeSingle();
+      if (!data) return;
+      const b: any = data.briefing || {};
+      if ((data as any).engine_mode === "v2" && !b.canario_voz?.aprovado) {
+        setEngineEscolhida("v2");
+        const skillId = data.skill_escrita ? SKILL_ID_REVERSO[data.skill_escrita] : undefined;
+        if (skillId) setSkillEscolhida(skillId);
+        if (data.total_capitulos) setTotalCapitulos(data.total_capitulos);
+        setFase("canario");
+      }
+    })();
+  }, [projetoParam]);
+
+  // Gera (ou regenera, ao trocar de skill) o canário de voz do projeto já criado.
+  async function gerarCanario(id: string, skillId: string) {
+    setGerandoCanario(true);
+    setCanarioErro(null);
+    setCanarioTexto(null);
+    try {
+      const skillV1 = SKILL_V1_MAP[skillId];
+      const { error: errUpd } = await supabase
+        .from("projects")
+        .update({ skill_escrita: skillV1 })
+        .eq("id", id);
+      if (errUpd) throw errUpd;
+      const job = await enqueueJob("canario_voz", { skill_escrita: skillV1 }, { project_id: id });
+      setCanarioJobId(job.id);
+    } catch (err) {
+      setCanarioErro(`Falha ao agendar o canário de voz: ${(err as Error).message}`);
+    } finally {
+      setGerandoCanario(false);
+    }
+  }
+
+  // Poll/Realtime do job do canário — mesmo padrão da entrevista acima.
+  useEffect(() => {
+    if (!canarioJobId) return;
+    let ativo = true;
+    async function verificar() {
+      const { data } = await supabase
+        .from("jobs")
+        .select("status,erro,progresso")
+        .eq("id", canarioJobId!)
+        .maybeSingle();
+      if (!ativo || !data) return;
+      if (data.status === "error" || data.status === "paused") {
+        setCanarioErro(data.erro || "O canário de voz falhou no worker.");
+        return;
+      }
+      if (data.status === "done") {
+        const c = (data.progresso as any)?.canario_voz;
+        if (c?.texto) {
+          setCanarioTexto(c.texto);
+        } else {
+          setCanarioErro(
+            "O job terminou, mas não encontrei o texto do canário em progresso.canario_voz."
+          );
+        }
+      }
+    }
+    verificar();
+    const ch = supabase
+      .channel(`canario-${canarioJobId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "jobs", filter: `id=eq.${canarioJobId}` },
+        verificar
+      )
+      .subscribe();
+    const poll = setInterval(verificar, 8_000);
+    return () => {
+      ativo = false;
+      supabase.removeChannel(ch);
+      clearInterval(poll);
+    };
+  }, [canarioJobId]);
+
+  async function aprovarCanario() {
+    if (!projectId || !skillEscolhida) return;
+    const { data } = await supabase
+      .from("projects")
+      .select("briefing")
+      .eq("id", projectId)
+      .single();
+    const b: any = data?.briefing || {};
+    const merged = {
+      ...b,
+      canario_voz: {
+        aprovado: true,
+        skill: skillEscolhida,
+        em: new Date().toISOString(),
+        job_id: canarioJobId,
+      },
+    };
+    const { error } = await supabase
+      .from("projects")
+      .update({ briefing: merged })
+      .eq("id", projectId);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setFase("entrevista");
+    await agendarEntrevista(projectId);
+  }
+
+  function adicionarDecisao() {
+    const t = novaDecisao.trim();
+    if (!t) return;
+    setDecisoesAutor((d) => [...d, t]);
+    setNovaDecisao("");
+  }
+  function removerDecisao(i: number) {
+    setDecisoesAutor((d) => d.filter((_, idx) => idx !== i));
+  }
+
   async function comecar(e: React.FormEvent) {
     e.preventDefault();
     if (ideia.trim().length < 10) {
       toast.error("Descreva sua ideia em pelo menos uma frase.");
       return;
     }
+    let contratoSel: (typeof CONTRATOS)[number] | undefined;
+    if (engineEscolhida === "v2") {
+      contratoSel = CONTRATOS.find((c) => c.id === skillEscolhida);
+      if (!contratoSel) {
+        toast.error("Escolha uma skill de escrita para a Engine V2.");
+        return;
+      }
+      const { erro } = validarCapitulos(totalCapitulos, contratoSel);
+      if (erro) {
+        toast.error(erro);
+        return;
+      }
+    }
     setIniciando(true);
     const tituloFinal = titulo.trim() || ideia.trim().split(/[.\n]/)[0].slice(0, 80);
+    const insertPayload: Record<string, unknown> = {
+      titulo: tituloFinal,
+      status: "rascunho",
+      briefing:
+        engineEscolhida === "v2"
+          ? {
+              ideia_central: ideia.trim(),
+              idea: ideia.trim(),
+              qa: [],
+              decisoes_autor: decisoesAutor.map((texto) => ({
+                texto,
+                em: new Date().toISOString(),
+              })),
+            }
+          : { ideia_central: ideia.trim(), idea: ideia.trim(), qa: [] },
+    };
+    if (engineEscolhida === "v2" && contratoSel) {
+      insertPayload.engine_mode = "v2";
+      insertPayload.skill_escrita = SKILL_V1_MAP[contratoSel.id];
+      insertPayload.total_capitulos = totalCapitulos;
+    }
     const { data, error } = await supabase
       .from("projects")
-      .insert({
-        titulo: tituloFinal,
-        status: "rascunho",
-        briefing: { ideia_central: ideia.trim(), idea: ideia.trim(), qa: [] },
-      })
+      .insert(insertPayload)
       .select()
       .single();
     if (error) {
@@ -214,9 +516,14 @@ export default function NovoProjeto() {
     }
     setProjectId(data.id);
     setParams({ projeto: data.id }, { replace: true });
-    setFase("entrevista");
     setIniciando(false);
-    await agendarEntrevista(data.id);
+    if (engineEscolhida === "v2" && contratoSel) {
+      setFase("canario");
+      await gerarCanario(data.id, contratoSel.id);
+    } else {
+      setFase("entrevista");
+      await agendarEntrevista(data.id);
+    }
   }
 
   async function responder() {
@@ -259,6 +566,13 @@ export default function NovoProjeto() {
 
   // ----- FASE 1: ideia única -----
   if (fase === "ideia") {
+    const contratoSel = CONTRATOS.find((c) => c.id === skillEscolhida);
+    const { erro: erroCapitulos, palavras: palavrasEstimadas } = validarCapitulos(
+      totalCapitulos,
+      contratoSel
+    );
+    const avisos = contratoSel ? avisosContrato(contratoSel) : [];
+    const v2Bloqueado = engineEscolhida === "v2" && (!contratoSel || !!erroCapitulos);
     return (
       <div className="mx-auto max-w-2xl space-y-6">
         <button
@@ -303,20 +617,207 @@ export default function NovoProjeto() {
                   placeholder="Ex.: Numa vila costeira, a faroleira descobre que a luz do farol esconde um código que prevê naufrágios — e alguém quer apagá-la."
                 />
               </div>
+
+              <div className="space-y-2">
+                <Label>Engine de escrita</Label>
+                <EscolhaEngine valor={engineEscolhida} onChange={setEngineEscolhida} />
+              </div>
+
+              {engineEscolhida === "v2" && (
+                <div className="space-y-5 rounded-lg border border-dashed p-4">
+                  <ComparadorEstilos
+                    selecionavel
+                    selecionado={skillEscolhida}
+                    onSelecionar={setSkillEscolhida}
+                  />
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="capitulos">Capítulos previstos</Label>
+                    <Input
+                      id="capitulos"
+                      type="number"
+                      min={1}
+                      value={totalCapitulos}
+                      onChange={(e) => setTotalCapitulos(Number(e.target.value) || 0)}
+                      className="max-w-[10rem]"
+                    />
+                    {contratoSel && !erroCapitulos && (
+                      <p className="text-xs text-muted-foreground">
+                        ≈ {Math.round((palavrasEstimadas ?? 0) / 1000)} mil palavras no total
+                        (capítulos × alvo da skill).
+                      </p>
+                    )}
+                    {erroCapitulos && <p className="text-xs text-destructive">{erroCapitulos}</p>}
+                    {contratoSel &&
+                      avisos.map((a, i) => (
+                        <p
+                          key={i}
+                          className="text-xs text-amber-700 dark:text-amber-400"
+                        >
+                          ⚠ {a}
+                        </p>
+                      ))}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>Decisões do autor (opcional)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Instruções suas que valem acima do perfil do livro (camada 3 do
+                      compilador).
+                    </p>
+                    <div className="flex gap-2">
+                      <Input
+                        value={novaDecisao}
+                        onChange={(e) => setNovaDecisao(e.target.value)}
+                        placeholder="Ex.: sem cenas de violência gráfica"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            adicionarDecisao();
+                          }
+                        }}
+                      />
+                      <Button type="button" variant="outline" size="icon" onClick={adicionarDecisao}>
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    {!!decisoesAutor.length && (
+                      <ul className="space-y-1.5">
+                        {decisoesAutor.map((d, i) => (
+                          <li
+                            key={i}
+                            className="flex items-center justify-between gap-2 rounded-md border px-3 py-1.5 text-sm"
+                          >
+                            <span>{d}</span>
+                            <button
+                              type="button"
+                              onClick={() => removerDecisao(i)}
+                              className="text-muted-foreground hover:text-destructive"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-end">
-                <Button type="submit" size="lg" disabled={iniciando}>
+                <Button type="submit" size="lg" disabled={iniciando || v2Bloqueado}>
                   {iniciando ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Wand2 className="h-4 w-4" />
                   )}
-                  Começar entrevista
+                  {engineEscolhida === "v2" ? "Gerar canário de voz" : "Começar entrevista"}
                 </Button>
               </div>
             </form>
           </CardContent>
         </Card>
-        <ComparadorEstilos />
+        {engineEscolhida === "v1" && <ComparadorEstilos />}
+      </div>
+    );
+  }
+
+  // ----- FASE 1.5: canário de voz (só Engine V2) -----
+  if (fase === "canario") {
+    const contratoAtual = CONTRATOS.find((c) => c.id === skillEscolhida);
+    return (
+      <div className="mx-auto max-w-2xl space-y-6">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Canário de voz</h1>
+          <p className="mt-1 text-muted-foreground">
+            Uma cena curta nesta skill, para você aprovar a voz antes da entrevista.
+          </p>
+        </div>
+
+        {trocandoSkill ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xl">Escolha outra skill</CardTitle>
+              <CardDescription>Gera um novo canário com a skill escolhida.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <ComparadorEstilos
+                selecionavel
+                selecionado={skillEscolhida}
+                onSelecionar={setSkillEscolhida}
+              />
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setTrocandoSkill(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={() => {
+                    setTrocandoSkill(false);
+                    setCanarioJobId(null);
+                    if (projectId && skillEscolhida) gerarCanario(projectId, skillEscolhida);
+                  }}
+                  disabled={!skillEscolhida || gerandoCanario}
+                >
+                  {gerandoCanario ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Wand2 className="h-4 w-4" />
+                  )}
+                  Gerar canário de voz
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : canarioErro ? (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
+              <p className="text-sm text-destructive">{canarioErro}</p>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => projectId && skillEscolhida && gerarCanario(projectId, skillEscolhida)}
+                >
+                  Tentar novamente
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setTrocandoSkill(true)}>
+                  Trocar skill
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : canarioTexto ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xl">
+                Cena de amostra — {contratoAtual?.nome ?? skillEscolhida}
+              </CardTitle>
+              <CardDescription>Leia e diga se é a voz do seu livro.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="max-h-96 overflow-y-auto rounded-md border bg-muted/20 p-4">
+                <p className="whitespace-pre-wrap font-serif text-sm leading-relaxed">
+                  {canarioTexto}
+                </p>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button variant="outline" onClick={() => setTrocandoSkill(true)}>
+                  Trocar skill
+                </Button>
+                <Button onClick={aprovarCanario}>
+                  <Check className="h-4 w-4" /> Aprovar esta voz
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
+              <Loader2 className="h-7 w-7 animate-spin text-primary" />
+              <p>Gerando a cena de amostra…</p>
+            </CardContent>
+          </Card>
+        )}
       </div>
     );
   }
