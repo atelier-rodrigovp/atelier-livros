@@ -4,6 +4,7 @@
 // no futuro sem tocar o núcleo (decisão D3).
 
 import { spawn } from "node:child_process";
+import { LimiteMaxError, limiteMaxRetryAt } from "../limite-max.js";
 import type { ClasseCapacidade, Papel } from "./tipos.js";
 
 export interface ChamadaModelo {
@@ -35,6 +36,20 @@ export class ErroProvedor extends Error {
   ) {
     super(mensagem);
   }
+}
+
+/**
+ * Classifica uma saída de erro do claude CLI: limite do plano Max vira
+ * LimiteMaxError (o loop do worker pausa com retry_at SEM contar tentativa —
+ * antes virava PROVEDOR_FALHOU genérico e o recuperador re-enfileirava em
+ * loop quente até o reset). Qualquer outro erro vira ErroProvedor. Pura/testável.
+ */
+export function classificarErroCli(mensagem: string, detalhe?: unknown): Error {
+  const retryAt = limiteMaxRetryAt(mensagem);
+  if (retryAt) {
+    return new LimiteMaxError(`claude CLI: ${mensagem.slice(0, 200)}`, retryAt);
+  }
+  return new ErroProvedor("PROVEDOR_FALHOU", mensagem, detalhe);
 }
 
 /**
@@ -81,7 +96,7 @@ export class ProvedorClaudeCli implements ProvedorModelo {
       throw new ErroProvedor("PROVEDOR_TIMEOUT", `claude CLI: ${r.err}`);
     }
     if (r.code !== 0) {
-      throw new ErroProvedor("PROVEDOR_FALHOU", `claude CLI rc=${r.code}: ${(r.err || r.out).slice(0, 400)}`, { code: r.code });
+      throw classificarErroCli(`claude CLI rc=${r.code}: ${(r.err || r.out).slice(0, 400)}`, { code: r.code });
     }
     const texto = r.out.trim();
     if (!texto) throw new ErroProvedor("PROVEDOR_SAIDA_VAZIA", "claude CLI retornou saída vazia");
@@ -95,7 +110,7 @@ export class ProvedorClaudeCli implements ProvedorModelo {
       };
       if (typeof env.result === "string") {
         if (env.is_error) {
-          throw new ErroProvedor("PROVEDOR_FALHOU", `claude CLI is_error (${env.subtype ?? "?"}): ${env.result.slice(0, 400)}`, env);
+          throw classificarErroCli(`claude CLI is_error (${env.subtype ?? "?"}): ${env.result.slice(0, 400)}`, env);
         }
         return {
           texto: env.result,
@@ -105,7 +120,7 @@ export class ProvedorClaudeCli implements ProvedorModelo {
         };
       }
     } catch (e) {
-      if (e instanceof ErroProvedor) throw e;
+      if (e instanceof ErroProvedor || e instanceof LimiteMaxError) throw e;
       // stdout não era o envelope JSON — trata como texto cru (versões antigas do CLI)
     }
     return { texto };

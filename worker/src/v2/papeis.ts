@@ -70,6 +70,9 @@ export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPa
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await e.gravador.falharRun(runId, { codigo: "PROVEDOR_FALHOU", classe: "infra", mensagem: msg });
+      // Limite do plano Max: NÃO é falha do papel — atravessa sem retry técnico
+      // (retry local não ajuda; o loop do worker pausa com retry_at sem contar tentativa).
+      if ((err as Error)?.name === "LimiteMaxError") throw err;
       if (tentativa === max) {
         throw new ErroEngine({ codigo: "PROVEDOR_FALHOU", classe: "infra", mensagem: `papel ${e.papel} falhou após ${max} tentativas: ${msg}` });
       }
