@@ -117,13 +117,25 @@ describe("validarSpec — anti-ghostwriting", () => {
     expect(r.erros.join()).toContain("palavras");
   });
 
-  it("aforismo pronto num campo reprova", () => {
-    const motivos = sinaisGhostwriting("virada", "Ela entende que a memória é uma dívida que ninguém escolhe pagar.");
-    expect(motivos.length).toBeGreaterThan(0);
+  it("aforismo pronto num campo vira AVISO (detector não decide sozinho), não bloqueio", () => {
+    const s = sinaisGhostwriting("virada", "Ela entende que a memória é uma dívida que ninguém escolhe pagar.");
+    expect(s.bloqueantes).toEqual([]);
+    expect(s.avisos.length).toBeGreaterThan(0);
   });
 
   it("apontamento seco não dispara falso positivo", () => {
-    const motivos = sinaisGhostwriting("acao_fisica", "ela fotografa o livro de registros e esconde o celular no casaco");
-    expect(motivos).toEqual([]);
+    const s = sinaisGhostwriting("acao_fisica", "ela fotografa o livro de registros e esconde o celular no casaco");
+    expect(s.bloqueantes).toEqual([]);
+    expect(s.avisos).toEqual([]);
+  });
+
+  // Caso real do canário hoover: falso positivo de personificação num objetivo com
+  // agente humano travava a ficha em loop determinístico (3 tentativas idênticas).
+  it("falso positivo de personificação em objetivo NÃO bloqueia a ficha", () => {
+    const f = fichaValida();
+    f.objetivo = "Assumir o plantão da paciente em coma cumprindo a rotina de admissão sem chamar atenção sobre si";
+    const r = validarSpec(f, contratoBase);
+    expect(r.ok).toBe(true);
+    expect(r.avisos.join()).toContain("personificação");
   });
 });

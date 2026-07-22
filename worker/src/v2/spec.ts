@@ -31,38 +31,48 @@ function palavras(s: string): number {
   return s.split(/\s+/).filter(Boolean).length;
 }
 
-/** Sinais de prosa pronta num valor de campo da ficha. Retorna lista de motivos. */
-export function sinaisGhostwriting(campo: string, valor: string): string[] {
-  const motivos: string[] = [];
+export interface SinaisGhostwriting {
+  /** Ghostwriting direto (diálogo/frase/pensamento redigidos, campo longo) — bloqueia a ficha. */
+  bloqueantes: string[];
+  /** Ornamento apontado por DETECTOR (metáfora/gnômico/personificação) — sinal, nunca decide sozinho. */
+  avisos: string[];
+}
+
+/** Sinais de prosa pronta num valor de campo da ficha. */
+export function sinaisGhostwriting(campo: string, valor: string): SinaisGhostwriting {
+  const bloqueantes: string[] = [];
+  const avisos: string[] = [];
   const v = valor.trim();
-  if (!v) return motivos;
+  if (!v) return { bloqueantes, avisos };
 
   if (palavras(v) > MAX_PALAVRAS_CAMPO) {
-    motivos.push(`${campo}: ${palavras(v)} palavras (máx ${MAX_PALAVRAS_CAMPO}) — ficha não redige, aponta`);
+    bloqueantes.push(`${campo}: ${palavras(v)} palavras (máx ${MAX_PALAVRAS_CAMPO}) — ficha não redige, aponta`);
   }
   // Diálogo pronto: travessão de fala ou fala entre aspas com verbo dicendi.
   if (/(^|\n)\s*—\s*[A-ZÁÉÍÓÚÂÊÔÃÕa-z]/.test(v) || /["“][^"”]{12,}["”]\s*,?\s*(disse|falou|perguntou|respondeu|sussurrou|gritou)/i.test(v)) {
-    motivos.push(`${campo}: contém diálogo redigido`);
+    bloqueantes.push(`${campo}: contém diálogo redigido`);
   }
   // Frase de abertura/encerramento ditada.
   if (/\b(abre|abrir|come[çc]a|comece|termina|encerra|feche|fecha)\b[^.]{0,40}\b(com a frase|com a linha|com o par[áa]grafo|dizendo)\b/i.test(v) || /["“][^"”]{25,}["”]/.test(v)) {
-    motivos.push(`${campo}: dita frase pronta (abertura/encerramento/citação longa)`);
+    bloqueantes.push(`${campo}: dita frase pronta (abertura/encerramento/citação longa)`);
   }
   // Pensamento/sensação redigidos literariamente (1ª pessoa dramatizada em ficha).
   if (/\b(ela|ele)\s+(pensa|sente)\s*:\s*["“]?[a-záéíóúâêôãõ]/i.test(v) || /\bpensamento\s*:\s*["“]/i.test(v)) {
-    motivos.push(`${campo}: formula pensamento/sensação redigidos`);
+    bloqueantes.push(`${campo}: formula pensamento/sensação redigidos`);
   }
-  // Ornamento literário: metáfora elaborada, gnômico, personificação — ficha não decora.
+  // Ornamento literário apontado por DETECTOR: AVISO, não bloqueio. A regra interina
+  // do adendo ("o número do detector nunca confirma violação sozinho") vale também
+  // aqui — caso real: personificação flagrada em "cumprindo a rotina de admissão sem
+  // chamar atenção sobre si" (agente humano) travava a ficha em loop determinístico.
   // Desdobra verbo de cognição ("ela entende que <máxima>") para pegar máxima embutida.
-  // Erros citam o TRECHO detectado: o retry do papel precisa saber o que remover.
   const desdobrado = v.replace(/\b(ela|ele|[A-ZÁÉÍÓÚ]\w+)\s+(entende|percebe|sabe|descobre|conclui|aprende)\s+que\s+(\p{L})/giu, (_m, _s, _v, l: string) => String(l).toUpperCase());
   const met = contarMetaforaElaborada(v);
-  if (met.n > 0) motivos.push(`${campo}: metáfora pronta — remova/troque por fato seco: ${JSON.stringify(met.exemplos[0] ?? v.slice(0, 60))}`);
+  if (met.n > 0) avisos.push(`${campo}: possível metáfora pronta — prefira fato seco: ${JSON.stringify(met.exemplos[0] ?? v.slice(0, 60))}`);
   const gno = contarGnomico(v).n > 0 ? contarGnomico(v) : contarGnomico(desdobrado);
-  if (gno.n > 0) motivos.push(`${campo}: aforismo/máxima pronta — remova: ${JSON.stringify(gno.exemplos[0] ?? "")}`);
+  if (gno.n > 0) avisos.push(`${campo}: possível aforismo/máxima pronta: ${JSON.stringify(gno.exemplos[0] ?? "")}`);
   const per = contarPersonificacao(v);
-  if (per.n > 0) motivos.push(`${campo}: personificação de abstração — remova: ${JSON.stringify(per.exemplos[0] ?? "")}`);
-  return motivos;
+  if (per.n > 0) avisos.push(`${campo}: possível personificação de abstração: ${JSON.stringify(per.exemplos[0] ?? "")}`);
+  return { bloqueantes, avisos };
 }
 
 /** Valida a ficha contra o schema e o contrato da skill. */
@@ -111,7 +121,9 @@ export function validarSpec(spec: SceneSpec, contrato: SkillContract): Resultado
     ...Object.entries(spec.campos_skill ?? {}).map(([k, v]) => [`campos_skill.${k}`, v] as [string, string]),
   ];
   for (const [campo, valor] of valoresTexto) {
-    for (const motivo of sinaisGhostwriting(campo, valor)) erros.push(motivo);
+    const s = sinaisGhostwriting(campo, valor);
+    erros.push(...s.bloqueantes);
+    avisos.push(...s.avisos);
   }
 
   // Coerência mínima de tempo quando a skill tem temporalidade de relógio.

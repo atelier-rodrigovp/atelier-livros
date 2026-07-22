@@ -229,8 +229,10 @@ describe("escreverCapitulo — caminho feliz", () => {
 });
 
 describe("escreverCapitulo — retry técnico da ficha", () => {
-  it("ficha com aforismo falha no parse; retry com ficha corrigida segue até aprovado", async () => {
-    const fichaRuim = { ...ficha(), virada: "Ela entende que a memória é uma dívida que ninguém escolhe pagar." };
+  it("ficha com diálogo redigido falha no parse; retry com ficha corrigida segue até aprovado", async () => {
+    // Ghostwriting DIRETO (diálogo redigido) segue bloqueante; ornamento por
+    // detector (aforismo/personificação) virou aviso — ver spec.test.ts.
+    const fichaRuim = { ...ficha(), virada: "— Você não devia estar aqui — disse o arquivista, fechando a porta." };
     provedor.enfileirar("arquiteto_cena", JSON.stringify(fichaRuim));
     provedor.enfileirar("arquiteto_cena", "```json\n" + JSON.stringify(ficha()) + "\n```"); // cerca aceita
     provedor.enfileirar("contextualizador", CTX_OK);
