@@ -42,10 +42,19 @@ export function validarParecer(obj: unknown): Parecer {
     if (typeof x?.sinal !== "string" || !DISPOSICOES.has(String(x?.disposicao)) || typeof x?.evidencia !== "string") {
       throw new Error(`sinal indisposto ou inválido: ${JSON.stringify(s).slice(0, 120)}`);
     }
-    // Auditabilidade (adendo 2): violacao_confirmada em sinal de CONTAGEM (valor
-    // numérico > 0) exige as ocorrências citadas uma a uma; disposição parcial
-    // exige a conta fechada (citadas + falsos_positivos = valor medido).
-    if (x.disposicao === "violacao_confirmada" && typeof x.valor === "number" && x.valor > 0) {
+    // Auditabilidade (adendo 2): violacao_confirmada em sinal de CONTAGEM DE
+    // OCORRÊNCIAS (valor numérico > 0) exige as ocorrências citadas uma a uma;
+    // disposição parcial exige a conta fechada (citadas + falsos_positivos = valor).
+    // Sinais ESCALARES/agregados (palavras totais, percentuais, comprimento de run)
+    // NÃO têm "ocorrências" para citar — exigir citação deles é armadilha de parse
+    // (o canário romantasy queimou tentativas com o revisor dispondo "palavras" 2263
+    // como violação). A auditabilidade segue integral para TODO detector de ocorrência.
+    if (
+      x.disposicao === "violacao_confirmada" &&
+      typeof x.valor === "number" &&
+      x.valor > 0 &&
+      !ehSinalEscalar(String(x.sinal))
+    ) {
       const citadas = x.ocorrencias_citadas;
       if (!Array.isArray(citadas) || citadas.length === 0) {
         throw new Error(
@@ -92,6 +101,26 @@ export function normalizarNomeSinal(s: string): string {
     .replace(/\([^)]*\)/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+/**
+ * Sinal ESCALAR/agregado: mede uma grandeza do capítulo inteiro (contagem total
+ * de palavras, percentual, comprimento de sequência), não um padrão com
+ * ocorrências citáveis no texto. Distingue-os dos detectores de OCORRÊNCIA
+ * (gnômico, sanfona, personificação, metáfora, tiques de cadência), para os
+ * quais a exigência de citação do adendo continua valendo. Conservador: na
+ * dúvida devolve false (mantém a auditabilidade — fail-closed).
+ */
+export function ehSinalEscalar(nome: string): boolean {
+  const n = normalizarNomeSinal(nome);
+  return (
+    n === "palavras" ||
+    n.includes("pct") ||
+    n.includes("percent") ||
+    n.includes("declarativas") ||
+    n.includes("dialogo") ||
+    n.includes("interioridade")
+  );
 }
 
 /**

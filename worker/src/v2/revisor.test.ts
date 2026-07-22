@@ -97,6 +97,23 @@ describe("validarParecer — auditabilidade dos sinais de contagem", () => {
       validarParecer(base([{ sinal: "sanfona", valor: 13, disposicao: "falso_positivo", evidencia: "descrição concreta por acúmulo, não reformulação" }]))
     ).not.toThrow();
   });
+
+  // Caso real do canário romantasy: o revisor dispôs "palavras" 2263 como
+  // violacao_confirmada e o parse exigiu "cite as ocorrências" — mas palavras é
+  // um escalar (contagem total), não tem ocorrências. Isso queimava tentativas.
+  it("sinal ESCALAR (palavras/percentual/run) como violacao_confirmada NÃO exige citações", () => {
+    for (const sinal of ["palavras", "declarativas_pct", "dialogo_pct", "interioridade_run"]) {
+      expect(() =>
+        validarParecer(base([{ sinal, valor: 2263, disposicao: "violacao_confirmada", evidencia: "abaixo do piso / fora do perfil" }]))
+      ).not.toThrow();
+    }
+  });
+
+  it("detector de OCORRÊNCIA (incl. tique de cadência) mantém a exigência de citação", () => {
+    expect(() =>
+      validarParecer(base([{ sinal: "cadencia.staccato (frases curtas)", valor: 42, disposicao: "violacao_confirmada", evidencia: "e" }]))
+    ).toThrow(/ocorrencias_citadas/);
+  });
 });
 
 // Parecer incompleto = falha de PROTOCOLO do revisor → retry técnico no parse
