@@ -149,7 +149,41 @@ o item não cumprido até a calibração. *Este relatório não decide isso.* No
 o dan-brown reprovando sob 1.0.0, o critério estrito dá **0/3 plenos**, não 2/3 —
 a questão não é margem, é a régua descalibrada e o defeito real coexistindo.
 
-## 7. Redução de escopo declarada
+## 6-bis. Leitura cega — qualidade independente e o defeito de fundo
+
+As três aberturas (capítulo 1 de cada canário) foram avaliadas **às cegas** por
+um leitor fresco, sem qualquer informação de gênero, autor ou origem, e sem saber
+que os três vinham do mesmo sistema. É a única evidência de qualidade que não
+passa pelos detectores do próprio pipeline.
+
+**Notas cegas:** romantasy 9,0 · hoover 8,5 · dan-brown 7,0. Dois dos três
+"viraria a página com força"; o dan-brown foi o mais frio ("planta baixa de
+suspense, não cena") — o que **converge com a reprova por excesso de dedução**
+que o revisor apontou de forma independente (§6). Sinais que concordam.
+
+**O achado central — e ele responde à queixa que originou este trabalho
+("tiques saem repetidos").** O leitor cego concluiu: *"na superfície, três vozes
+distintas; no fundo, a mesma inteligência."*
+
+- **A superfície está sólida.** POV, tempo verbal, gênero e o léxico de cada
+  domínio (clorexidina/Glasgow no hoover; isóbata/velino no romantasy;
+  filigrana/ferrogálica no dan-brown) são convincentes e bem separados —
+  "nenhum lê como cenário trocado por cima do mesmo parágrafo". O sistema
+  **controla registro de superfície**, e isso é uma conquista real.
+
+- **A retórica de revelação NÃO diverge.** Uma assinatura estrutural atravessa os
+  três, intacta apesar da troca de gênero, POV e tempo verbal: (1) o fecho por
+  antítese *"não era A, era B"*; (2) o aparte que universaliza com *"a gente"*;
+  (3) o corpo que age antes da vontade; (4) a veterania cronometrada ("dezoito
+  anos", "onze anos", "dez mil vezes"); (5) a obsessão de contar segundos.
+
+Isto reformula o problema original com precisão: os tiques de superfície **por
+capítulo** estão sob controle (é o que os detectores + revisor medem e corrigem).
+O que ainda trai a origem comum é a **cadência de como cada voz revela e fecha** —
+e essa é uma propriedade **entre livros**, que nenhum detector atual mede (todos
+operam por capítulo). É a próxima fronteira real da qualidade, maior que a
+calibração de cotas: exigiria um sinal **cross-book** de divergência de retórica.
+Registrado como achado; fora do escopo desta entrega.
 
 - **Fusão de capítulos** no editor estrutural: **não implementada** (só corte e
   reordenação).
@@ -191,8 +225,7 @@ que só emerge rodando prosa real, capítulo após capítulo.
 
 - ✅ romantasy 2/2 concluído (`aprovado_com_excecao` sob 1.0.0)
 - ✅ dan-brown revalidado sob 1.0.0 — capítulo 1 **reprova** (defeito real; ver §6)
-- ⏳ Laboratório 1.0.0: identidade e distinguibilidade das vozes
-- ⏳ leitura cega das 3 prosas
+- ✅ leitura cega das 3 prosas (= teste de distinguibilidade; ver §6-bis) — notas 9,0/8,5/7,0, superfície distinta, retórica de revelação compartilhada
 - ⏳ restauração do ambiente: worker (task `AtelierWorkerFechamento` a
   desinstalar, `AtelierWorker` do autor a reabilitar), jobs V1 pausados
   (`83caefa2`, `cbf5ee19`), projetos-canário `producao_pausada`
