@@ -39,6 +39,26 @@ export class ErroProvedor extends Error {
 }
 
 /**
+ * Extrai a mensagem de erro REAL da saída do claude CLI. Com `--output-format
+ * json`, mesmo um `rc != 0` traz um envelope `{...,"result":"..."}` no stdout, e
+ * o `result` (que carrega "You've hit your session limit") vem DEPOIS de `usage`
+ * — um slice ingênuo do stdout bruto o perde e o throttle escapa da
+ * classificação (gap do rc=1: 2 tentativas de job queimadas no canário romantasy).
+ * Preferimos o `result` parseado; caímos no bruto só quando não há envelope.
+ */
+export function extrairMensagemCli(err: string, out: string): string {
+  if (out && out.trim()) {
+    try {
+      const env = JSON.parse(out.trim()) as { result?: unknown };
+      if (typeof env.result === "string" && env.result.trim()) return env.result;
+    } catch {
+      /* stdout não era envelope JSON — usa o bruto */
+    }
+  }
+  return (err || out || "").trim();
+}
+
+/**
  * Classifica uma saída de erro do claude CLI: limite do plano Max vira
  * LimiteMaxError (o loop do worker pausa com retry_at SEM contar tentativa —
  * antes virava PROVEDOR_FALHOU genérico e o recuperador re-enfileirava em
@@ -96,7 +116,8 @@ export class ProvedorClaudeCli implements ProvedorModelo {
       throw new ErroProvedor("PROVEDOR_TIMEOUT", `claude CLI: ${r.err}`);
     }
     if (r.code !== 0) {
-      throw classificarErroCli(`claude CLI rc=${r.code}: ${(r.err || r.out).slice(0, 400)}`, { code: r.code });
+      const msg = extrairMensagemCli(r.err, r.out);
+      throw classificarErroCli(`claude CLI rc=${r.code}: ${msg.slice(0, 400)}`, { code: r.code });
     }
     const texto = r.out.trim();
     if (!texto) throw new ErroProvedor("PROVEDOR_SAIDA_VAZIA", "claude CLI retornou saída vazia");
