@@ -86,33 +86,68 @@ mostram — e é ela que também produz o resultado do §6.
 **Fato, com evidência hash-bound:** sob a régua 1.0.0, **todo capítulo que passou
 saiu como `aprovado_com_excecao`** — nenhum pleno.
 
-| Canário | Capítulo | Veredito | Review |
+| Canário | Capítulo | Veredito sob 1.0.0 | Review |
 |---|---|---|---|
-| hoover | 1 | `aprovado_com_excecao` | `430c0b1e` → `97225c8c` |
+| hoover | 1 | `aprovado_com_excecao` (voz de acúmulo) | `430c0b1e` → `97225c8c` |
 | hoover | 2 | `aprovado_com_excecao` | `17e92d70` → `8705217a` |
 | romantasy | 1 | `aprovado_com_excecao` | `79fe26b2` |
-| romantasy | 2 | ⏳ | ⏳ |
-| dan-brown | 1 e 2 | `aprovado` **pleno** — mas sob a régua **1.1.0 rejeitada** | `5cf0b9b1`, `a6dd10f6` |
+| romantasy | 2 | `aprovado_com_excecao` | `9d6f59b3` |
+| dan-brown | 1 | **`reprovado`** — defeito real (não convergiu em 17 runs) | `78204d99` |
+| dan-brown | 2 | `aprovado` sob a régua **1.1.0 rejeitada** (não re-revisado) | `a6dd10f6` |
 
-**Causa raiz.** As exceções não são complacência do revisor: são cotas
-incompatíveis com as vozes. No hoover, a cota `sanfona = 1` enfrenta um detector
-cuja precisão nessa voz é de ~0–15% (documentado em
-`investigacao-sanfona-hoover.md`) — das 11 ocorrências do capítulo 1, **10 eram
-enumeração descritiva concreta**, citadas uma a uma pelo revisor. Cumprir a cota
-ao pé da letra exigiria descaracterizar a voz que o próprio contrato manda
-proteger.
+> As aprovações plenas do dan-brown (`5cf0b9b1`, `a6dd10f6`) eram sob a **1.1.0
+> rejeitada**. Revalidado sob 1.0.0, o capítulo 1 — texto idêntico — **reprova**.
 
-Ou seja: **a 1.0.0 é honesta mas descalibrada, e a 1.1.0 era calibrada pelo
-método errado.** O pipeline, no meio disso, está fazendo exatamente o que deve —
-aprovando com exceção auditada em vez de mentir em qualquer direção.
+**Causa raiz — DOIS motivos opostos, ambos honestos.** As exceções e a reprova
+não são complacência nem rigidez cega do revisor:
+
+- **hoover e romantasy (vozes de ACÚMULO): a cota é apertada demais porque o
+  detector é impreciso.** A cota `sanfona = 1` enfrenta um detector cuja precisão
+  nessa voz é ~0–15% (`investigacao-sanfona-hoover.md`) — das 11 ocorrências do
+  capítulo 1 do hoover, **10 eram enumeração descritiva concreta**, citadas uma a
+  uma. Cumprir a cota ao pé da letra descaracterizaria a voz que o contrato manda
+  proteger. → `aprovado_com_excecao` honesto.
+
+- **dan-brown (voz de TRANSPARÊNCIA): a cota está CERTA e o texto tinha um defeito
+  real.** O revisor confirmou `interioridade_run = 3` (regra contratual 1–2) com
+  as ocorrências citadas: blocos de 3–4 frases de dedução interior sem estímulo
+  físico — acúmulo que uma prosa "transparente" não deve ter. A **1.1.0 mascarava
+  esse defeito** ao afrouxar a cota. → `reprovado` correto. (O loop de correção
+  não convergiu em 17 runs: limitação do escritor em reduzir o acúmulo, não da
+  régua.)
+
+Ou seja: **a 1.0.0 não é "burra em geral" — é apertada demais onde o _detector_ é
+impreciso (vozes de acúmulo) e corretamente rígida onde não é (transparência). A
+1.1.0 era errada dos dois lados: relaxava o falso positivo do hoover E o defeito
+real do dan-brown.** O pipeline, no meio disso, faz o certo em ambos os casos —
+aprova com exceção auditada onde é voz, reprova com citação onde é defeito.
 
 **Caminho (não executado — exige o processo separado que o autor definiu):**
-calibrar com corpus rotulado, medir precisão/recall por detector e por voz,
-validar em holdout. Só então promover cotas a bloqueio duro por skill.
+construir corpus rotulado à mão, medir precisão/recall por detector e por voz,
+recalibrar cotas com número medido (não chutado), validar em holdout. Só então
+promover cotas a bloqueio duro por skill. O corpus é pré-requisito de tudo —
+mexer no detector sem ele é repetir o erro da 1.1.0 (o dan-brown é a prova).
+
+**Opção futura, dependente dos resultados da calibração — sinal semântico
+INFORMATIVO.** Primeiro candidato a atacar a imprecisão do detector nas vozes de
+acúmulo: um sinal que mede se segmentos consecutivos *acrescentam informação
+nova* (via similaridade de embeddings — determinística) para distinguir
+enumeração-que-avança de reformulação-que-repete. **Não decide nada, não muda
+cota, não bloqueia** — só sussurra ao revisor "destes 11, estes 3 parecem
+repetição real", reduzindo o trabalho de dispor falsos positivos (economia de
+tokens/janela, que é o gargalo). Preserva o congelamento da régua (não altera o
+que aprova) e o determinismo (base do hash-binding). **Pré-condições antes de
+implementar:** (1) corpus rotulado existente, para medir se o sussurro é
+confiável; (2) embeddings determinísticos viáveis no ambiente (a máquina Windows
+tem histórico de quebrar dependência nativa); (3) validação de que o sinal reduz
+o falso positivo sem introduzir novos. Registrado como a **primeira tarefa
+concreta** do processo de calibração, não do fechamento.
 
 **Decisão do autor:** aceitar `aprovado_com_excecao` com citação auditada como
 equivalente a pleno para efeito do 3/3, ou manter o critério estrito e declarar
-o item não cumprido até a calibração. *Este relatório não decide isso.*
+o item não cumprido até a calibração. *Este relatório não decide isso.* Nota: com
+o dan-brown reprovando sob 1.0.0, o critério estrito dá **0/3 plenos**, não 2/3 —
+a questão não é margem, é a régua descalibrada e o defeito real coexistindo.
 
 ## 7. Redução de escopo declarada
 
@@ -137,18 +172,28 @@ Correção sugerida: manter a melhor versão aprovada quando a reescrita da
 meta-nota falha. **Não implementado nesta entrega** — muda semântica de estado e
 merece decisão sua.
 
+Além dos 4 fixes da §2, mais 4 fixes de protocolo emergiram dos canários (todos
+com teste do caso literal, régua intocada): casamento tolerante do nome do sinal
+(`7accb2f`), auditabilidade só para detector de ocorrência e não escalar
+(`c1569f0`), throttle do Max no `rc=1` (`8b3ecbf`), e o predicado de disposição
+completa. **Oito fixes no total, nenhum de julgamento literário — todos de
+comunicação entre os papéis.** É o resultado mais informativo do exercício: o
+núcleo editorial (detectores, cotas, rubrica) não precisou de um ajuste; o que
+faltava era a plumbing que faz os papéis conversarem sem se atropelar — defeito
+que só emerge rodando prosa real, capítulo após capítulo.
+
 ## 9. Testes
 
-`npm run typecheck` limpo e **652 testes passando** (3 skipped) no worker no
+`npm run typecheck` limpo e **657 testes passando** (3 skipped) no worker no
 último ciclo commitado. Frontend: 700 passed / 3 skipped no baseline da Fase 0.
 
 ## 10. Pendências desta entrega
 
-- ⏳ romantasy capítulo 2 + fases finais
-- ⏳ dan-brown: revalidação dos 2 capítulos sob 1.0.0 (as aprovações plenas atuais são sob a régua rejeitada)
+- ✅ romantasy 2/2 concluído (`aprovado_com_excecao` sob 1.0.0)
+- ✅ dan-brown revalidado sob 1.0.0 — capítulo 1 **reprova** (defeito real; ver §6)
 - ⏳ Laboratório 1.0.0: identidade e distinguibilidade das vozes
 - ⏳ leitura cega das 3 prosas
-- ⏳ restauração do ambiente: pausa global de escrita, jobs V1 pausados
-  (`83caefa2`, `cbf5ee19`), task `AtelierWorkerFechamento` desinstalada,
-  `AtelierWorker` reabilitada
+- ⏳ restauração do ambiente: worker (task `AtelierWorkerFechamento` a
+  desinstalar, `AtelierWorker` do autor a reabilitar), jobs V1 pausados
+  (`83caefa2`, `cbf5ee19`), projetos-canário `producao_pausada`
 - 🛑 **merge, deploy e smoke aguardam consentimento explícito do autor**
