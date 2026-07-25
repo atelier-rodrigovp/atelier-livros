@@ -16,22 +16,27 @@ rodar antes em persistência isolada (`--disco`).
 6. Toda cota candidata passou por calibração, holdout e laboratório; nenhuma
    cota foi promovida apenas por máximo/média de amostras.
 7. Laboratório cego v2 aprovado e com artefatos brutos preservados.
-8. Backup lógico do banco e cópia segura do `WORK_DIR`.
-9. Worker temporário encerrado; somente a instância principal conhecida pode
+8. Avaliação cega humana registrada e exportada, com acerto mínimo de 80%.
+9. `v2-certificar-release.ts` gerou `worker/release/engine-v2.json` e
+   `v2-verificar-release.ts` aprovou no checkout que será publicado.
+10. Backup lógico do banco e cópia segura do `WORK_DIR`.
+11. Worker temporário encerrado; somente a instância principal conhecida pode
    processar a fila.
 
 ## Ordem de publicação
 
 1. Aplicar `supabase/engine_v2.sql` no SQL Editor do Supabase.
 2. Executar as consultas de verificação abaixo.
-3. Fazer push da branch auditada e aguardar o check `CI / validar`.
-4. Confirmar que o SHA aprovado no GitHub é exatamente o SHA testado localmente.
-5. Atualizar ou substituir o draft PR #3; não misturar uma branch antiga.
-6. Fazer merge somente após novo aval do autor.
-7. Aguardar o workflow de GitHub Pages concluir no mesmo SHA.
-8. Restaurar/iniciar o worker principal no checkout publicado.
-9. Executar o smoke em projeto descartável.
-10. Somente depois do smoke considerar migração de projeto real.
+3. Gerar e revisar o certificado de release com os artefatos finais.
+4. Fazer push da branch auditada e aguardar o check `CI / validar`, incluindo o
+   gate de certificação.
+5. Confirmar que o SHA aprovado no GitHub é exatamente o SHA testado localmente.
+6. Atualizar ou substituir o draft PR #3; não misturar uma branch antiga.
+7. Fazer merge somente após novo aval do autor.
+8. Aguardar o workflow de GitHub Pages concluir no mesmo SHA.
+9. Restaurar/iniciar o worker principal no checkout publicado.
+10. Executar o smoke em projeto descartável.
+11. Somente depois do smoke considerar migração de projeto real.
 
 ## Verificação do banco
 

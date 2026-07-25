@@ -2,14 +2,14 @@
 // mostra o relatório (métricas × skill, regressões, matriz de confusão) e a
 // avaliação cega HUMANA — o gabarito só é consultado depois do palpite.
 import { useCallback, useEffect, useState } from "react";
-import { FlaskConical, Loader2, Play, RotateCw } from "lucide-react";
+import { Download, FlaskConical, Loader2, Play, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
 import type { Job } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { podeAprovarReleaseLab } from "@/lib/laboratorioV2";
+import { montarEvidenciaHumanaRelease, podeAprovarReleaseLab } from "@/lib/laboratorioV2";
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning";
 
@@ -494,6 +494,35 @@ export default function Laboratorio() {
     }
   }
 
+  function baixarEvidenciaHumana(jobId: string, progresso: ProgressoLab) {
+    const humana = progresso.lab_avaliacao_humana;
+    const cegas = progresso.lab_cegas;
+    const gabaritoPorHash = progresso.lab_gabarito;
+    const execucaoId = progresso.lab_execucao_id ?? progresso.lab_relatorio?.execucaoId;
+    if (!humana || !cegas?.length || !gabaritoPorHash || !execucaoId) {
+      toast.error("A execução não contém avaliação humana e gabarito completos.");
+      return;
+    }
+    try {
+      const evidencia = montarEvidenciaHumanaRelease({
+        jobId,
+        execucaoId,
+        humana,
+        amostras: cegas,
+        gabaritoPorHash,
+      });
+      const blob = new Blob([JSON.stringify(evidencia, null, 2) + "\n"], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `avaliacao-humana-${execucaoId}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (erro) {
+      toast.error((erro as Error).message);
+    }
+  }
+
   const atual = jobs[0];
   const pgAtual = atual ? progressoDe(atual) : undefined;
   const jobRelatorio = jobs.find((j) => j.status === "done" && progressoDe(j).lab_relatorio);
@@ -680,6 +709,17 @@ export default function Laboratorio() {
                   registrando={registrando}
                   onRegistrar={(resultado) => registrarAvaliacaoHumana(jobRelatorio.id, resultado)}
                 />
+                {pgRelatorio.lab_avaliacao_humana && (
+                  <Button
+                    className="mt-3"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => baixarEvidenciaHumana(jobRelatorio.id, pgRelatorio)}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Baixar evidência para certificação
+                  </Button>
+                )}
               </CardContent>
             </Card>
           )}

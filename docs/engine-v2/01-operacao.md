@@ -32,6 +32,12 @@ update projects set engine_mode = 'v2' where id = '<uuid>';
 ```
 `engine_mode` ausente/desconhecido → V1 byte-idêntica (fail-safe). O desvio é um único ponto (`worker/src/v2/integracao.ts`, chamado em `index.ts`).
 
+`engine_mode='v2'` **não basta para escrever**. O canário de voz e o laboratório
+podem rodar para produzir evidências, mas `criar_fundacao` e `escrever_livro`
+exigem `worker/release/engine-v2.json` válido. O worker recalcula hashes dos
+contratos, do corpus e de todo o runtime não-teste (incluindo lockfile) em cada
+verificação; mudança posterior invalida o certificado.
+
 ## Gates universais vs sinais editoriais
 
 - **Gates (bloqueiam, determinísticos):** artefato ausente, truncamento, POV estruturalmente impossível, repetição quase literal cross-capítulo, menção a conhecimento proibido da ficha, saída fora do schema, contradição factual comprovada pelo auditor, aprovação sem evidência, estado inconsistente (hash).
@@ -48,6 +54,9 @@ update projects set engine_mode = 'v2' where id = '<uuid>';
 - `worker/src/v2/lab/`: 6 cenas fixas (mesmos fatos) × N skills → amostras com sinais/gates → **avaliação cega** (o avaliador recebe só resumos dos contratos) → relatório anterior vs candidata.
 - Decisão automática: regressão de tique >30% em qualquer skill OU vazamento de POV = **rejeitar** (nunca melhorar uma skill destruindo outra); sem avaliação = pendente.
 - Rodar pela UI (página Laboratório → job `laboratorio_v2`) ou direto: o job publica relatório + amostras cegas em `jobs.progresso`.
+- Depois de registrar a leitura humana, use **Baixar evidência para
+  certificação**. O arquivo preserva palpites e gabarito vinculados aos IDs
+  anônimos da execução.
 
 ## Migração V1→V2
 
@@ -65,6 +74,27 @@ npx tsx -e "import('./src/v2/migracao.js').then(m => m.migrarProjetoV1({...}))"
 cd worker && npx tsx scripts/v2-canario.ts todos --caps 2
 ```
 Roda briefing → fundação (arquiteto_enredo, proibido semear aforismo) → fichas → contexto → escrita → gates → revisão → auditoria → aprovação, por skill, com chamadas reais. **Não cria linhas em `jobs`** (o worker V1 vivo nunca reivindica canário). Relatórios em `<WORK_DIR>/canario-v2-*/engine-v2/canario-relatorio.json` e resumo em `<WORK_DIR>/canario-v2-resumo.json`.
+
+## Certificar o release
+
+Somente depois de calibração, canários e laboratório aprovados:
+
+```powershell
+cd worker
+npx tsx scripts/v2-certificar-release.ts `
+  --canarios "<WORK_DIR>\canario-v2-resumo.json" `
+  --lab-dir "<WORK_DIR>\lab-v2\<execucao-id>" `
+  --humano "<downloads>\avaliacao-humana-<execucao-id>.json" `
+  --por "Nome do autor/revisor" `
+  --commit "<SHA Git completo>"
+
+npx tsx scripts/v2-verificar-release.ts
+```
+
+O primeiro comando rejeita exceções, hashes divergentes, menos de dois
+capítulos plenos por skill, menos de três amostras de laboratório por skill,
+regressão, vazamento, avaliação automática abaixo dos pisos ou avaliação humana
+abaixo de 80%. O segundo é o mesmo gate executado pelo CI.
 
 ## Recuperação de falhas
 

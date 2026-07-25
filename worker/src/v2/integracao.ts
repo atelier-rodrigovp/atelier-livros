@@ -30,6 +30,7 @@ import { fundirFichas, PersistenciaEstadoIsolado } from "./estrutural-staging.js
 import { executarMeta9 } from "./meta9.js";
 import { resolverTotalCapitulos } from "./total-capitulos.js";
 import { medirSinais, resumoSinais } from "./sinais.js";
+import { exigirReleaseAtual } from "./release.js";
 import { conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
 import {
   ErroEngine,
@@ -235,6 +236,7 @@ export async function executarEscritaV2(job: Job): Promise<void> {
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const skillId = MAPA_SKILL_V1_V2[skillV1] ?? skillV1;
   const contrato = carregarContrato(skillId); // skill desconhecida/contrato inválido = falha clara AQUI, antes do escritor
+  const release = exigirReleaseAtual(contrato.contrato.id);
 
   const dirProjeto = projDir(projectId);
   const { persistencia, migracaoPendente } = await criarPersistencia({ dirProjeto });
@@ -317,6 +319,7 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     engine_version: estado.engine_version,
     skill: contrato.contrato.id,
     skill_versao: contrato.contrato.versao,
+    release_commit: release.codigo_commit,
     migracao_pendente: migracaoPendente,
     fase: "ESCRITA",
     total,
@@ -648,6 +651,7 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
   }
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const contrato = carregarContrato(MAPA_SKILL_V1_V2[skillV1] ?? skillV1);
+  const release = exigirReleaseAtual(contrato.contrato.id);
   const dirProjeto = projDir(projectId);
   const { persistencia } = await criarPersistencia({ dirProjeto });
   const gravador = new Gravador({ persistencia, projectId });
@@ -683,7 +687,13 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
     dirProjeto,
     jobId: job.id,
   };
-  await atualizarProgresso(job.id, { engine: "v2", fase: "FUNDACAO", skill: contrato.contrato.id, skill_versao: contrato.contrato.versao });
+  await atualizarProgresso(job.id, {
+    engine: "v2",
+    fase: "FUNDACAO",
+    skill: contrato.contrato.id,
+    skill_versao: contrato.contrato.versao,
+    release_commit: release.codigo_commit,
+  });
   const { fundacao, runId } = await gerarFundacaoV2(depsF, {
     titulo: (proj as { titulo?: string }).titulo ?? "Sem título",
     premissa,

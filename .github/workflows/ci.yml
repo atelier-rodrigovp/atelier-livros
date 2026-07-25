@@ -48,3 +48,7 @@ jobs:
 
       - name: Build de produção
         run: npm run build
+
+      - name: Gate de release da Engine V2
+        working-directory: worker
+        run: npx tsx scripts/v2-verificar-release.ts
