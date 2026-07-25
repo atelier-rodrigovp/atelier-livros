@@ -15,6 +15,7 @@ create table if not exists projects (
   status text not null default 'rascunho', -- rascunho|fundacao|escrevendo|revisao|pronto|publicado
   briefing jsonb not null default '{}',
   skill_escrita text,                      -- skill-dan-brown | hoover-mcfadden | skill-jk-rowling | vesper-escritor-de-capitulos | skill-romantasy | null
+  engine_mode text not null default 'claude_code', -- claude_code (V1) | v2
   paginas_alvo int,
   total_capitulos int,
   piso_palavras int default 1400,

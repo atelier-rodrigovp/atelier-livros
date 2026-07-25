@@ -2,8 +2,9 @@
 // pareceres estruturados (engine_reviews) e execuções (engine_runs).
 // Honestidade: migração pendente mostra banner âmbar; nunca inventa dados.
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, RotateCw } from "lucide-react";
+import { AlertTriangle, History, Loader2, RotateCw, ShieldCheck } from "lucide-react";
 import {
+  avaliacaoMetaComprovada,
   lerEstadoV2,
   listarReviewsV2,
   listarRunsV2,
@@ -11,6 +12,8 @@ import {
   type ReviewV2,
   type RunV2,
 } from "@/lib/engineV2";
+import { cn } from "@/lib/utils";
+import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,6 +53,34 @@ const FASE_LABEL: Record<string, string> = {
   concluido: "concluído",
   bloqueado: "bloqueado",
 };
+
+const FASES = ["fundacao", "estrutura", "escrita", "revisao_final", "consolidacao", "avaliacao", "concluido"] as const;
+
+function ProgressoFases({ fase }: { fase: string }) {
+  const atual = FASES.indexOf(fase as (typeof FASES)[number]);
+  return (
+    <ol className="grid grid-cols-2 overflow-hidden rounded-lg border sm:grid-cols-4 lg:grid-cols-7" aria-label="Etapas da Engine V2">
+      {FASES.map((item, indice) => {
+        const concluida = atual >= indice || fase === "concluido";
+        const ativa = item === fase;
+        return (
+          <li
+            key={item}
+            className={cn(
+              "border-b border-r px-3 py-2 text-[11px] last:border-r-0 sm:border-b-0",
+              ativa && "bg-primary/10 text-primary",
+              concluida && !ativa && "bg-muted/30"
+            )}
+            aria-current={ativa ? "step" : undefined}
+          >
+            <span className="block font-mono text-[9px] text-muted-foreground">{String(indice + 1).padStart(2, "0")}</span>
+            <span className="font-medium">{FASE_LABEL[item]}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 const MODO_CORRECAO_LABEL: Record<string, string> = {
   cirurgico: "cirúrgico",
@@ -229,8 +260,19 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
   useEffect(() => {
     carregar();
     const timer = setInterval(carregar, 20_000);
-    return () => clearInterval(timer);
-  }, [carregar]);
+    const canal = supabase
+      .channel(`engine-v2-panel-${projectId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "engine_state", filter: `project_id=eq.${projectId}` },
+        carregar
+      )
+      .subscribe();
+    return () => {
+      clearInterval(timer);
+      supabase.removeChannel(canal);
+    };
+  }, [carregar, projectId]);
 
   if (carregando) {
     return (
@@ -269,7 +311,19 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
 
   const doc = estado.doc;
   const caps = Object.entries(doc.capitulos ?? {}).sort((a, b) => Number(a[0]) - Number(b[0]));
+  const aprovados = caps.filter(([, c]) => c.status === "aprovado").length;
+  const comExcecao = caps.filter(([, c]) => c.status === "aprovado_com_excecao").length;
+  const pendentes = caps.length - aprovados - comExcecao;
   const reviewsLivro = reviews.filter((r) => r.capitulo === null);
+  const decisaoHumana = doc.bloqueios?.find(
+    (b) => /DECISAO|HUMAN/i.test(`${b.codigo} ${b.detalhe}`)
+  );
+  const falhaRecente = runs[0]?.status === "falha" ? runs[0] : undefined;
+  const throttleRecente = falhaRecente && (
+    falhaRecente.erro?.classe === "quota" ||
+    /limit|quota|thrott|429|reset/i.test(`${falhaRecente.erro?.codigo ?? ""} ${falhaRecente.erro?.mensagem ?? ""}`)
+  );
+  const metaAtingida = avaliacaoMetaComprovada(doc.avaliacao);
   const reviewSel =
     capSel == null
       ? undefined
@@ -305,6 +359,51 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
               <span className="text-xs text-muted-foreground">· atualizado {fmtData(estado.updated_at)}</span>
             )}
           </div>
+
+          <ProgressoFases fase={doc.fase} />
+
+          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-4">
+            <div className="bg-card p-3">
+              <p className="font-mono text-xl tabular-nums">{aprovados}</p>
+              <p className="text-[11px] text-muted-foreground">aprovados plenos</p>
+            </div>
+            <div className="bg-card p-3">
+              <p className="font-mono text-xl tabular-nums">{comExcecao}</p>
+              <p className="text-[11px] text-muted-foreground">com exceção</p>
+            </div>
+            <div className="bg-card p-3">
+              <p className="font-mono text-xl tabular-nums">{pendentes}</p>
+              <p className="text-[11px] text-muted-foreground">a resolver</p>
+            </div>
+            <div className="bg-card p-3">
+              <p className="font-mono text-xl tabular-nums">{runs.length}</p>
+              <p className="text-[11px] text-muted-foreground">execuções recentes</p>
+            </div>
+          </div>
+
+          {decisaoHumana && (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" />
+              <div>
+                <p className="font-medium">Decisão autoral necessária</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {decisaoHumana.alvo}: {decisaoHumana.detalhe} Abra o parecer correspondente antes de decidir.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {throttleRecente && (
+            <div className="flex items-start gap-3 rounded-lg border bg-muted/30 p-3 text-sm">
+              <RotateCw className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-medium">Limite da IA detectado</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  O worker preserva o estado atual e retoma pelo agendador; a falha não rebaixa capítulos aprovados.
+                </p>
+              </div>
+            </div>
+          )}
 
           {caps.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nenhum capítulo registrado no estado V2 ainda.</p>
@@ -426,6 +525,42 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
         </CardContent>
       </Card>
 
+      {!!doc.reversoes_meta?.length && (
+        <Card className="border-emerald-600/30">
+          <CardHeader>
+            <div className="flex items-start gap-3">
+              <div className="rounded-full bg-emerald-600/10 p-2 text-emerald-700 dark:text-emerald-400">
+                <ShieldCheck className="h-4 w-4" />
+              </div>
+              <div>
+                <CardTitle className="text-xl">Melhor versão preservada</CardTitle>
+                <CardDescription>
+                  Tentativas piores continuam no histórico, mas não substituíram o texto aprovado.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ul className="space-y-2">
+              {[...doc.reversoes_meta].reverse().slice(0, 5).map((r, i) => (
+                <li key={`${r.capitulo}-${r.em}-${i}`} className="flex items-start gap-3 rounded-lg border p-3 text-xs">
+                  <History className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0">
+                    <p className="font-medium">
+                      Capítulo {r.capitulo}: tentativa {r.status_tentativa.replace(/_/g, " ")} revertida
+                    </p>
+                    <p className="mt-0.5 text-muted-foreground">{r.motivo}</p>
+                    <p className="mt-1 font-mono text-[10px] text-muted-foreground" title={r.text_hash_restaurado}>
+                      restaurado {hashCurto(r.text_hash_restaurado)} · {fmtData(r.em)}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
       {doc.edicao_estrutural && (
         <Card>
           <CardHeader>
@@ -464,11 +599,21 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
                 / meta {doc.avaliacao.meta.toFixed(1)}
               </span>
               {doc.avaliacao.nota != null && (
-                <Badge variant={doc.avaliacao.nota >= doc.avaliacao.meta ? "success" : "warning"}>
-                  {doc.avaliacao.nota >= doc.avaliacao.meta ? "meta atingida" : "abaixo da meta"}
+                <Badge variant={metaAtingida ? "success" : "warning"}>
+                  {metaAtingida ? "meta e piso atingidos" : "ainda não aprovada"}
                 </Badge>
               )}
             </div>
+            {doc.avaliacao.floor ? (
+              <p className="text-sm">
+                Piso editorial: <span className="font-medium tabular-nums">{doc.avaliacao.floor.nota.toFixed(1)}</span>
+                <span className="text-muted-foreground"> em {doc.avaliacao.floor.dimensao.replace(/_/g, " ")} · mínimo 7,0</span>
+              </p>
+            ) : (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                Esta avaliação antiga não registrou o piso por dimensão; reavalie antes de tratá-la como aprovação.
+              </p>
+            )}
             <p className="text-sm text-muted-foreground">
               {doc.avaliacao.iteracoes} iteração(ões) · {fmtData(doc.avaliacao.em)}
             </p>

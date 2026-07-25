@@ -45,7 +45,23 @@ export interface EstadoCanonicoV2 {
       em: string;
     };
     // Meta-nota (avaliação de livro): última nota alcançada e o alvo comercial.
-    avaliacao?: { nota?: number; meta: number; iteracoes: number; relatorio_path?: string; em: string };
+    avaliacao?: {
+      nota?: number;
+      meta: number;
+      floor?: { dimensao: string; nota: number };
+      iteracoes: number;
+      relatorio_path?: string;
+      em: string;
+    };
+    reversoes_meta?: {
+      capitulo: number;
+      status_tentativa: string;
+      text_hash_tentativa?: string;
+      review_id_tentativa?: string;
+      text_hash_restaurado: string;
+      motivo: string;
+      em: string;
+    }[];
     capitulos: Record<string, CapituloEstadoV2>;
     bloqueios: { codigo: string; alvo: string; detalhe: string; desde: string }[];
     migracao?: { origem: string; em: string; divergencias?: number };
@@ -106,6 +122,17 @@ export function tabelaAusente(error: { code?: string; message?: string } | null)
     error.code === "42P01" ||
     error.code === "PGRST205" ||
     /could not find the table/i.test(error.message ?? "")
+  );
+}
+
+export function avaliacaoMetaComprovada(
+  avaliacao?: EstadoCanonicoV2["doc"]["avaliacao"]
+): boolean {
+  return (
+    avaliacao?.nota != null &&
+    avaliacao.nota >= avaliacao.meta &&
+    avaliacao.floor != null &&
+    avaliacao.floor.nota >= 7
   );
 }
 

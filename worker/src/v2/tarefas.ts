@@ -75,14 +75,30 @@ export function tarefaEscritorCorrecao(
 }
 
 /** Canário de voz (wizard): UMA cena curta de amostra da voz do contrato, pré-fundação. */
-export function tarefaCanarioVoz(ideia: string, contrato: SkillContract): string {
+export function tarefaCanarioVoz(ideia: string, contrato: SkillContract, ajusteAutor?: string): string {
   return [
     `Escreva UMA cena curta de amostra (300–500 palavras), em português brasileiro, demonstrando a VOZ desta skill para a ideia do autor.`,
     `Ideia do autor: ${ideia}`,
+    ajusteAutor?.trim() ? `Ajuste solicitado pelo autor após ler a amostra anterior: ${ajusteAutor.trim()}` : "",
     `A cena deve ter: um objetivo concreto, um obstáculo, uma virada e um gancho final (tipo permitido: ${contrato.tipos_gancho.join(", ")}).`,
     `É uma AMOSTRA de voz, não o capítulo 1: personagens podem ser provisórios; a voz e a cadência do contrato são o que está em prova.`,
     `Não mencione o processo, a skill ou o pacote. Sem título.`,
     `Responda APENAS a prosa da cena.`,
+  ].filter(Boolean).join("\n");
+}
+
+/** Revisor do canário: avalia a voz sem fingir que a amostra curta é um capítulo final. */
+export function tarefaRevisorCanario(resumoSinais: string, contrato: SkillContract): string {
+  return [
+    `Avalie a AMOSTRA DE VOZ (seção TEXTO A AVALIAR) contra o contrato da skill.`,
+    `A amostra tem deliberadamente 300–500 palavras: NÃO a reprove por ficar abaixo da faixa de um capítulo completo.`,
+    `Responda APENAS JSON no schema "parecer/v1": { "schema":"parecer/v1", "dramatic_progression":{"nota":0-5,"evidencia":string}, "skill_adherence":{...}, "clarity":{...}, "emotional_effect":{...}, "continuity":{...}, "hook_effectiveness":{...}, "verdict":"aprovado"|"aprovado_com_excecao"|"reprovado"|"necessita_decisao_humana", "evidencias":[{"local","trecho","observacao"}], "sinais":[{"sinal","valor","disposicao","evidencia","ocorrencias_citadas"?:[{"trecho","posicao"?}],"falsos_positivos"?:number}], "correcoes":[{"local","problema","instrucao"}] }.`,
+    `## SINAIS MEDIDOS (a contagem de palavras foi removida porque esta é uma amostra curta)`,
+    resumoSinais,
+    `Disponha todo sinal FORA DA COTA. Para "violacao_confirmada", cite exatamente cada ocorrência medida que é defeito real; use "falsos_positivos" para fechar a contagem.`,
+    `Aprovação exige evidência positiva localizada e aderência material aos testes da skill: ${contrato.testes_positivos.slice(0, 4).join("; ") || "—"}.`,
+    `Se a voz estiver genérica, a cadência contrariar o contrato ou a amostra não tiver evento/virada/gancho, reprove e dê correções objetivas.`,
+    `Não transforme preferência autoral em aprovação por exceção: "aprovado_com_excecao" continua sendo uma ressalva visível.`,
   ].join("\n");
 }
 

@@ -5,6 +5,29 @@
 -- colunas reais só para chaves de consulta/constraint; miolo em jsonb; RLS owner_all.
 -- ============================================================================
 
+-- 0) Seletor de engine no projeto — o wizard grava `v2` e o worker roteia por
+-- esta coluna. O ALTER é obrigatório para bancos criados antes da Engine V2;
+-- sem ele a criação pelo navegador falha ou o worker cai no caminho clássico.
+alter table public.projects
+  add column if not exists engine_mode text not null default 'claude_code';
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.projects'::regclass
+      and conname = 'projects_engine_mode_check'
+  ) then
+    alter table public.projects
+      add constraint projects_engine_mode_check
+      check (engine_mode in ('claude_code', 'v2'));
+  end if;
+end $$;
+
+create index if not exists projects_engine_mode_idx
+  on public.projects (owner, engine_mode);
+
 -- 1) engine_runs — ledger append-only de execuções (toda chamada de papel é um run)
 create table if not exists public.engine_runs (
   id uuid primary key default gen_random_uuid(),

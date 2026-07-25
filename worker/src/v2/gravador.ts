@@ -401,6 +401,7 @@ export class Gravador {
   async registrarAvaliacao(dados: {
     nota?: number;
     meta: number;
+    floor?: { dimensao: string; nota: number };
     iteracoes: number;
     relatorio_path?: string;
   }): Promise<void> {

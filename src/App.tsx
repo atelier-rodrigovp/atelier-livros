@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { useSession } from "@/hooks/useSession";
 import AppLayout from "@/components/layout/AppLayout";
 import Login from "@/pages/Login";
@@ -14,6 +14,7 @@ import Autor from "@/pages/Autor";
 import Vendas from "@/pages/Vendas";
 import Observabilidade from "@/pages/Observabilidade";
 import Laboratorio from "@/pages/Laboratorio";
+import { supabaseConfigured } from "@/lib/supabase";
 
 function Carregando() {
   return (
@@ -23,9 +24,25 @@ function Carregando() {
   );
 }
 
+function ConfiguracaoAusente() {
+  return (
+    <main className="flex min-h-svh items-center justify-center bg-background px-4">
+      <section className="w-full max-w-lg rounded-xl border border-amber-500/40 bg-card p-6 shadow-sm">
+        <AlertTriangle className="h-6 w-6 text-amber-700 dark:text-amber-400" />
+        <h1 className="mt-4 text-2xl font-semibold">Configuração do painel ausente</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Defina <code>VITE_SUPABASE_URL</code> e <code>VITE_SUPABASE_ANON_KEY</code> no ambiente
+          do frontend e reinicie a aplicação. Nenhum projeto foi alterado.
+        </p>
+      </section>
+    </main>
+  );
+}
+
 export default function App() {
   const { session, carregando } = useSession();
 
+  if (!supabaseConfigured) return <ConfiguracaoAusente />;
   if (carregando) return <Carregando />;
 
   return (

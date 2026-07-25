@@ -12,11 +12,11 @@ import { criarPersistencia, type PersistenciaV2 } from "./persistencia.js";
 import { carregarContrato, MAPA_SKILL_V1_V2 } from "./contrato.js";
 import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
 import { mapaModelosDoAmbiente } from "./config.js";
-import { ProvedorClaudeCli } from "./provedor.js";
+import { ProvedorClaudeCli, type ProvedorModelo } from "./provedor.js";
 import { hashJsonCanonico } from "./hash.js";
 import { compilarPacote, type SecaoContexto } from "./compilador.js";
 import { executarPapel } from "./papeis.js";
-import { tarefaCanarioVoz, tarefaEditorEstrutural } from "./tarefas.js";
+import { tarefaCanarioVoz, tarefaEditorEstrutural, tarefaRevisorCanario } from "./tarefas.js";
 import { gerarFundacaoV2, materializarFundacao } from "./fundacao.js";
 import {
   aplicarEdicaoEstrutural,
@@ -28,7 +28,16 @@ import {
 } from "./estrutural.js";
 import { fundirFichas, PersistenciaEstadoIsolado } from "./estrutural-staging.js";
 import { executarMeta9 } from "./meta9.js";
-import { ErroEngine, type EstadoCanonico, type SceneSpec } from "./tipos.js";
+import { medirSinais, resumoSinais } from "./sinais.js";
+import { conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
+import {
+  ErroEngine,
+  type ContratoCompilado,
+  type EstadoCanonico,
+  type MapaModelos,
+  type Parecer,
+  type SceneSpec,
+} from "./tipos.js";
 
 /** Tipos de job que a V2 sabe executar (os demais permanecem na V1 mesmo em modo v2). */
 export const TIPOS_V2 = new Set(["escrever_livro", "criar_fundacao", "laboratorio_v2"]);
@@ -675,6 +684,55 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
  * da fundação. O texto vai para jobs.progresso.canario_voz (a UI lê de lá) e uma
  * cópia de auditoria fica em <dirProjeto>/canario-voz.md. Nenhum capítulo é criado.
  */
+export async function revisarCanarioVoz(opts: {
+  gravador: Gravador;
+  provedor: ProvedorModelo;
+  mapa: MapaModelos;
+  jobId?: string | null;
+  contrato: ContratoCompilado;
+  perfil: { texto: string; skillId: string; hash: string; validado: boolean };
+  texto: string;
+}): Promise<{
+  parecer: Parecer;
+  runId: string;
+  problemasProtocolo: string[];
+}> {
+  // A amostra é deliberadamente curta; "palavras" pertence à faixa de um
+  // capítulo completo e seria um falso bloqueio inevitável no wizard.
+  const sinais = medirSinais(opts.texto, opts.contrato.contrato).filter((s) => s.sinal !== "palavras");
+  const pacote = compilarPacote({
+    papel: "revisor_literario",
+    alvo: "canario-voz",
+    contrato: opts.contrato,
+    perfil: opts.perfil,
+    fatos: [{ titulo: "TEXTO A AVALIAR", texto: opts.texto, fonte: "canario-voz" }],
+  });
+  if (!pacote.ok) {
+    throw new ErroEngine({
+      codigo: "CANARIO_REVISAO_BLOQUEADA",
+      classe: "configuracao",
+      mensagem: `revisão do canário bloqueada: ${pacote.bloqueios.map((b) => `${b.codigo}: ${b.detalhe}`).join(" · ")}`,
+    });
+  }
+  const revisao = await executarPapel<Parecer>({
+    gravador: opts.gravador,
+    provedor: opts.provedor,
+    mapa: opts.mapa,
+    jobId: opts.jobId ?? null,
+    papel: "revisor_literario",
+    alvo: "canario-voz",
+    pacote: pacote.pacote!,
+    tarefa: tarefaRevisorCanario(resumoSinais(sinais), opts.contrato.contrato),
+    parse: (t) => exigirDisposicaoCompleta(validarParecer(extrairJson(t)), sinais),
+  });
+  const conferencia = conferirParecer(revisao.valor, sinais);
+  return {
+    parecer: { ...revisao.valor, verdict: conferencia.verdictEfetivo },
+    runId: revisao.runId,
+    problemasProtocolo: conferencia.problemas,
+  };
+}
+
 export async function executarCanarioVoz(job: Job): Promise<void> {
   const { sb, OWNER } = await import("../supabase.js");
   const { projDir, CLAUDE_BIN } = await import("../lib.js");
@@ -692,7 +750,8 @@ export async function executarCanarioVoz(job: Job): Promise<void> {
     throw new ErroEngine({ codigo: "PROJETO_AUSENTE", classe: "configuracao", mensagem: `projeto ${projectId} não encontrado: ${error?.message ?? ""}` });
   }
 
-  const skillV1 = (job.payload as { skill_escrita?: string })?.skill_escrita
+  const payloadCanario = job.payload as { skill_escrita?: string; ajuste_autor?: string };
+  const skillV1 = payloadCanario?.skill_escrita
     ?? (proj as { skill_escrita?: string }).skill_escrita
     ?? "";
   const skillId = MAPA_SKILL_V1_V2[skillV1] ?? skillV1;
@@ -704,18 +763,21 @@ export async function executarCanarioVoz(job: Job): Promise<void> {
   const dirProjeto = projDir(projectId);
   const { persistencia } = await criarPersistencia({ dirProjeto });
   const gravador = new Gravador({ persistencia, projectId });
+  const provedor = new ProvedorClaudeCli(CLAUDE_BIN, dirProjeto);
+  const mapa = mapaModelosDoAmbiente();
 
   // Perfil sintético: ainda não há fundação — o canário demonstra a VOZ do contrato.
+  const perfilCanario = {
+    texto: `Amostra de voz pré-fundação. Ideia central do autor: ${ideia}`,
+    skillId: contrato.contrato.id,
+    hash: hashJsonCanonico(ideia),
+    validado: true,
+  };
   const comp = compilarPacote({
     papel: "escritor",
     alvo: "canario-voz",
     contrato,
-    perfil: {
-      texto: `Amostra de voz pré-fundação. Ideia central do autor: ${ideia}`,
-      skillId: contrato.contrato.id,
-      hash: hashJsonCanonico(ideia),
-      validado: true,
-    },
+    perfil: perfilCanario,
   });
   if (!comp.ok) {
     throw new ErroEngine({
@@ -726,13 +788,13 @@ export async function executarCanarioVoz(job: Job): Promise<void> {
   }
   const r = await executarPapel<string>({
     gravador,
-    provedor: new ProvedorClaudeCli(CLAUDE_BIN, dirProjeto),
-    mapa: mapaModelosDoAmbiente(),
+    provedor,
+    mapa,
     jobId: job.id,
     papel: "escritor",
     alvo: "canario-voz",
     pacote: comp.pacote!,
-    tarefa: tarefaCanarioVoz(ideia, contrato.contrato),
+    tarefa: tarefaCanarioVoz(ideia, contrato.contrato, payloadCanario.ajuste_autor),
     parse: (t) => {
       const limpo = t.trim();
       if (!limpo) throw new Error("cena vazia");
@@ -740,9 +802,35 @@ export async function executarCanarioVoz(job: Job): Promise<void> {
     },
   });
 
+  const revisao = await revisarCanarioVoz({
+    gravador,
+    provedor,
+    mapa,
+    jobId: job.id,
+    contrato,
+    perfil: perfilCanario,
+    texto: r.valor,
+  });
+  const parecer = revisao.parecer;
+  const textHash = hashText(r.valor);
+
   // Cópia de auditoria no disco (worker escreve; modelo nunca toca disco).
   await fs.mkdir(dirProjeto, { recursive: true });
   await fs.writeFile(path.join(dirProjeto, "canario-voz.md"), r.valor, "utf8");
+  await fs.writeFile(
+    path.join(dirProjeto, "canario-voz.avaliacao.json"),
+    JSON.stringify({
+      schema: "canario-voz/v1",
+      skill_id: contrato.contrato.id,
+      contrato_versao: contrato.contrato.versao,
+      text_hash: textHash,
+      escritor_run_id: r.runId,
+      revisor_run_id: revisao.runId,
+      parecer,
+      problemas_protocolo: revisao.problemasProtocolo,
+    }, null, 2),
+    "utf8"
+  );
 
   await atualizarProgresso(job.id, {
     fase: "CANARIO_VOZ",
@@ -750,7 +838,13 @@ export async function executarCanarioVoz(job: Job): Promise<void> {
       texto: r.valor,
       skill_id: contrato.contrato.id,
       contrato_versao: contrato.contrato.versao,
-      hash: hashJsonCanonico(r.valor),
+      hash: textHash,
+      escritor_run_id: r.runId,
+      revisor_run_id: revisao.runId,
+      verdict: parecer.verdict,
+      parecer,
+      problemas_protocolo: revisao.problemasProtocolo,
+      ajuste_autor: payloadCanario.ajuste_autor?.trim() || null,
     },
   });
 }

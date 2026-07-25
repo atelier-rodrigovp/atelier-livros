@@ -313,7 +313,14 @@ export interface EstadoCanonicoDoc {
   // Edição estrutural (editor propõe; o pipeline aplica cortes/fusões/reordenações).
   edicao_estrutural?: { run_id?: string; propostas: number; aplicadas: number; detalhe: string[]; em: string };
   // Meta-nota (avaliação de livro): última nota alcançada e o alvo comercial.
-  avaliacao?: { nota?: number; meta: number; iteracoes: number; relatorio_path?: string; em: string };
+  avaliacao?: {
+    nota?: number;
+    meta: number;
+    floor?: { dimensao: string; nota: number };
+    iteracoes: number;
+    relatorio_path?: string;
+    em: string;
+  };
   // Tentativas da meta-nota que não puderam substituir uma versão já aprovada.
   // Runs/reviews preservam o detalhe completo; esta trilha explica por que o
   // estado canônico voltou ao melhor hash conhecido.

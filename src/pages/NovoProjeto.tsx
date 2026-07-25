@@ -1,9 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Check, Loader2, Plus, Sparkles, Trash2, Wand2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Check,
+  Clock3,
+  FileCheck2,
+  Loader2,
+  Plus,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  Wand2,
+  WifiOff,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { useWorkerStatus } from "@/hooks/useWorkerStatus";
+import { resolverEsperaWizardV2, TEXTO_ESPERA_WIZARD_V2 } from "@/lib/wizardV2";
+import type { ReviewV2 } from "@/lib/engineV2";
+import type { JobStatus } from "@/lib/types";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -112,6 +131,9 @@ function ComparadorEstilos({
             <p className="text-xs text-muted-foreground">
               {FAMILIA_SIMPLES[c.familia_editorial] ?? c.familia_editorial}
             </p>
+            <p className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+              contrato e régua {c.versao}
+            </p>
             <div>
               <p className="text-xs font-medium">Motor da história</p>
               <p className="text-xs text-muted-foreground">{c.motor_narrativo}</p>
@@ -215,8 +237,158 @@ interface Pergunta {
   multipla?: boolean;
 }
 
+interface JobWizard {
+  status: JobStatus;
+  erro?: string | null;
+  created_at?: string | null;
+  progresso?: { aguardando_reset?: boolean; retry_at?: string | null; [chave: string]: unknown };
+}
+
+interface CanarioVoz {
+  texto: string;
+  skill_id: string;
+  contrato_versao: string;
+  hash: string;
+  verdict?: string;
+  parecer?: ReviewV2["parecer"];
+  problemas_protocolo?: string[];
+}
+
+function TrilhaWizard({ fase }: { fase: "ideia" | "canario" | "entrevista" }) {
+  const etapas = [
+    { id: "ideia", label: "Projeto e skill" },
+    { id: "canario", label: "Prova de voz" },
+    { id: "entrevista", label: "Entrevista e fundação" },
+  ] as const;
+  const atual = etapas.findIndex((e) => e.id === fase);
+  return (
+    <ol className="grid grid-cols-3 border-y py-3 text-xs" aria-label="Progresso da criação">
+      {etapas.map((etapa, indice) => (
+        <li
+          key={etapa.id}
+          className={cn(
+            "relative px-3 before:absolute before:left-0 before:top-0 before:h-full before:w-px before:bg-border first:before:hidden",
+            indice <= atual ? "text-foreground" : "text-muted-foreground"
+          )}
+          aria-current={indice === atual ? "step" : undefined}
+        >
+          <span className="block font-mono text-[10px] tabular-nums text-muted-foreground">
+            {String(indice + 1).padStart(2, "0")}
+          </span>
+          <span className={cn("font-medium", indice === atual && "text-primary")}>{etapa.label}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function EstadoEspera({
+  job,
+  workerOnline,
+  producaoAtiva,
+}: {
+  job: JobWizard | null;
+  workerOnline: boolean;
+  producaoAtiva: boolean;
+}) {
+  const estado = resolverEsperaWizardV2({
+    status: job?.status,
+    createdAt: job?.created_at,
+    progresso: job?.progresso,
+    workerOnline,
+    producaoAtiva,
+  });
+  if (estado === "concluido") return null;
+  const texto = TEXTO_ESPERA_WIZARD_V2[estado];
+  const Icone =
+    estado === "worker_offline" ? WifiOff
+      : estado === "demora_excessiva" || estado === "throttle" ? Clock3
+        : estado === "falha" || estado === "pausado" ? AlertTriangle
+          : Loader2;
+  const alerta = ["falha", "pausado", "worker_offline", "producao_pausada", "demora_excessiva"].includes(estado);
+  const retryAt = job?.progresso?.retry_at;
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-3 rounded-lg border px-4 py-3 text-sm",
+        alerta ? "border-amber-500/40 bg-amber-500/10" : "bg-muted/30"
+      )}
+      role="status"
+    >
+      <Icone className={cn("mt-0.5 h-4 w-4 shrink-0", !alerta && estado !== "throttle" && "animate-spin")} />
+      <div>
+        <p className="font-medium">{texto.titulo}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{texto.detalhe}</p>
+        {retryAt && estado === "throttle" && (
+          <p className="mt-1 text-xs">Retomada prevista: {new Date(retryAt).toLocaleString("pt-BR")}</p>
+        )}
+        {job?.erro && (estado === "falha" || estado === "pausado") && (
+          <p className="mt-1 text-xs text-destructive">{job.erro}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AvaliacaoCanario({ resultado }: { resultado: CanarioVoz }) {
+  const parecer = resultado.parecer;
+  const aprovado = resultado.verdict === "aprovado";
+  return (
+    <div className="space-y-3 rounded-lg border bg-card p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium">Avaliação técnica da amostra</p>
+          <p className="text-xs text-muted-foreground">
+            contrato {resultado.skill_id}@{resultado.contrato_versao} · hash {resultado.hash.slice(0, 10)}
+          </p>
+        </div>
+        <Badge variant={aprovado ? "success" : resultado.verdict === "aprovado_com_excecao" ? "warning" : "destructive"}>
+          {resultado.verdict?.replace(/_/g, " ") ?? "sem parecer"}
+        </Badge>
+      </div>
+      {parecer?.skill_adherence && (
+        <div>
+          <div className="flex items-center justify-between text-xs">
+            <span>Aderência à skill</span>
+            <span className="font-mono tabular-nums">{parecer.skill_adherence.nota}/5</span>
+          </div>
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-primary"
+              style={{ width: `${Math.max(0, Math.min(100, parecer.skill_adherence.nota * 20))}%` }}
+            />
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">{parecer.skill_adherence.evidencia}</p>
+        </div>
+      )}
+      {!!parecer?.evidencias?.length && (
+        <div className="space-y-1">
+          <p className="text-xs font-medium">O que funcionou</p>
+          {parecer.evidencias.slice(0, 2).map((e, i) => (
+            <p key={i} className="text-xs text-muted-foreground">
+              “{e.trecho}” — {e.observacao}
+            </p>
+          ))}
+        </div>
+      )}
+      {!!parecer?.correcoes?.length && (
+        <div className="space-y-1">
+          <p className="text-xs font-medium">O que precisa mudar</p>
+          <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+            {parecer.correcoes.slice(0, 4).map((c, i) => <li key={i}>{c.instrucao}</li>)}
+          </ul>
+        </div>
+      )}
+      {resultado.problemas_protocolo?.map((p, i) => (
+        <p key={i} className="text-xs text-amber-700 dark:text-amber-400">{p}</p>
+      ))}
+    </div>
+  );
+}
+
 export default function NovoProjeto() {
   const nav = useNavigate();
+  const worker = useWorkerStatus(15_000);
   const [params, setParams] = useSearchParams();
   // Retomada por URL: ?projeto=<id> sobrevive a refresh e permite voltar do Dashboard.
   const projetoParam = params.get("projeto");
@@ -237,9 +409,13 @@ export default function NovoProjeto() {
   // Canário de voz (fase "canario", só engine V2).
   const [canarioJobId, setCanarioJobId] = useState<string | null>(null);
   const [canarioTexto, setCanarioTexto] = useState<string | null>(null);
+  const [canarioResultado, setCanarioResultado] = useState<CanarioVoz | null>(null);
+  const [canarioJob, setCanarioJob] = useState<JobWizard | null>(null);
   const [canarioErro, setCanarioErro] = useState<string | null>(null);
   const [gerandoCanario, setGerandoCanario] = useState(false);
   const [trocandoSkill, setTrocandoSkill] = useState(false);
+  const [ajusteCanario, setAjusteCanario] = useState("");
+  const [decidindoCanario, setDecidindoCanario] = useState(false);
 
   const [projectId, setProjectId] = useState<string | null>(projetoParam);
   const [pendentes, setPendentes] = useState<Pergunta[]>([]);
@@ -250,6 +426,7 @@ export default function NovoProjeto() {
   // Falha visível + retomável: enqueue falho ou job de entrevista com erro não
   // podem virar spinner eterno.
   const [erroFluxo, setErroFluxo] = useState<string | null>(null);
+  const [jobEntrevista, setJobEntrevista] = useState<JobWizard | null>(null);
   const qaRef = useRef<any[]>([]);
 
   // Lê o estado da entrevista do projeto e reage.
@@ -281,16 +458,28 @@ export default function NovoProjeto() {
       // Sem perguntas e não concluído: distinguir "worker processando" de "job com erro".
       const { data: js } = await supabase
         .from("jobs")
-        .select("status,erro,created_at")
+        .select("status,erro,created_at,progresso")
         .eq("project_id", id)
         .eq("tipo", "entrevistar")
         .order("created_at", { ascending: false })
         .limit(1);
       const j: any = js?.[0];
-      if (j?.status === "error" || j?.status === "paused") {
+      setJobEntrevista(j ? {
+        status: j.status,
+        erro: j.erro,
+        created_at: j.created_at,
+        progresso: j.progresso ?? {},
+      } : null);
+      if (j?.status === "error") {
         setPendentes([]);
         setPensando(false);
         setErroFluxo(j.erro || "A entrevista falhou no worker. Tente novamente.");
+        return;
+      }
+      if (j?.status === "paused") {
+        setPendentes([]);
+        setPensando(true);
+        setErroFluxo(null);
         return;
       }
       if (!j) {
@@ -328,7 +517,13 @@ export default function NovoProjeto() {
 
   async function agendarEntrevista(id: string) {
     try {
-      await enqueueJob("entrevistar", {}, { project_id: id });
+      const job = await enqueueJob("entrevistar", {}, { project_id: id });
+      setJobEntrevista({
+        status: job.status,
+        erro: job.erro,
+        created_at: job.created_at,
+        progresso: job.progresso,
+      });
       setPensando(true);
       setErroFluxo(null);
     } catch (err) {
@@ -355,15 +550,41 @@ export default function NovoProjeto() {
         if (skillId) setSkillEscolhida(skillId);
         if (data.total_capitulos) setTotalCapitulos(data.total_capitulos);
         setFase("canario");
+        const { data: jobsCanario } = await supabase
+          .from("jobs")
+          .select("id,status,erro,created_at,progresso")
+          .eq("project_id", projetoParam)
+          .eq("tipo", "canario_voz")
+          .order("created_at", { ascending: false })
+          .limit(1);
+        const ultimo = jobsCanario?.[0] as any;
+        if (ultimo) {
+          setCanarioJobId(ultimo.id);
+          setCanarioJob({
+            status: ultimo.status,
+            erro: ultimo.erro,
+            created_at: ultimo.created_at,
+            progresso: ultimo.progresso ?? {},
+          });
+          const resultado = ultimo.progresso?.canario_voz as CanarioVoz | undefined;
+          if (resultado?.texto) {
+            setCanarioResultado(resultado);
+            setCanarioTexto(resultado.texto);
+          }
+        } else {
+          setCanarioErro("Nenhum canário foi agendado para este projeto. Gere uma amostra para continuar.");
+        }
       }
     })();
   }, [projetoParam]);
 
   // Gera (ou regenera, ao trocar de skill) o canário de voz do projeto já criado.
-  async function gerarCanario(id: string, skillId: string) {
+  async function gerarCanario(id: string, skillId: string, ajusteAutor?: string) {
     setGerandoCanario(true);
     setCanarioErro(null);
     setCanarioTexto(null);
+    setCanarioResultado(null);
+    setCanarioJob(null);
     try {
       const skillV1 = SKILL_V1_MAP[skillId];
       const { error: errUpd } = await supabase
@@ -371,8 +592,22 @@ export default function NovoProjeto() {
         .update({ skill_escrita: skillV1 })
         .eq("id", id);
       if (errUpd) throw errUpd;
-      const job = await enqueueJob("canario_voz", { skill_escrita: skillV1 }, { project_id: id });
+      const job = await enqueueJob(
+        "canario_voz",
+        {
+          skill_escrita: skillV1,
+          ...(ajusteAutor?.trim() ? { ajuste_autor: ajusteAutor.trim() } : {}),
+        },
+        { project_id: id }
+      );
       setCanarioJobId(job.id);
+      setCanarioJob({
+        status: job.status,
+        erro: job.erro,
+        created_at: job.created_at,
+        progresso: job.progresso,
+      });
+      setAjusteCanario("");
     } catch (err) {
       setCanarioErro(`Falha ao agendar o canário de voz: ${(err as Error).message}`);
     } finally {
@@ -387,17 +622,24 @@ export default function NovoProjeto() {
     async function verificar() {
       const { data } = await supabase
         .from("jobs")
-        .select("status,erro,progresso")
+        .select("status,erro,progresso,created_at")
         .eq("id", canarioJobId!)
         .maybeSingle();
       if (!ativo || !data) return;
-      if (data.status === "error" || data.status === "paused") {
+      setCanarioJob({
+        status: data.status,
+        erro: data.erro,
+        created_at: data.created_at,
+        progresso: (data.progresso as JobWizard["progresso"]) ?? {},
+      });
+      if (data.status === "error") {
         setCanarioErro(data.erro || "O canário de voz falhou no worker.");
         return;
       }
       if (data.status === "done") {
-        const c = (data.progresso as any)?.canario_voz;
+        const c = (data.progresso as any)?.canario_voz as CanarioVoz | undefined;
         if (c?.texto) {
+          setCanarioResultado(c);
           setCanarioTexto(c.texto);
         } else {
           setCanarioErro(
@@ -425,31 +667,102 @@ export default function NovoProjeto() {
 
   async function aprovarCanario() {
     if (!projectId || !skillEscolhida) return;
-    const { data } = await supabase
-      .from("projects")
-      .select("briefing")
-      .eq("id", projectId)
-      .single();
-    const b: any = data?.briefing || {};
-    const merged = {
-      ...b,
-      canario_voz: {
-        aprovado: true,
-        skill: skillEscolhida,
-        em: new Date().toISOString(),
-        job_id: canarioJobId,
-      },
-    };
-    const { error } = await supabase
-      .from("projects")
-      .update({ briefing: merged })
-      .eq("id", projectId);
-    if (error) {
-      toast.error(error.message);
+    if (canarioResultado?.verdict !== "aprovado") {
+      toast.error("A avaliação técnica ainda não aprovou plenamente esta amostra. Ajuste ou troque a skill.");
       return;
     }
-    setFase("entrevista");
-    await agendarEntrevista(projectId);
+    setDecidindoCanario(true);
+    try {
+      const { data, error: leituraErro } = await supabase
+        .from("projects")
+        .select("briefing")
+        .eq("id", projectId)
+        .single();
+      if (leituraErro) throw leituraErro;
+      const b: any = data?.briefing || {};
+      const decisao = {
+        decisao: "aprovado",
+        skill: skillEscolhida,
+        contrato_versao: canarioResultado.contrato_versao,
+        text_hash: canarioResultado.hash,
+        verdict_tecnico: canarioResultado.verdict,
+        em: new Date().toISOString(),
+        job_id: canarioJobId,
+      };
+      const merged = {
+        ...b,
+        canario_voz: {
+          aprovado: true,
+          ...decisao,
+        },
+        canario_voz_historico: [
+          ...(Array.isArray(b.canario_voz_historico) ? b.canario_voz_historico : []),
+          decisao,
+        ],
+      };
+      const { error } = await supabase
+        .from("projects")
+        .update({ briefing: merged })
+        .eq("id", projectId);
+      if (error) throw error;
+      setFase("entrevista");
+      await agendarEntrevista(projectId);
+    } catch (erro) {
+      toast.error((erro as Error).message);
+    } finally {
+      setDecidindoCanario(false);
+    }
+  }
+
+  async function registrarDecisaoCanario(decisao: "rejeitado" | "ajustar") {
+    if (!projectId || !skillEscolhida || !canarioResultado) return;
+    if (decisao === "ajustar" && !ajusteCanario.trim()) {
+      toast.error("Descreva o ajuste que deseja ver na próxima amostra.");
+      return;
+    }
+    setDecidindoCanario(true);
+    try {
+      const { data, error: leituraErro } = await supabase
+        .from("projects")
+        .select("briefing")
+        .eq("id", projectId)
+        .single();
+      if (leituraErro) throw leituraErro;
+      const b: any = data?.briefing || {};
+      const registro = {
+        decisao,
+        skill: skillEscolhida,
+        contrato_versao: canarioResultado.contrato_versao,
+        text_hash: canarioResultado.hash,
+        verdict_tecnico: canarioResultado.verdict ?? null,
+        feedback: ajusteCanario.trim() || null,
+        em: new Date().toISOString(),
+        job_id: canarioJobId,
+      };
+      const { error } = await supabase
+        .from("projects")
+        .update({
+          briefing: {
+            ...b,
+            canario_voz: { aprovado: false, ...registro },
+            canario_voz_historico: [
+              ...(Array.isArray(b.canario_voz_historico) ? b.canario_voz_historico : []),
+              registro,
+            ],
+          },
+        })
+        .eq("id", projectId);
+      if (error) throw error;
+      if (decisao === "ajustar") {
+        await gerarCanario(projectId, skillEscolhida, ajusteCanario);
+      } else {
+        toast.success("Amostra rejeitada. Ajuste a orientação ou escolha outra skill.");
+      }
+    } catch (erro) {
+      toast.error((erro as Error).message);
+    } finally {
+      setDecidindoCanario(false);
+    }
   }
 
   function adicionarDecisao() {
@@ -588,6 +901,7 @@ export default function NovoProjeto() {
             curta (perguntas com recomendação), valida a fundação e gera tudo.
           </p>
         </div>
+        <TrilhaWizard fase="ideia" />
         <Card>
           <CardHeader>
             <CardTitle className="text-xl">Sua ideia</CardTitle>
@@ -733,6 +1047,7 @@ export default function NovoProjeto() {
             Uma cena curta nesta skill, para você aprovar a voz antes da entrevista.
           </p>
         </div>
+        <TrilhaWizard fase="canario" />
 
         {trocandoSkill ? (
           <Card>
@@ -787,34 +1102,120 @@ export default function NovoProjeto() {
             </CardContent>
           </Card>
         ) : canarioTexto ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-xl">
-                Cena de amostra — {contratoAtual?.nome ?? skillEscolhida}
-              </CardTitle>
-              <CardDescription>Leia e diga se é a voz do seu livro.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="max-h-96 overflow-y-auto rounded-md border bg-muted/20 p-4">
-                <p className="whitespace-pre-wrap font-serif text-sm leading-relaxed">
-                  {canarioTexto}
-                </p>
-              </div>
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button variant="outline" onClick={() => setTrocandoSkill(true)}>
-                  Trocar skill
-                </Button>
-                <Button onClick={aprovarCanario}>
-                  <Check className="h-4 w-4" /> Aprovar esta voz
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="space-y-4">
+            <Card className="overflow-hidden">
+              <CardHeader className="border-b bg-muted/20">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-xl">
+                      Cena de amostra — {contratoAtual?.nome ?? skillEscolhida}
+                    </CardTitle>
+                    <CardDescription>
+                      Leia a prosa e compare sua percepção com o parecer técnico.
+                    </CardDescription>
+                  </div>
+                  {canarioResultado?.contrato_versao && (
+                    <Badge variant="outline" className="font-mono">
+                      régua {canarioResultado.contrato_versao}
+                    </Badge>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-5 pt-5">
+                <div className="relative max-h-[30rem] overflow-y-auto border-l-2 border-primary/40 bg-muted/15 py-4 pl-6 pr-4">
+                  <span className="absolute left-2 top-4 font-mono text-[9px] uppercase tracking-widest text-muted-foreground [writing-mode:vertical-rl]">
+                    prova de voz
+                  </span>
+                  <p className="whitespace-pre-wrap font-serif text-[0.95rem] leading-7">
+                    {canarioTexto}
+                  </p>
+                </div>
+                {canarioResultado ? (
+                  <AvaliacaoCanario resultado={canarioResultado} />
+                ) : (
+                  <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
+                    Esta amostra foi gerada por uma versão antiga do worker, sem parecer estruturado.
+                    Gere novamente para poder aprová-la.
+                  </div>
+                )}
+                {contratoAtual && (
+                  <details className="rounded-lg border">
+                    <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+                      Ver contrato usado nesta prova
+                    </summary>
+                    <div className="grid gap-4 border-t p-4 text-xs sm:grid-cols-2">
+                      <div>
+                        <p className="font-medium">A voz precisa demonstrar</p>
+                        <ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground">
+                          {contratoAtual.testes_positivos.map((t, i) => <li key={i}>{t}</li>)}
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="font-medium">A voz deve evitar</p>
+                        <ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground">
+                          {contratoAtual.sinais_negativos.slice(0, 6).map((t, i) => <li key={i}>{t}</li>)}
+                        </ul>
+                      </div>
+                    </div>
+                  </details>
+                )}
+
+                <div className="space-y-2 rounded-lg border p-4">
+                  <Label htmlFor="ajuste-canario">O que você quer ajustar nesta voz?</Label>
+                  <Textarea
+                    id="ajuste-canario"
+                    value={ajusteCanario}
+                    onChange={(e) => setAjusteCanario(e.target.value)}
+                    rows={3}
+                    placeholder="Ex.: menos explicação interna; revele a ameaça por ações e objetos."
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    O ajuste fica registrado como decisão autoral e orienta uma nova amostra.
+                  </p>
+                </div>
+
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+                  <Button variant="ghost" onClick={() => setTrocandoSkill(true)} disabled={decidindoCanario}>
+                    Trocar skill
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => registrarDecisaoCanario("rejeitado")}
+                    disabled={decidindoCanario || !canarioResultado}
+                  >
+                    <X className="h-4 w-4" /> Rejeitar esta voz
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => registrarDecisaoCanario("ajustar")}
+                    disabled={decidindoCanario || !ajusteCanario.trim() || !canarioResultado}
+                  >
+                    <Wand2 className="h-4 w-4" /> Ajustar e gerar outra
+                  </Button>
+                  <Button
+                    onClick={aprovarCanario}
+                    disabled={decidindoCanario || canarioResultado?.verdict !== "aprovado"}
+                    title={canarioResultado?.verdict !== "aprovado" ? "A aprovação exige parecer técnico plenamente aprovado." : undefined}
+                  >
+                    {decidindoCanario ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                    Aprovar voz e continuar
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         ) : (
           <Card>
-            <CardContent className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-              <Loader2 className="h-7 w-7 animate-spin text-primary" />
-              <p>Gerando a cena de amostra…</p>
+            <CardContent className="space-y-4 py-8">
+              <EstadoEspera
+                job={canarioJob}
+                workerOnline={worker.online}
+                producaoAtiva={worker.producaoAtiva}
+              />
+              <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                <FileCheck2 className="h-4 w-4" />
+                O escritor gera a amostra; o revisor mede a aderência antes da sua decisão.
+              </div>
             </CardContent>
           </Card>
         )}
@@ -832,6 +1233,7 @@ export default function NovoProjeto() {
           recomendações já vêm marcadas) — bloco {turno + 1}.
         </p>
       </div>
+      <TrilhaWizard fase="entrevista" />
 
       {erroFluxo ? (
         <Card>
@@ -848,12 +1250,16 @@ export default function NovoProjeto() {
         </Card>
       ) : pensando || !pendentes.length ? (
         <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-            <Loader2 className="h-7 w-7 animate-spin text-primary" />
-            <p>
+          <CardContent className="space-y-4 py-8">
+            <EstadoEspera
+              job={jobEntrevista}
+              workerOnline={worker.online}
+              producaoAtiva={worker.producaoAtiva}
+            />
+            <p className="text-center text-sm text-muted-foreground">
               {turno === 0
-                ? "Analisando sua ideia e preparando as primeiras perguntas…"
-                : "Validando suas respostas e preparando o próximo bloco…"}
+                ? "O arquiteto está analisando sua ideia e preparando as primeiras perguntas."
+                : "O arquiteto está validando suas respostas e preparando o próximo bloco."}
             </p>
           </CardContent>
         </Card>

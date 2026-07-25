@@ -585,6 +585,7 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
     await deps.gravador.registrarAvaliacao({
       nota: lote.estadoAvaliacaoBase.nota,
       meta: lote.estadoAvaliacaoBase.meta,
+      floor: lote.estadoAvaliacaoBase.floor,
       iteracoes: lote.estadoAvaliacaoBase.iteracoes,
       relatorio_path: lote.estadoAvaliacaoBase.relatorio_path,
     });
@@ -619,7 +620,13 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
       verdict: atingiuMeta(av, meta) ? "aprovado" : "reprovado",
       parecer: pareceDeAvaliacao(av, meta),
     });
-    await deps.gravador.registrarAvaliacao({ nota: av.nota, meta, iteracoes: iteracao, relatorio_path: relatorioPath });
+    await deps.gravador.registrarAvaliacao({
+      nota: av.nota,
+      meta,
+      floor: av.floor,
+      iteracoes: iteracao,
+      relatorio_path: relatorioPath,
+    });
 
     if (lotePendente) {
       if (compararAvaliacao(av, lotePendente.avaliacaoBase, meta) <= 0) {
@@ -694,6 +701,7 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
       estadoAvaliacaoBase: {
         nota: av.nota,
         meta,
+        floor: av.floor,
         iteracoes: iteracao,
         relatorio_path: relatorioPath,
         em: new Date().toISOString(),

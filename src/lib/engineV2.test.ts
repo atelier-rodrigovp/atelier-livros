@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 // (ausentes nos testes). Mock inerte: aqui só interessa a função pura tabelaAusente.
 vi.mock("./supabase", () => ({ supabase: {} }));
 
-import { tabelaAusente } from "./engineV2";
+import { avaliacaoMetaComprovada, tabelaAusente } from "./engineV2";
 
 describe("tabelaAusente", () => {
   it("retorna false para null (sem erro)", () => {
@@ -30,5 +30,24 @@ describe("tabelaAusente", () => {
     expect(tabelaAusente({ code: "XX000", message: "internal error" })).toBe(false);
     expect(tabelaAusente({ message: "permission denied for table engine_state" })).toBe(false);
     expect(tabelaAusente({})).toBe(false);
+  });
+});
+
+describe("avaliacaoMetaComprovada", () => {
+  const base = {
+    meta: 9,
+    iteracoes: 1,
+    em: "2026-07-25T12:00:00.000Z",
+  };
+
+  it("exige simultaneamente nota global e piso editorial", () => {
+    expect(avaliacaoMetaComprovada({ ...base, nota: 9.1, floor: { dimensao: "ritmo", nota: 7 } })).toBe(true);
+    expect(avaliacaoMetaComprovada({ ...base, nota: 8.9, floor: { dimensao: "ritmo", nota: 9 } })).toBe(false);
+    expect(avaliacaoMetaComprovada({ ...base, nota: 9.5, floor: { dimensao: "ritmo", nota: 6.9 } })).toBe(false);
+  });
+
+  it("não promove avaliações antigas sem piso registrado", () => {
+    expect(avaliacaoMetaComprovada({ ...base, nota: 9.5 })).toBe(false);
+    expect(avaliacaoMetaComprovada(undefined)).toBe(false);
   });
 });
