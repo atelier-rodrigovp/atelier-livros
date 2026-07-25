@@ -152,7 +152,7 @@ export function sinaisRunnerLog(log: string): Telemetria["throughput"] {
 }
 
 // Deriva o nome da pasta de transcript a partir do cwd absoluto (Claude Code troca
-// todo não-alfanumérico por '-'). Ex.: C:\Users\Rodrigo Paiva\atelier-work\<id>
+// todo não-alfanumérico por '-'). Ex.: C:\Users\Autor\atelier-work\<id>
 //   → C--Users-Rodrigo-Paiva-atelier-work-<id>
 export function pastaTranscript(cwdAbs: string): string {
   return cwdAbs.replace(/[^a-zA-Z0-9]/g, "-");

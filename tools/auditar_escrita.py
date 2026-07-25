@@ -14,7 +14,9 @@ import re
 import sys
 import json
 
-WORK_DIR = os.environ.get("WORK_DIR") or r"C:/Users/Rodrigo Paiva/atelier-work"
+WORK_DIR = os.environ.get("WORK_DIR")
+if not WORK_DIR:
+    raise SystemExit("defina WORK_DIR antes de executar a auditoria")
 FILTRO = (sys.argv[1] if len(sys.argv) > 1 else "Biblioteca Afogada").lower()
 
 RE_ALVO = re.compile(r"ESCRITA: capitulo alvo = (\d+)")

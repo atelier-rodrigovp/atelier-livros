@@ -10,8 +10,9 @@ import {
 } from "../src/maneirismo.js";
 import { avaliarRotacaoFio, exigenciasParaSkill } from "../src/exigencias-skill.js";
 
-const WORK = process.env.WORK_DIR || "C:/Users/Rodrigo Paiva/atelier-work";
-const PID = process.argv[2] || "53abdade-554d-47e2-bd14-955de3ffc41e";
+const WORK = process.env.WORK_DIR;
+const PID = process.argv[2];
+if (!WORK || !PID) throw new Error("uso: defina WORK_DIR e informe <project_id>");
 const dir = path.join(WORK, PID);
 if (!existsSync(dir)) { console.error("projeto não encontrado:", dir); process.exit(1); }
 

@@ -77,8 +77,8 @@ describe("sinaisRunnerLog", () => {
 
 describe("pastaTranscript", () => {
   it("troca não-alfanuméricos por '-' (casa o encoding do Claude Code)", () => {
-    expect(pastaTranscript("C:\\Users\\Rodrigo Paiva\\atelier-work\\53abdade-554d")).toBe(
-      "C--Users-Rodrigo-Paiva-atelier-work-53abdade-554d"
+    expect(pastaTranscript("C:\\Users\\Autor\\atelier-work\\53abdade-554d")).toBe(
+      "C--Users-Autor-atelier-work-53abdade-554d"
     );
   });
 });

@@ -19,7 +19,8 @@ as skills**: a régua não discriminava aprovado de reprovado — reprovava tudo
 **Método:** `worker/scripts/v2-calibrar-cotas.ts` roda `medirSinais` (o mesmo caminho do
 pipeline: `contarGnomico`, `contarPersonificacao`, `contarSanfona`,
 `percentDeclarativasSimples`, `contarMetaforaElaborada`, `diagnosticarCadencia`) sobre o
-corpus do manifest `worker/scripts/v2-calibracao-corpus.json`.
+corpus do manifesto histórico posteriormente substituído pelo corpus autocontido
+`worker/calibration/v1/corpus.json`.
 **Cota 1.1.0 = max(cota 1.0.0, máximo observado no corpus aprovado)** — percentil generoso
 (com n=3, p90 = máximo), nunca abaixo do que o corpus aprovado mede, e nunca reduzindo cota
 sem dado. Pisos: mantidos apenas quando ficam abaixo do mínimo aprovado. A normalização por
@@ -39,7 +40,7 @@ contagem absoluta, sem especular além do medido.
 | romantasy | aprovado | piloto SPEC-RM3 caps 01–03 | 1147/1096/923 | 5b4312775809 / 1435b5c39350 / be449a5d1281 | AUDITORIA-HOOVER-ROMANTASY — julgados conformes à craft na página (única prosa romantasy avaliada positivamente) |
 | romantasy | contraste | canário V2 cap-01 | 2833 | 28e9537613cb | canário 2026-07-21 (reprovado) |
 
-Cópia estável do corpus romantasy: `C:\Users\Rodrigo Paiva\atelier-work\calibracao-v2-corpus\romantasy\`.
+Cópia versionada do corpus: `worker/calibration/v1/samples/`.
 
 ## Tabela corpus → cota
 

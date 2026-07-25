@@ -1,5 +1,5 @@
 // Importador de projetos existentes -> plataforma Atelier (Supabase + Storage).
-// Roda NA MÁQUINA DO RODRIGO (precisa alcançar o Supabase com a service_role do worker).
+// Roda na máquina do operador (precisa alcançar o Supabase com a service_role do worker).
 //
 // Uso (na pasta worker/):
 //   node scripts/importar-projetos.mjs --dry     # só mostra o plano, não grava nada
@@ -7,7 +7,7 @@
 //   node scripts/importar-projetos.mjs --force   # reimporta (apaga e recria os mesmos títulos)
 //
 // Lê credenciais de worker/.env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OWNER_USER_ID.
-// Pastas-fonte: por padrão as do Windows; sobrescreva com env LIVROS_ROOT / SAGA_ROOT.
+// Pastas-fonte obrigatórias: configure LIVROS_ROOT e SAGA_ROOT.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -16,8 +16,11 @@ import "dotenv/config";
 const DRY = process.argv.includes("--dry");
 const FORCE = process.argv.includes("--force");
 
-const LIVROS_ROOT = process.env.LIVROS_ROOT || "C:\\Users\\Rodrigo Paiva\\Desktop\\PESSOAL\\LIVROS";
-const SAGA_ROOT = process.env.SAGA_ROOT || "C:\\Users\\Rodrigo Paiva\\Desktop\\PESSOAL\\Saga";
+const LIVROS_ROOT = process.env.LIVROS_ROOT;
+const SAGA_ROOT = process.env.SAGA_ROOT;
+if (!LIVROS_ROOT || !SAGA_ROOT) {
+  throw new Error("configure LIVROS_ROOT e SAGA_ROOT antes de executar o importador");
+}
 
 const FUND = ["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md"];
 

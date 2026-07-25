@@ -17,7 +17,8 @@ if (!URL || !KEY || !OWNER) { console.error("Faltam SUPABASE_URL/SERVICE_ROLE/OW
 const sb = createClient(URL, KEY, { auth: { persistSession: false } });
 const APPLY = process.argv.includes("--apply");
 
-const PESSOAL = "C:/Users/Rodrigo Paiva/Desktop/PESSOAL";
+const PESSOAL = process.env.PESSOAL_ROOT;
+if (!PESSOAL) throw new Error("configure PESSOAL_ROOT antes de executar o importador");
 const SAGA = `${PESSOAL}/Saga`;
 const LIV = `${PESSOAL}/LIVROS`;
 const MP = `${LIV}/Mia Peducci`;

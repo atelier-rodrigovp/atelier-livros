@@ -4,7 +4,8 @@
 # Uso: gerar-cap.sh <sandbox-dir> <NN> [<skill>]
 set -u
 SBX="$1"; N="$2"; SKILL="${3:-skill-dan-brown}"
-CLAUDE='/c/Users/Rodrigo Paiva/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe'
+: "${CLAUDE_BIN:?configure CLAUDE_BIN com o executavel real do Claude Code}"
+CLAUDE="$CLAUDE_BIN"
 unset ANTHROPIC_API_KEY
 ARQ="manuscrito/capitulo-$N.md"
 rm -f "$SBX/$ARQ"

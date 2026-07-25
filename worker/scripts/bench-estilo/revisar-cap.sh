@@ -5,7 +5,8 @@
 # Uso: revisar-cap.sh <sandbox-dir> <NN> "<sinais>"
 set -u
 SBX="$1"; N="$2"; SINAIS="$3"
-CLAUDE='/c/Users/Rodrigo Paiva/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe'
+: "${CLAUDE_BIN:?configure CLAUDE_BIN com o executavel real do Claude Code}"
+CLAUDE="$CLAUDE_BIN"
 unset ANTHROPIC_API_KEY
 ARQ="manuscrito/capitulo-$N.md"
 
