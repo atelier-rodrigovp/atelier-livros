@@ -14,9 +14,9 @@ operacional ainda não foram comprovados.
 
 - Branch isolada: `codex/engine-v2-conclusao`
 - Base remota: `origin/master` em `d6578fd5`
-- Divergência após fetch: 0 commits atrás; 36 à frente
-- Último commit de código validado: `9f315a2ff3ba8bf77042b2b692bca5d8e8a616fc`
-- Suíte: 77 arquivos, 784 testes aprovados, 3 pulados
+- Divergência após fetch: 0 commits atrás; 38 à frente
+- Último commit de código validado: `7d025aa2ac74d07442485ae20e3f4bfc6df5b6a4`
+- Suíte: 77 arquivos, 787 testes aprovados, 3 pulados
 - Lint: 0 erros; 3 warnings antigos de Fast Refresh
 - Worker typecheck: aprovado
 - Build de produção: aprovado (warning de chunk grande)
@@ -27,10 +27,10 @@ operacional ainda não foram comprovados.
 | # | Critério | Estado | Evidência / pendência |
 |---|---|---|---|
 | 1 | Regressão meta-9 corrigida | comprovado em código | Snapshot, promoção condicional, restauração e ledger; testes Hoover/Romantasy |
-| 2 | Calibração reproduzível | parcial | Corpus/splits/hashes/métricas/promoção fail-closed e planilha humana auditável implementados; 14 amostras, 596 ocorrências e 182 atestações aguardam revisão humana |
+| 2 | Calibração reproduzível | parcial | Corpus/splits/hashes/métricas/promoção fail-closed e planilha humana auditável implementados; laboratório/UI bloqueiam release sem corpus pronto; 14 amostras, 596 ocorrências e 182 atestações aguardam revisão humana |
 | 3 | Três canários 3/3 plenos | pendente | Claude CLI respondeu 429 antes de qualquer token; não foi substituído por mock |
 | 4 | Dois capítulos atuais aprovados por canário | pendente | Depende da execução real dos canários |
-| 5 | Vozes distinguíveis em leitura cega | pendente | Protocolo v2 corrigido/testado; IDs humanos são únicos, resultado é persistido e release não pode sobrepor reprovação; execução real aguarda reset |
+| 5 | Vozes distinguíveis em leitura cega | pendente | Protocolo v2 corrigido/testado; IDs humanos são únicos, resultado é persistido e release não pode sobrepor reprovação nem ausência de calibração; execução real aguarda reset |
 | 6 | Corte, fusão e reordenação | parcial | Staging/rollback e pipeline integrados testados; confirmação com modelo real virá nos canários |
 | 7 | Meta-9 em livro longo real | parcial | Fluxo >40 mil palavras testado integralmente com provedor controlado; execução real ainda falta |
 | 8 | Wizard V2 completo no navegador | parcial | UI desktop/mobile e estados locais verificados; criação autenticada ponta a ponta ainda falta |
