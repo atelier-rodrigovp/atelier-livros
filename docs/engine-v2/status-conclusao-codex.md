@@ -8,15 +8,16 @@ declaração de conclusão.
 O núcleo e a interface receberam correções estruturais e estão verdes
 localmente, mas o goal permanece aberto: canários reais, laboratório cego real,
 rotulagem humana, fluxo autenticado, prova não-canário, CI remoto e restauração
-operacional ainda não foram comprovados.
+operacional ainda não foram comprovados. Fundação e escrita V2 agora falham
+fechado enquanto essas provas não gerarem um certificado de release.
 
 ## Branch e evidência local
 
 - Branch isolada: `codex/engine-v2-conclusao`
 - Base remota: `origin/master` em `d6578fd5`
-- Divergência após fetch: 0 commits atrás; 38 à frente
-- Último commit de código validado: `7d025aa2ac74d07442485ae20e3f4bfc6df5b6a4`
-- Suíte: 77 arquivos, 787 testes aprovados, 3 pulados
+- Divergência após fetch: 0 commits atrás; 40 à frente
+- Último commit de código validado: `0fe95d84862c5272eb5f11d17342367690171eb7`
+- Suíte: 78 arquivos, 795 testes aprovados, 3 pulados
 - Lint: 0 erros; 3 warnings antigos de Fast Refresh
 - Worker typecheck: aprovado
 - Build de produção: aprovado (warning de chunk grande)
@@ -37,7 +38,7 @@ operacional ainda não foram comprovados.
 | 9 | Erro, timeout e worker offline | comprovado em código/UI | Resolver operacional testado; tela de configuração ausente e recuperação de job implementadas |
 | 10 | Prova real não-canário autorizada | pendente | O Índice não foi alterado; sandbox/cópia ainda exige escolha/autorização |
 | 11 | Banco/arquivo/hash/parecer consistentes | parcial | Invariantes e testes verdes; falta conferência em execução real |
-| 12 | Testes e checks verdes | parcial | Local verde; workflow CI criado, mas remoto não pode rodar sem push |
+| 12 | Testes e checks verdes | parcial | Suíte/lint/typecheck/build locais verdes; gate de release reprova intencionalmente enquanto não existir certificado; remoto não pode rodar sem push |
 | 13 | Ambiente restaurado | pendente | `AtelierWorkerFechamento` ainda existe no Windows; principal está desabilitado |
 | 14 | PR contém código auditado | pendente | PR #3 está desatualizado; push não autorizado |
 | 15 | Relatório final sem pendências | pendente | Este ledger registra as pendências sem reinterpretá-las |
@@ -58,7 +59,10 @@ canários ou laboratório seria uma repetição idêntica sem nova hipótese.
    atestações, validar em dry-run e só então aplicar. O CSV, revisor, data e
    atestações ficam ligados por SHA-256. Rodar o calibrador; promover somente
    se precisão, recall, holdout e não-regressão passarem.
-4. Executar fluxo autenticado do wizard e meta-9 longa em sandbox seguro.
-5. Solicitar a autorização mínima para a prova real não-canário.
-6. Restaurar ambiente, atualizar matriz, apresentar SHA/diff e pedir autorização
+4. Registrar/exportar a avaliação humana do laboratório e executar
+   `v2-certificar-release.ts`; o certificado precisa casar com runtime,
+   contratos, corpus, canários e cinco hashes de evidência.
+5. Executar fluxo autenticado do wizard e meta-9 longa em sandbox seguro.
+6. Solicitar a autorização mínima para a prova real não-canário.
+7. Restaurar ambiente, atualizar matriz, apresentar SHA/diff e pedir autorização
    explícita para push/PR/merge/deploy.
