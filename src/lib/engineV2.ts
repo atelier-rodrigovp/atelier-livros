@@ -64,7 +64,13 @@ export interface EstadoCanonicoV2 {
     }[];
     capitulos: Record<string, CapituloEstadoV2>;
     bloqueios: { codigo: string; alvo: string; detalhe: string; desde: string }[];
-    migracao?: { origem: string; em: string; divergencias?: number };
+    migracao?: {
+      origem: string;
+      em: string;
+      divergencias?: number;
+      total_original?: number;
+      total_reconciliado?: number;
+    };
   };
 }
 

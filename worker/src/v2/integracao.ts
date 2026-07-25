@@ -28,6 +28,7 @@ import {
 } from "./estrutural.js";
 import { fundirFichas, PersistenciaEstadoIsolado } from "./estrutural-staging.js";
 import { executarMeta9 } from "./meta9.js";
+import { resolverTotalCapitulos } from "./total-capitulos.js";
 import { medirSinais, resumoSinais } from "./sinais.js";
 import { conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
 import {
@@ -255,10 +256,16 @@ export async function executarEscritaV2(job: Job): Promise<void> {
   }
 
   const estado = await gravador.carregarEstado();
-  const total = (proj as { total_capitulos?: number }).total_capitulos ?? estado.doc.total_capitulos ?? Number((job.payload as { total?: number })?.total ?? 0);
-  if (!total || total < 1) {
+  const resolucaoTotal = resolverTotalCapitulos({
+    projeto: (proj as { total_capitulos?: number }).total_capitulos,
+    canonico: estado.doc.total_capitulos,
+    payload: Number((job.payload as { total?: number })?.total ?? 0),
+    migrado: estado.doc.migracao?.origem === "v1",
+  });
+  if (!resolucaoTotal) {
     throw new ErroEngine({ codigo: "TOTAL_CAPITULOS_INDEFINIDO", classe: "configuracao", mensagem: "total de capítulos não definido no projeto nem no payload" });
   }
+  const total = resolucaoTotal.total;
 
   // Docs factuais do contrato (ex.: dossie-factual.md do dan-brown, matriz-de-relogios
   // do hoover): quando existem no projeto, entram VERBATIM no pacote do revisor e do
@@ -313,6 +320,13 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     migracao_pendente: migracaoPendente,
     fase: "ESCRITA",
     total,
+    total_origem: resolucaoTotal.origem,
+    ...(resolucaoTotal.divergenciaProjeto
+      ? {
+          total_divergencia: resolucaoTotal.divergenciaProjeto,
+          aviso: `total da tabela projects (${resolucaoTotal.divergenciaProjeto.projeto}) difere do canônico migrado (${resolucaoTotal.divergenciaProjeto.canonico}); escrita limitada ao canônico`,
+        }
+      : {}),
   });
 
   // Escrita incremental controlada (ex.: prova de 1 capítulo num livro migrado):

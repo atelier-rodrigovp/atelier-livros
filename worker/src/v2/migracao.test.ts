@@ -125,6 +125,25 @@ describe("migrarProjetoV1 — projeto V1 completo (a)", () => {
     expect(readFileSync(path.join(dir, "manuscrito", "capitulo-01.md"), "utf8")).toBe(CAP1);
     expect(JSON.parse(readFileSync(path.join(dir, "ESTADO_LIVRO.json"), "utf8")).fase_atual).toBe("CONCLUIDO");
   });
+
+  it("reconcilia legado concluído 3/4 para os 3 arquivos contíguos sem criar capítulo", async () => {
+    montarProjetoCompleto();
+    escrever(
+      "ESTADO_LIVRO.json",
+      JSON.stringify({ fase_atual: "CONCLUIDO", total_capitulos_previstos: 4, capitulos_aprovados: 3 })
+    );
+
+    const rel = await migrar();
+    const estado = await disco.lerEstado("proj-1");
+
+    expect(rel.totalCapitulos).toBe(3);
+    expect(rel.reconciliacaoTotal).toMatchObject({ original: 4, reconciliado: 3 });
+    expect(rel.divergencias.join(" | ")).toContain("reconciliado de 4 para 3");
+    expect(estado?.doc.total_capitulos).toBe(3);
+    expect(estado?.doc.migracao).toMatchObject({ total_original: 4, total_reconciliado: 3 });
+    expect(estado?.doc.capitulos["4"]).toBeUndefined();
+    expect(existsSync(path.join(dir, "manuscrito", "capitulo-04.md"))).toBe(false);
+  });
 });
 
 describe("migrarProjetoV1 — hash divergente (b)", () => {

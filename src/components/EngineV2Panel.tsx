@@ -381,6 +381,22 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
             </div>
           </div>
 
+          {doc.migracao?.total_original != null &&
+            doc.migracao.total_reconciliado != null &&
+            doc.migracao.total_original !== doc.migracao.total_reconciliado && (
+              <div className="flex items-start gap-3 rounded-lg border border-sky-500/40 bg-sky-500/10 p-3 text-sm">
+                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-sky-700 dark:text-sky-400" />
+                <div>
+                  <p className="font-medium">Total legado reconciliado</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    O planejamento antigo indicava {doc.migracao.total_original} capítulos, mas o estado canônico
+                    concluído contém {doc.migracao.total_reconciliado}. A escrita respeitará o total canônico e não
+                    criará capítulo adicional automaticamente.
+                  </p>
+                </div>
+              </div>
+            )}
+
           {decisaoHumana && (
             <div className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" />

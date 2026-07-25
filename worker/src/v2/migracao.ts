@@ -34,6 +34,7 @@ export interface RelatorioMigracao {
   fundacao: { docs: Record<string, string>; ausentes: string[] }; // doc → sha256
   divergencias: string[]; // ex.: quality aprovado mas hash não bate com o arquivo atual
   totalCapitulos?: number;
+  reconciliacaoTotal?: { original: number; reconciliado: number; motivo: string };
   fase: EstadoCanonicoDoc["fase"];
   idempotente: boolean; // true se nada mudou em relação à migração anterior
 }
@@ -279,8 +280,29 @@ export async function migrarProjetoV1(opts: {
   }
   doc.fase = fase;
 
+  let reconciliacaoTotal: RelatorioMigracao["reconciliacaoTotal"];
   if (typeof estadoLivro?.total_capitulos_previstos === "number") {
-    doc.total_capitulos = estadoLivro.total_capitulos_previstos;
+    const totalOriginal = estadoLivro.total_capitulos_previstos;
+    const numeros = [...arquivos.keys()].sort((a, b) => a - b);
+    const sequenciaContigua = numeros.every((numero, indice) => numero === indice + 1);
+    if (
+      faseV1 === "CONCLUIDO" &&
+      numeros.length > 0 &&
+      sequenciaContigua &&
+      totalOriginal !== numeros.length
+    ) {
+      doc.total_capitulos = numeros.length;
+      reconciliacaoTotal = {
+        original: totalOriginal,
+        reconciliado: numeros.length,
+        motivo: "projeto V1 concluído; total canônico reconciliado à sequência contígua de arquivos existentes",
+      };
+      divergencias.push(
+        `total de capítulos reconciliado de ${totalOriginal} para ${numeros.length}: projeto V1 concluído com sequência contígua no disco`
+      );
+    } else {
+      doc.total_capitulos = totalOriginal;
+    }
   }
   if (opts.skill) doc.skill = opts.skill;
 
@@ -299,7 +321,15 @@ export async function migrarProjetoV1(opts: {
     };
   }
 
-  doc.migracao = { origem: "v1", em: agora, relatorio_path: RELATORIO_REL, divergencias: divergencias.length };
+  doc.migracao = {
+    origem: "v1",
+    em: agora,
+    relatorio_path: RELATORIO_REL,
+    divergencias: divergencias.length,
+    ...(reconciliacaoTotal
+      ? { total_original: reconciliacaoTotal.original, total_reconciliado: reconciliacaoTotal.reconciliado }
+      : {}),
+  };
 
   // -------------------------------------------------------------------------
   // Idempotência: doc idêntico ao persistido (módulo migracao.em) → NÃO grava.
@@ -322,6 +352,7 @@ export async function migrarProjetoV1(opts: {
     fundacao: { docs: docsFundacao, ausentes },
     divergencias,
     ...(doc.total_capitulos !== undefined ? { totalCapitulos: doc.total_capitulos } : {}),
+    ...(reconciliacaoTotal ? { reconciliacaoTotal } : {}),
     fase: doc.fase,
     idempotente,
   };

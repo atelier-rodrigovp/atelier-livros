@@ -336,7 +336,14 @@ export interface EstadoCanonicoDoc {
   capitulos: Record<string, CapituloEstado>;
   // status_anterior: guarda o status do capítulo antes do bloqueio, para restauração fiel
   bloqueios: { codigo: string; alvo: string; detalhe: string; desde: string; status_anterior?: CapituloStatusV2 }[];
-  migracao?: { origem: "v1"; em: string; relatorio_path?: string; divergencias?: number };
+  migracao?: {
+    origem: "v1";
+    em: string;
+    relatorio_path?: string;
+    divergencias?: number;
+    total_original?: number;
+    total_reconciliado?: number;
+  };
 }
 
 export interface EstadoCanonico {
