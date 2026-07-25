@@ -11,9 +11,13 @@ rodar antes em persistência isolada (`--disco`).
 3. `npm ci`, `npm ci --prefix worker`, testes, lint, typecheck e build verdes.
 4. Canários Dan Brown, Hoover/McFadden e Romantasy com 2/2 capítulos
    `aprovado` no estado canônico atual — exceção não conta.
-5. Laboratório cego v2 aprovado e com artefatos brutos preservados.
-6. Backup lógico do banco e cópia segura do `WORK_DIR`.
-7. Worker temporário encerrado; somente a instância principal conhecida pode
+5. As 14 amostras da calibração estão `validado_humano`, com atestação por
+   sinal, SHA-256 do pacote e calibrador sem `rotulacao_pendente`.
+6. Toda cota candidata passou por calibração, holdout e laboratório; nenhuma
+   cota foi promovida apenas por máximo/média de amostras.
+7. Laboratório cego v2 aprovado e com artefatos brutos preservados.
+8. Backup lógico do banco e cópia segura do `WORK_DIR`.
+9. Worker temporário encerrado; somente a instância principal conhecida pode
    processar a fila.
 
 ## Ordem de publicação

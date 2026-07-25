@@ -14,9 +14,9 @@ operacional ainda não foram comprovados.
 
 - Branch isolada: `codex/engine-v2-conclusao`
 - Base remota: `origin/master` em `d6578fd5`
-- Divergência após fetch: 0 commits atrás; 34 à frente
-- Último commit de código validado: `3fed80f3e158d9cebb57b357e57362064012ceae`
-- Suíte: 76 arquivos, 777 testes aprovados, 3 pulados
+- Divergência após fetch: 0 commits atrás; 36 à frente
+- Último commit de código validado: `9f315a2ff3ba8bf77042b2b692bca5d8e8a616fc`
+- Suíte: 77 arquivos, 784 testes aprovados, 3 pulados
 - Lint: 0 erros; 3 warnings antigos de Fast Refresh
 - Worker typecheck: aprovado
 - Build de produção: aprovado (warning de chunk grande)
@@ -27,7 +27,7 @@ operacional ainda não foram comprovados.
 | # | Critério | Estado | Evidência / pendência |
 |---|---|---|---|
 | 1 | Regressão meta-9 corrigida | comprovado em código | Snapshot, promoção condicional, restauração e ledger; testes Hoover/Romantasy |
-| 2 | Calibração reproduzível | parcial | Corpus/splits/hashes/métricas/promoção fail-closed implementados; 14 amostras e 596 ocorrências aguardam rótulo humano |
+| 2 | Calibração reproduzível | parcial | Corpus/splits/hashes/métricas/promoção fail-closed e planilha humana auditável implementados; 14 amostras, 596 ocorrências e 182 atestações aguardam revisão humana |
 | 3 | Três canários 3/3 plenos | pendente | Claude CLI respondeu 429 antes de qualquer token; não foi substituído por mock |
 | 4 | Dois capítulos atuais aprovados por canário | pendente | Depende da execução real dos canários |
 | 5 | Vozes distinguíveis em leitura cega | pendente | Protocolo v2 corrigido/testado; IDs humanos são únicos, resultado é persistido e release não pode sobrepor reprovação; execução real aguarda reset |
@@ -54,8 +54,10 @@ canários ou laboratório seria uma repetição idêntica sem nova hipótese.
    `--completo`) e corrigir defeitos gerais até 3/3 pleno.
 2. Executar `v2-lab-isolado.ts`, preservar `execucao.json`,
    `avaliacao-cega.json` e `relatorio.json`.
-3. Concluir os rótulos humanos e rodar o calibrador; promover somente se
-   precisão, recall, holdout e não-regressão passarem.
+3. Exportar os rótulos com `v2-rotulos-humanos.ts`, concluir ocorrências e
+   atestações, validar em dry-run e só então aplicar. O CSV, revisor, data e
+   atestações ficam ligados por SHA-256. Rodar o calibrador; promover somente
+   se precisão, recall, holdout e não-regressão passarem.
 4. Executar fluxo autenticado do wizard e meta-9 longa em sandbox seguro.
 5. Solicitar a autorização mínima para a prova real não-canário.
 6. Restaurar ambiente, atualizar matriz, apresentar SHA/diff e pedir autorização
