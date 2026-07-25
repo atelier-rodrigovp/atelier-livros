@@ -27,6 +27,14 @@ interface LabRelatorio {
     notaMediaMinimaPorDimensao: number;
   };
   falhasDistincao?: string[];
+  calibracao?: {
+    corpusVersao: string;
+    corpusHash: string;
+    pronta: boolean;
+    skills: Record<string, boolean>;
+    pendencias: string[];
+  };
+  falhasCalibracao?: string[];
   regressoes: string[];
   vazamentos: string[];
   decisao: "aprovar" | "rejeitar" | "pendente";
@@ -211,6 +219,25 @@ function Relatorio({ rel, skillsVersoes }: { rel: LabRelatorio; skillsVersoes?: 
           {fmtNum(rel.criteriosCegos.notaMediaMinimaPorDimensao)}.
         </p>
       )}
+
+      <div className={`rounded-md border px-3 py-2 ${rel.calibracao?.pronta ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/5"}`}>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium">Calibração humana:</span>
+          <Badge variant={rel.calibracao?.pronta ? "success" : "warning"}>
+            {rel.calibracao?.pronta ? "pronta" : "pendente"}
+          </Badge>
+          {rel.calibracao && (
+            <span className="text-xs text-muted-foreground">
+              corpus {rel.calibracao.corpusVersao} · SHA {rel.calibracao.corpusHash.slice(0, 12)}
+            </span>
+          )}
+        </div>
+        {!!rel.falhasCalibracao?.length && (
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-amber-700 dark:text-amber-400">
+            {rel.falhasCalibracao.map((falha, i) => <li key={i}>{falha}</li>)}
+          </ul>
+        )}
+      </div>
 
       {matriz && colunas.length > 0 && (
         <div>
@@ -410,10 +437,11 @@ export default function Laboratorio() {
         decisao === "aprovada" &&
         !podeAprovarReleaseLab({
           decisaoAutomatica: atualProg.lab_relatorio?.decisao,
+          calibracaoPronta: atualProg.lab_relatorio?.calibracao?.pronta,
           resultadoHumano: atualProg.lab_avaliacao_humana,
         })
       ) {
-        throw new Error("A aprovação exige decisão automática aprovada e leitura humana registrada com ao menos 80% de acerto.");
+        throw new Error("A aprovação exige calibração humana pronta, decisão automática aprovada e leitura humana registrada com ao menos 80% de acerto.");
       }
       const merged: ProgressoLab = {
         ...atualProg,
@@ -473,6 +501,7 @@ export default function Laboratorio() {
   const emAndamento = atual?.status === "queued" || atual?.status === "running";
   const podeAprovarRelease = podeAprovarReleaseLab({
     decisaoAutomatica: pgRelatorio?.lab_relatorio?.decisao,
+    calibracaoPronta: pgRelatorio?.lab_relatorio?.calibracao?.pronta,
     resultadoHumano: pgRelatorio?.lab_avaliacao_humana,
   });
   const releaseRegistradaValida =
@@ -609,7 +638,7 @@ export default function Laboratorio() {
                       title={
                         podeAprovarRelease
                           ? undefined
-                          : "Exige decisão automática aprovada e leitura humana registrada com ao menos 80%."
+                          : "Exige calibração humana pronta, decisão automática aprovada e leitura humana registrada com ao menos 80%."
                       }
                       onClick={() => registrarDecisao(jobRelatorio.id, "aprovada")}
                     >

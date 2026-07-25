@@ -10,10 +10,17 @@ import { DiscoPersistencia } from "../persistencia.js";
 import { adaptarFichaParaSkill, CENAS_LAB } from "./cenas.js";
 import { rodarLab, type ExecucaoLab } from "./rodar.js";
 import { amostrasCegasParaUi, avaliarCego, ordenarAmostrasCegas, type AvaliacaoCega } from "./avaliar.js";
-import { compararExecucoes, falhasAvaliacaoCega } from "./relatorio.js";
+import { compararExecucoes, falhasAvaliacaoCega, resumirCalibracao } from "./relatorio.js";
 
 const SKILLS = ["dan-brown", "hoover-mcfadden", "romantasy"];
 const mapa = mapaModelosDoAmbiente({} as NodeJS.ProcessEnv);
+const CALIBRACAO_PRONTA = {
+  corpusVersao: "teste",
+  corpusHash: "a".repeat(64),
+  pronta: true,
+  skills: Object.fromEntries(SKILLS.map((skill) => [skill, true])),
+  pendencias: [],
+};
 
 // Prosa mock distinta por skill (voz reconhecível; termina com pontuação; sem aforismo).
 const PROSA: Record<string, string> = {
@@ -101,6 +108,32 @@ describe("lab — avaliação cega e relatório", () => {
     });
   }
 
+  it("resume calibração por skill e falha fechado quando uma voz está ausente", () => {
+    const resumo = resumirCalibracao({
+      schema: "calibration-result/v1",
+      corpus_versao: "teste",
+      corpus_hash: "a".repeat(64),
+      pendencias: ["hoover-mcfadden: rótulos pendentes"],
+      skills: [{
+        skill: "dan-brown",
+        contrato_versao: "1.0.0",
+        contrato_hash: "b".repeat(64),
+        sinais: [],
+        pronta_para_lab: true,
+      }, {
+        skill: "hoover-mcfadden",
+        contrato_versao: "1.0.0",
+        contrato_hash: "c".repeat(64),
+        sinais: [],
+        pronta_para_lab: false,
+      }],
+    }, ["dan-brown", "romantasy"]);
+    expect(resumo.pronta).toBe(false);
+    expect(resumo.skills).toEqual({ "dan-brown": true, romantasy: false });
+    expect(resumo.pendencias).toContain("romantasy: ausente do corpus de calibração");
+    expect(resumo.pendencias.join()).not.toContain("hoover-mcfadden");
+  });
+
   async function execComMock(): Promise<{ exec: ExecucaoLab; dir: string }> {
     const dir = await mkdtemp(path.join(tmpdir(), "lab-"));
     const exec = await rodarLab({ skills: SKILLS, provedor: mockEscritor(), mapa, dirSaida: dir, categorias: ["abertura", "confronto"] });
@@ -166,7 +199,7 @@ describe("lab — avaliação cega e relatório", () => {
       matrizConfusao: Object.fromEntries(SKILLS.map((s) => [s, { [s]: 2 }])),
       mediaNotas: notas,
     };
-    const r1 = compararExecucoes(exec, avaliacao, null);
+    const r1 = compararExecucoes(exec, avaliacao, null, null, CALIBRACAO_PRONTA);
     expect(r1.vazamentos).toEqual([]);
     expect(r1.decisao).toBe("aprovar");
     expect(r1.metricas["gnomico"].porSkill["dan-brown"]).toBeDefined();
@@ -187,7 +220,7 @@ describe("lab — avaliação cega e relatório", () => {
         sinais: a.sinais.map((s) => (s.sinal === "gnomico" ? { ...s, valor: 4 } : s)),
       })),
     };
-    const r2 = compararExecucoes(atualPior, avaliacao, anterior);
+    const r2 = compararExecucoes(atualPior, avaliacao, anterior, null, CALIBRACAO_PRONTA);
     expect(r2.decisao).toBe("rejeitar");
     expect(r2.regressoes.join()).toContain("gnomico");
   });
@@ -204,6 +237,39 @@ describe("lab — avaliação cega e relatório", () => {
     const r = compararExecucoes(comVazamento, null, null);
     expect(r.decisao).toBe("rejeitar");
     expect(r.vazamentos.length).toBe(1);
+  });
+
+  it("não aprova release sem evidência de calibração humana pronta", async () => {
+    const { exec } = await execComMock();
+    const itens = exec.amostras.map((a, i) => ({
+      amostraAnonima: `A-${i}`,
+      amostraId: a.id,
+      skillReal: a.skillId,
+      skillAdivinhada: a.skillId,
+      acertou: true,
+      aderencia: 4.4,
+      notas,
+      tracosDistintivos: ["voz reconhecível"],
+      parecerResumo: "aderente",
+      runId: `run-${i}`,
+      saidaBruta: respostaCega(a.skillId),
+      saidaBrutaHash: `hash-${i}`,
+    }));
+    const avaliacao: AvaliacaoCega = {
+      schema: "blind-evaluation/v2",
+      execucaoId: "blind-sem-calibracao",
+      labExecucaoId: exec.id,
+      executadaEm: "2026-07-25T12:00:00.000Z",
+      seedOrdem: "seed",
+      modeloAvaliador: "sonnet",
+      porAmostra: itens,
+      distinguibilidade: 1,
+      matrizConfusao: {},
+      mediaNotas: notas,
+    };
+    const rel = compararExecucoes(exec, avaliacao, null);
+    expect(rel.decisao).toBe("pendente");
+    expect(rel.falhasCalibracao).toContain("execução não publicou evidência de calibração");
   });
 
   it("não aprova avaliação existente porém indistinguível", async () => {

@@ -6,12 +6,14 @@
 
 import "dotenv/config";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { DiscoPersistencia } from "../src/v2/persistencia.js";
+import { analisarCalibracao } from "../src/v2/calibracao.js";
 import { mapaModelosDoAmbiente } from "../src/v2/config.js";
 import { ProvedorClaudeCli } from "../src/v2/provedor.js";
 import { rodarLab } from "../src/v2/lab/rodar.js";
 import { avaliarCego, gravarAvaliacaoCega, lerAvaliacaoCega } from "../src/v2/lab/avaliar.js";
-import { compararExecucoes, execucaoAnterior, gravarRelatorio } from "../src/v2/lab/relatorio.js";
+import { compararExecucoes, execucaoAnterior, gravarRelatorio, resumirCalibracao } from "../src/v2/lab/relatorio.js";
 
 async function main(): Promise<void> {
   const dirIdx = process.argv.indexOf("--dir");
@@ -27,6 +29,10 @@ async function main(): Promise<void> {
   const mapa = mapaModelosDoAmbiente();
   const persistencia = new DiscoPersistencia(dirSaida);
   const anterior = await execucaoAnterior(dirSaida);
+  const calibracao = resumirCalibracao(
+    analisarCalibracao(path.resolve(workerDir(), "calibration", "v1")),
+    skills
+  );
 
   console.log(`laboratório isolado: ${dirSaida}`);
   console.log(`skills: ${skills.join(", ")} · escritor: ${mapa.prosa} · avaliador: ${mapa.julgamento}`);
@@ -37,7 +43,7 @@ async function main(): Promise<void> {
   const avaliacaoPath = await gravarAvaliacaoCega(dirSaida, avaliacao);
   const anteriorValido = anterior && anterior.id !== exec.id ? anterior : null;
   const avaliacaoAnterior = anteriorValido ? await lerAvaliacaoCega(dirSaida, anteriorValido.id) : null;
-  const relatorio = compararExecucoes(exec, avaliacao, anteriorValido, avaliacaoAnterior);
+  const relatorio = compararExecucoes(exec, avaliacao, anteriorValido, avaliacaoAnterior, calibracao);
   const relatorioPath = await gravarRelatorio(dirSaida, relatorio);
 
   console.log(`distinguibilidade: ${(avaliacao.distinguibilidade * 100).toFixed(1)}%`);
@@ -45,9 +51,17 @@ async function main(): Promise<void> {
   if (relatorio.falhasDistincao.length) {
     for (const falha of relatorio.falhasDistincao) console.log(`  - ${falha}`);
   }
+  if (relatorio.falhasCalibracao.length) {
+    console.log("calibração pendente:");
+    for (const falha of relatorio.falhasCalibracao) console.log(`  - ${falha}`);
+  }
   console.log(`avaliação bruta: ${avaliacaoPath}`);
   console.log(`relatório: ${relatorioPath}`);
   if (relatorio.decisao !== "aprovar") process.exitCode = 2;
+}
+
+function workerDir(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 }
 
 main().catch((erro) => {

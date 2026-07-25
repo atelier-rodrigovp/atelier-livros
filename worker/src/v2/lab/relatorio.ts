@@ -4,8 +4,17 @@
 
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import type { ResultadoCalibracao } from "../calibracao.js";
 import type { AvaliacaoCega } from "./avaliar.js";
 import type { AmostraLab, ExecucaoLab } from "./rodar.js";
+
+export interface EvidenciaCalibracaoLab {
+  corpusVersao: string;
+  corpusHash: string;
+  pronta: boolean;
+  skills: Record<string, boolean>;
+  pendencias: string[];
+}
 
 export interface RelatorioLab {
   execucaoId: string;
@@ -16,6 +25,8 @@ export interface RelatorioLab {
   matrizConfusao?: Record<string, Record<string, number>>;
   criteriosCegos: typeof CRITERIOS_CEGOS;
   falhasDistincao: string[];
+  calibracao?: EvidenciaCalibracaoLab;
+  falhasCalibracao: string[];
   regressoes: string[];
   vazamentos: string[];
   decisao: "aprovar" | "rejeitar" | "pendente";
@@ -29,6 +40,30 @@ export const CRITERIOS_CEGOS = {
 } as const;
 
 const METRICAS = ["gnomico", "personificacao", "sanfona", "metafora_elaborada", "palavras", "dialogo_pct"] as const;
+
+export function resumirCalibracao(
+  resultado: ResultadoCalibracao,
+  skillsEsperadas: string[]
+): EvidenciaCalibracaoLab {
+  const porSkill = new Map(resultado.skills.map((skill) => [skill.skill, skill.pronta_para_lab]));
+  const skills = Object.fromEntries(skillsEsperadas.map((skill) => [skill, porSkill.get(skill) === true]));
+  const ausentes = skillsEsperadas.filter((skill) => !porSkill.has(skill));
+  const todasAsSkills = resultado.skills.map((skill) => skill.skill);
+  const pendencias = [
+    ...resultado.pendencias.filter((pendencia) => {
+      const skillDaPendencia = todasAsSkills.find((skill) => pendencia.startsWith(`${skill}:`));
+      return !skillDaPendencia || skillsEsperadas.includes(skillDaPendencia);
+    }),
+    ...ausentes.map((skill) => `${skill}: ausente do corpus de calibração`),
+  ];
+  return {
+    corpusVersao: resultado.corpus_versao,
+    corpusHash: resultado.corpus_hash,
+    pronta: Object.values(skills).every(Boolean) && pendencias.length === 0,
+    skills,
+    pendencias,
+  };
+}
 
 function mediaSinal(amostras: AmostraLab[], sinal: string): number {
   const valores = amostras
@@ -77,7 +112,8 @@ export function compararExecucoes(
   atual: ExecucaoLab,
   avaliacao: AvaliacaoCega | null,
   anterior: ExecucaoLab | null,
-  avaliacaoAnterior: AvaliacaoCega | null = null
+  avaliacaoAnterior: AvaliacaoCega | null = null,
+  calibracao?: EvidenciaCalibracaoLab
 ): RelatorioLab {
   const skills = atual.skills.map((s) => s.id);
   const metricas: RelatorioLab["metricas"] = {};
@@ -128,10 +164,15 @@ export function compararExecucoes(
   }
 
   const falhasDistincao = avaliacao ? falhasAvaliacaoCega(avaliacao) : [];
+  const falhasCalibracao = calibracao
+    ? calibracao.pronta ? [] : calibracao.pendencias.length
+      ? calibracao.pendencias
+      : ["calibração não está pronta para laboratório"]
+    : ["execução não publicou evidência de calibração"];
 
   let decisao: RelatorioLab["decisao"];
   if (regressoes.length > 0 || vazamentos.length > 0 || falhasDistincao.length > 0) decisao = "rejeitar";
-  else if (!avaliacao) decisao = "pendente";
+  else if (!avaliacao || falhasCalibracao.length > 0) decisao = "pendente";
   else decisao = "aprovar";
 
   return {
@@ -143,6 +184,8 @@ export function compararExecucoes(
     matrizConfusao: avaliacao?.matrizConfusao,
     criteriosCegos: CRITERIOS_CEGOS,
     falhasDistincao,
+    calibracao,
+    falhasCalibracao,
     regressoes,
     vazamentos,
     decisao,

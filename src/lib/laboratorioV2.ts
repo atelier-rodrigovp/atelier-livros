@@ -5,6 +5,7 @@ export interface ResultadoHumanoLab {
 
 export function podeAprovarReleaseLab(opts: {
   decisaoAutomatica?: string;
+  calibracaoPronta?: boolean;
   resultadoHumano?: ResultadoHumanoLab | null;
   minimoHumano?: number;
 }): boolean {
@@ -12,6 +13,7 @@ export function podeAprovarReleaseLab(opts: {
   const humano = opts.resultadoHumano;
   return (
     opts.decisaoAutomatica === "aprovar" &&
+    opts.calibracaoPronta === true &&
     humano != null &&
     humano.total > 0 &&
     humano.acertos / humano.total >= minimo

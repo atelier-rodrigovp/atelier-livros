@@ -4,13 +4,15 @@
 // a avaliação humana às cegas).
 
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { DiscoPersistencia } from "../persistencia.js";
 import { mapaModelosDoAmbiente } from "../config.js";
 import { ProvedorClaudeCli } from "../provedor.js";
 import { MAPA_SKILL_V1_V2 } from "../contrato.js";
+import { analisarCalibracao } from "../calibracao.js";
 import { rodarLab } from "./rodar.js";
 import { amostrasCegasParaUi, avaliarCego, gravarAvaliacaoCega, lerAvaliacaoCega } from "./avaliar.js";
-import { compararExecucoes, execucaoAnterior, gravarRelatorio } from "./relatorio.js";
+import { compararExecucoes, execucaoAnterior, gravarRelatorio, resumirCalibracao } from "./relatorio.js";
 import type { CategoriaCena } from "./cenas.js";
 
 interface JobLab {
@@ -37,11 +39,17 @@ export async function executarLaboratorio(job: JobLab): Promise<void> {
   const payload = (job.payload ?? {}) as PayloadLab;
   const skills = payload.skills?.length ? payload.skills : Object.values(MAPA_SKILL_V1_V2);
   const dirSaida = path.join(WORK_DIR, "lab-v2");
+  const dirCorpus = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../calibration/v1");
+  const calibracao = resumirCalibracao(analisarCalibracao(dirCorpus), skills);
   const provedor = new ProvedorClaudeCli(CLAUDE_BIN);
   const mapa = mapaModelosDoAmbiente();
   const persistencia = new DiscoPersistencia(dirSaida);
 
-  await progresso({ fase: "LAB", etapa: `escrevendo amostras (${skills.length} skills × cenas)` });
+  await progresso({
+    fase: "LAB",
+    etapa: `escrevendo amostras (${skills.length} skills × cenas)`,
+    lab_calibracao: calibracao,
+  });
   const anterior = await execucaoAnterior(dirSaida);
   const exec = await rodarLab({ skills, categorias: payload.categorias, provedor, mapa, dirSaida, persistencia });
 
@@ -55,7 +63,7 @@ export async function executarLaboratorio(job: JobLab): Promise<void> {
 
   const anteriorValido = anterior && anterior.id !== exec.id ? anterior : null;
   const avaliacaoAnterior = anteriorValido ? await lerAvaliacaoCega(dirSaida, anteriorValido.id) : null;
-  const relatorio = compararExecucoes(exec, avaliacao, anteriorValido, avaliacaoAnterior);
+  const relatorio = compararExecucoes(exec, avaliacao, anteriorValido, avaliacaoAnterior, calibracao);
   const relPath = await gravarRelatorio(dirSaida, relatorio);
 
   await progresso({
