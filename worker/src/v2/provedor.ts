@@ -72,6 +72,11 @@ export function classificarErroCli(mensagem: string, detalhe?: unknown): Error {
   return new ErroProvedor("PROVEDOR_FALHOU", mensagem, detalhe);
 }
 
+/** Chamada deliberadamente sem ferramentas: o modelo recebe texto e devolve texto. */
+export function argumentosClaudeCli(modelo: string): string[] {
+  return ["-p", "--model", modelo, "--output-format", "json", "--tools", ""];
+}
+
 /**
  * Provedor via claude CLI não-interativo (`claude -p`).
  * Papéis V2 são chamadas puras de texto: o modelo NUNCA usa ferramentas nem toca disco
@@ -109,7 +114,7 @@ export class ProvedorClaudeCli implements ProvedorModelo {
   }
 
   async chamar(c: ChamadaModelo): Promise<RespostaModelo> {
-    const args = ["-p", "--model", c.modelo, "--output-format", "json"];
+    const args = argumentosClaudeCli(c.modelo);
     const timeoutMs = c.timeoutMs ?? 600000;
     const r = await this.executar(args, c.prompt, timeoutMs);
     if (r.code === -1 && /timeout/.test(r.err)) {

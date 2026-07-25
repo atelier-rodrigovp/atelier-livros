@@ -8,14 +8,14 @@
 // 'running' sem heartbeat). O canário chama o pipeline direto; o estado
 // canônico fica em engine_state (ou fallback de disco pré-DDL).
 //
-// Uso (de worker/):  npx tsx scripts/v2-canario.ts [dan-brown|hoover-mcfadden|romantasy|todos] [--caps N]
+// Uso (de worker/):  npx tsx scripts/v2-canario.ts [dan-brown|hoover-mcfadden|romantasy|todos] [--caps N] [--disco]
 
 import "dotenv/config";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { carregarContrato } from "../src/v2/contrato.js";
-import { criarPersistencia } from "../src/v2/persistencia.js";
+import { criarPersistencia, DiscoPersistencia } from "../src/v2/persistencia.js";
 import { Gravador } from "../src/v2/gravador.js";
 import { compilarPacote } from "../src/v2/compilador.js";
 import { executarPapel } from "../src/v2/papeis.js";
@@ -84,13 +84,21 @@ async function rodarCanario(skillId: string, totalCaps: number, dirExistente?: s
   }
   await fs.mkdir(dirProjeto, { recursive: true });
 
-  const { persistencia, migracaoPendente } = await criarPersistencia({ dirProjeto });
+  const persistenciaDisco = process.argv.includes("--disco");
+  const criada = persistenciaDisco
+    ? { persistencia: new DiscoPersistencia(dirProjeto), migracaoPendente: false }
+    : await criarPersistencia({ dirProjeto });
+  const { persistencia, migracaoPendente } = criada;
   const gravador = new Gravador({ persistencia, projectId });
   const provedor = new ProvedorClaudeCli(process.env.CLAUDE_BIN!, dirProjeto);
   const mapa = mapaModelosDoAmbiente();
 
   console.log(`\n=== CANÁRIO ${skillId} (${contrato.contrato.versao}) — ${brief.titulo}`);
-  console.log(`dir: ${dirProjeto} · persistência: ${migracaoPendente ? "disco (DDL pendente)" : "supabase"}`);
+  console.log(
+    `dir: ${dirProjeto} · persistência: ${
+      persistenciaDisco ? "disco (isolada por --disco)" : migracaoPendente ? "disco (DDL pendente)" : "supabase"
+    }`
+  );
 
   // --- Retomada: fundação já existe no disco? ---
   const perfilPathExistente = path.join(dirProjeto, "perfil-de-voz.md");
@@ -101,6 +109,7 @@ async function rodarCanario(skillId: string, totalCaps: number, dirExistente?: s
     console.log(`fundação reaproveitada · fios: ${estruturaBruta.fios.join(", ")}`);
     return continuarCapitulos(skillId, totalCaps, {
       contrato, brief, projectId, dirProjeto, persistencia, gravador, provedor, mapa, migracaoPendente,
+      persistenciaModo: persistenciaDisco ? "disco_isolado" : migracaoPendente ? "disco_fallback" : "supabase",
       fundacao: { perfil_voz: perfilExistente, estrutura: estruturaBruta.estrutura, fios: estruturaBruta.fios, promessa_editorial: estruturaBruta.promessa },
       fundacaoRunId: "retomada",
     });
@@ -149,6 +158,7 @@ async function rodarCanario(skillId: string, totalCaps: number, dirExistente?: s
 
   return continuarCapitulos(skillId, totalCaps, {
     contrato, brief, projectId, dirProjeto, persistencia, gravador, provedor, mapa, migracaoPendente,
+    persistenciaModo: persistenciaDisco ? "disco_isolado" : migracaoPendente ? "disco_fallback" : "supabase",
     fundacao: fundacao.valor,
     fundacaoRunId: fundacao.runId,
   });
@@ -164,12 +174,13 @@ interface CtxCanario {
   provedor: ProvedorClaudeCli;
   mapa: ReturnType<typeof mapaModelosDoAmbiente>;
   migracaoPendente: boolean;
+  persistenciaModo: "supabase" | "disco_fallback" | "disco_isolado";
   fundacao: FundacaoCanario;
   fundacaoRunId: string;
 }
 
 async function continuarCapitulos(skillId: string, totalCaps: number, ctx: CtxCanario): Promise<Record<string, unknown>> {
-  const { contrato, brief, projectId, dirProjeto, persistencia, gravador, provedor, mapa, migracaoPendente, fundacao } = ctx;
+  const { contrato, brief, projectId, dirProjeto, persistencia, gravador, provedor, mapa, migracaoPendente, persistenciaModo, fundacao } = ctx;
   const deps: DepsPipeline = {
     gravador,
     persistencia,
@@ -274,6 +285,7 @@ async function continuarCapitulos(skillId: string, totalCaps: number, ctx: CtxCa
     titulo: brief.titulo,
     dirProjeto,
     migracaoPendente,
+    persistenciaModo,
     fundacao: { fios: fundacao.fios, promessa: fundacao.promessa_editorial, runId: ctx.fundacaoRunId },
     capitulos: resultados,
     capitulos_estado_final: capitulosFinais,

@@ -9,7 +9,7 @@ import { mapaModelosDoAmbiente } from "../config.js";
 import { ProvedorClaudeCli } from "../provedor.js";
 import { MAPA_SKILL_V1_V2 } from "../contrato.js";
 import { rodarLab } from "./rodar.js";
-import { avaliarCego } from "./avaliar.js";
+import { avaliarCego, gravarAvaliacaoCega, lerAvaliacaoCega } from "./avaliar.js";
 import { compararExecucoes, execucaoAnterior, gravarRelatorio } from "./relatorio.js";
 import type { CategoriaCena } from "./cenas.js";
 
@@ -46,12 +46,16 @@ export async function executarLaboratorio(job: JobLab): Promise<void> {
   const exec = await rodarLab({ skills, categorias: payload.categorias, provedor, mapa, dirSaida, persistencia });
 
   let avaliacao = null;
+  let avaliacaoPath: string | null = null;
   if (payload.avaliar !== false) {
     await progresso({ etapa: `avaliação cega (${exec.amostras.length} amostras)` });
     avaliacao = await avaliarCego(exec, { provedor, mapa, persistencia });
+    avaliacaoPath = await gravarAvaliacaoCega(dirSaida, avaliacao);
   }
 
-  const relatorio = compararExecucoes(exec, avaliacao, anterior && anterior.id !== exec.id ? anterior : null);
+  const anteriorValido = anterior && anterior.id !== exec.id ? anterior : null;
+  const avaliacaoAnterior = anteriorValido ? await lerAvaliacaoCega(dirSaida, anteriorValido.id) : null;
+  const relatorio = compararExecucoes(exec, avaliacao, anteriorValido, avaliacaoAnterior);
   const relPath = await gravarRelatorio(dirSaida, relatorio);
 
   await progresso({
@@ -60,6 +64,7 @@ export async function executarLaboratorio(job: JobLab): Promise<void> {
     lab_relatorio: relatorio,
     lab_execucao_id: exec.id,
     lab_relatorio_path: relPath,
+    lab_avaliacao_cega_path: avaliacaoPath,
     // Versões dos contratos desta execução (a UI mostra "dan-brown@1.1.0 …").
     lab_skills: exec.skills,
     // Amostras cegas para avaliação HUMANA: sem skillId (a UI revela só depois do palpite).

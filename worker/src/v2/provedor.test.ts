@@ -5,7 +5,15 @@
 // tentativa) e executarPapel deixa esse erro ATRAVESSAR sem retry técnico.
 import { describe, expect, it } from "vitest";
 import { LimiteMaxError } from "../limite-max.js";
-import { ErroProvedor, classificarErroCli, extrairMensagemCli } from "./provedor.js";
+import { argumentosClaudeCli, ErroProvedor, classificarErroCli, extrairMensagemCli } from "./provedor.js";
+
+describe("argumentosClaudeCli", () => {
+  it("desabilita ferramentas para manter cada papel como transformação pura de texto", () => {
+    const args = argumentosClaudeCli("opus");
+    expect(args).toContain("--tools");
+    expect(args[args.indexOf("--tools") + 1]).toBe("");
+  });
+});
 
 describe("classificarErroCli", () => {
   it("mensagem REAL do incidente (session limit 429) vira LimiteMaxError com retry_at", () => {

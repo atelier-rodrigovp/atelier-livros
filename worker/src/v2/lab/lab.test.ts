@@ -9,8 +9,8 @@ import { validarSpec } from "../spec.js";
 import { DiscoPersistencia } from "../persistencia.js";
 import { adaptarFichaParaSkill, CENAS_LAB } from "./cenas.js";
 import { rodarLab, type ExecucaoLab } from "./rodar.js";
-import { avaliarCego } from "./avaliar.js";
-import { compararExecucoes } from "./relatorio.js";
+import { avaliarCego, ordenarAmostrasCegas, type AvaliacaoCega } from "./avaliar.js";
+import { compararExecucoes, falhasAvaliacaoCega } from "./relatorio.js";
 
 const SKILLS = ["dan-brown", "hoover-mcfadden", "romantasy"];
 const mapa = mapaModelosDoAmbiente({} as NodeJS.ProcessEnv);
@@ -82,6 +82,25 @@ describe("lab — rodarLab", () => {
 });
 
 describe("lab — avaliação cega e relatório", () => {
+  const notas = {
+    voz: 4.5,
+    cadencia: 4.2,
+    interioridade: 4.1,
+    revelacao: 4.3,
+    encerramento: 4,
+    inteligencia_narrativa: 4.4,
+  };
+
+  function respostaCega(skill: string) {
+    return JSON.stringify({
+      skill_adivinhada: skill,
+      aderencia: 4.4,
+      notas,
+      tracos_distintivos: ["cadência e foco narrativo identificáveis no texto"],
+      justificativa: "A voz, a distância psíquica e o modo de revelar informação correspondem ao contrato.",
+    });
+  }
+
   async function execComMock(): Promise<{ exec: ExecucaoLab; dir: string }> {
     const dir = await mkdtemp(path.join(tmpdir(), "lab-"));
     const exec = await rodarLab({ skills: SKILLS, provedor: mockEscritor(), mapa, dirSaida: dir, categorias: ["abertura", "confronto"] });
@@ -91,20 +110,53 @@ describe("lab — avaliação cega e relatório", () => {
   it("distinguibilidade e matriz de confusão", async () => {
     const { exec, dir } = await execComMock();
     const revisor = new ProvedorMock();
-    // Palpites: acerta sempre que o texto contém marca da skill (determinístico via ordem por hash).
-    const ordenadas = [...exec.amostras].sort((a, b) => a.textoHash.localeCompare(b.textoHash));
+    // Palpites: acerta sempre; ordem pseudorrandômica é reproduzível pelo seed da execução.
+    const ordenadas = ordenarAmostrasCegas(exec).amostras;
     for (const a of ordenadas) {
-      revisor.enfileirar("revisor_literario", JSON.stringify({ skill_adivinhada: a.skillId, aderencia: 4, justificativa: "voz casa com o contrato" }));
+      revisor.enfileirar("revisor_literario", respostaCega(a.skillId));
     }
     const av = await avaliarCego(exec, { provedor: revisor, mapa, persistencia: new DiscoPersistencia(dir) });
+    expect(av.schema).toBe("blind-evaluation/v2");
     expect(av.distinguibilidade).toBe(1);
     expect(av.matrizConfusao["dan-brown"]["dan-brown"]).toBe(2);
     expect(av.porAmostra.every((p) => p.acertou)).toBe(true);
+    expect(av.porAmostra.every((p) => p.saidaBruta && p.runId)).toBe(true);
+    expect(falhasAvaliacaoCega(av)).toEqual([]);
+    // O pacote técnico é neutro: não revela qual dos contratos participantes gerou a amostra.
+    for (const chamada of revisor.chamadas) {
+      expect(chamada.prompt).toContain("Skill: avaliacao-cega@2");
+      expect(chamada.prompt).not.toMatch(/Skill: (dan-brown|hoover-mcfadden|romantasy)@/);
+    }
   });
 
   it("relatório: sem anterior + avaliado → aprovar; regressão de tique → rejeitar", async () => {
     const { exec } = await execComMock();
-    const avaliacao = { porAmostra: [], distinguibilidade: 1, matrizConfusao: {} };
+    const itens = exec.amostras.map((a, i) => ({
+      amostraAnonima: `A-${i}`,
+      amostraId: a.id,
+      skillReal: a.skillId,
+      skillAdivinhada: a.skillId,
+      acertou: true,
+      aderencia: 4.4,
+      notas,
+      tracosDistintivos: ["voz reconhecível"],
+      parecerResumo: "aderente",
+      runId: `run-${i}`,
+      saidaBruta: respostaCega(a.skillId),
+      saidaBrutaHash: `hash-${i}`,
+    }));
+    const avaliacao: AvaliacaoCega = {
+      schema: "blind-evaluation/v2",
+      execucaoId: "blind-1",
+      labExecucaoId: exec.id,
+      executadaEm: "2026-07-25T12:00:00.000Z",
+      seedOrdem: "seed",
+      modeloAvaliador: "sonnet",
+      porAmostra: itens,
+      distinguibilidade: 1,
+      matrizConfusao: Object.fromEntries(SKILLS.map((s) => [s, { [s]: 2 }])),
+      mediaNotas: notas,
+    };
     const r1 = compararExecucoes(exec, avaliacao, null);
     expect(r1.vazamentos).toEqual([]);
     expect(r1.decisao).toBe("aprovar");
@@ -143,5 +195,38 @@ describe("lab — avaliação cega e relatório", () => {
     const r = compararExecucoes(comVazamento, null, null);
     expect(r.decisao).toBe("rejeitar");
     expect(r.vazamentos.length).toBe(1);
+  });
+
+  it("não aprova avaliação existente porém indistinguível", async () => {
+    const { exec } = await execComMock();
+    const itens = exec.amostras.map((a, i) => ({
+      amostraAnonima: `A-${i}`,
+      amostraId: a.id,
+      skillReal: a.skillId,
+      skillAdivinhada: "dan-brown",
+      acertou: a.skillId === "dan-brown",
+      aderencia: 3,
+      notas: { ...notas, inteligencia_narrativa: 2.5 },
+      tracosDistintivos: ["mesma inteligência narrativa"],
+      parecerResumo: "vozes confundidas",
+      runId: `run-${i}`,
+      saidaBruta: "{}",
+      saidaBrutaHash: `hash-${i}`,
+    }));
+    const av: AvaliacaoCega = {
+      schema: "blind-evaluation/v2",
+      execucaoId: "blind-ruim",
+      labExecucaoId: exec.id,
+      executadaEm: "2026-07-25T12:00:00.000Z",
+      seedOrdem: "seed",
+      modeloAvaliador: "sonnet",
+      porAmostra: itens,
+      distinguibilidade: itens.filter((x) => x.acertou).length / itens.length,
+      matrizConfusao: {},
+      mediaNotas: { ...notas, inteligencia_narrativa: 2.5 },
+    };
+    const rel = compararExecucoes(exec, av, null);
+    expect(rel.decisao).toBe("rejeitar");
+    expect(rel.falhasDistincao.join(" | ")).toMatch(/distinguibilidade|aderência|inteligencia_narrativa/);
   });
 });

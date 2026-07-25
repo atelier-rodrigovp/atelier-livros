@@ -12,11 +12,21 @@ export interface RelatorioLab {
   anterior?: string;
   metricas: Record<string, { porSkill: Record<string, number> }>;
   distinguibilidade?: number;
+  distinguibilidadeAnterior?: number;
   matrizConfusao?: Record<string, Record<string, number>>;
+  criteriosCegos: typeof CRITERIOS_CEGOS;
+  falhasDistincao: string[];
   regressoes: string[];
   vazamentos: string[];
   decisao: "aprovar" | "rejeitar" | "pendente";
 }
+
+export const CRITERIOS_CEGOS = {
+  distinguibilidadeMinima: 0.8,
+  acertoMinimoPorSkill: 2 / 3,
+  aderenciaMediaMinima: 4,
+  notaMediaMinimaPorDimensao: 3.5,
+} as const;
 
 const METRICAS = ["gnomico", "personificacao", "sanfona", "metafora_elaborada", "palavras", "dialogo_pct"] as const;
 
@@ -32,10 +42,42 @@ function foraDaCotaTotal(amostras: AmostraLab[]): number {
   return amostras.reduce((s, a) => s + a.sinais.filter((x) => x.fora_da_cota).length, 0);
 }
 
+export function falhasAvaliacaoCega(avaliacao: AvaliacaoCega): string[] {
+  const falhas: string[] = [];
+  if (avaliacao.schema !== "blind-evaluation/v2" || avaliacao.porAmostra.length === 0) {
+    return ["avaliação cega ausente, vazia ou em protocolo anterior ao v2"];
+  }
+  if (avaliacao.distinguibilidade < CRITERIOS_CEGOS.distinguibilidadeMinima) {
+    falhas.push(
+      `distinguibilidade ${(avaliacao.distinguibilidade * 100).toFixed(1)}% abaixo de ${(CRITERIOS_CEGOS.distinguibilidadeMinima * 100).toFixed(0)}%`
+    );
+  }
+  const aderenciaMedia =
+    avaliacao.porAmostra.reduce((s, item) => s + item.aderencia, 0) / avaliacao.porAmostra.length;
+  if (aderenciaMedia < CRITERIOS_CEGOS.aderenciaMediaMinima) {
+    falhas.push(`aderência média ${aderenciaMedia.toFixed(2)} abaixo de ${CRITERIOS_CEGOS.aderenciaMediaMinima}`);
+  }
+  const skills = [...new Set(avaliacao.porAmostra.map((item) => item.skillReal))];
+  for (const skill of skills) {
+    const itens = avaliacao.porAmostra.filter((item) => item.skillReal === skill);
+    const acerto = itens.filter((item) => item.acertou).length / itens.length;
+    if (acerto < CRITERIOS_CEGOS.acertoMinimoPorSkill) {
+      falhas.push(`${skill}: acerto ${(acerto * 100).toFixed(1)}% abaixo de ${(CRITERIOS_CEGOS.acertoMinimoPorSkill * 100).toFixed(1)}%`);
+    }
+  }
+  for (const [dimensao, nota] of Object.entries(avaliacao.mediaNotas)) {
+    if (nota < CRITERIOS_CEGOS.notaMediaMinimaPorDimensao) {
+      falhas.push(`${dimensao}: média ${nota.toFixed(2)} abaixo de ${CRITERIOS_CEGOS.notaMediaMinimaPorDimensao}`);
+    }
+  }
+  return falhas;
+}
+
 export function compararExecucoes(
   atual: ExecucaoLab,
   avaliacao: AvaliacaoCega | null,
-  anterior: ExecucaoLab | null
+  anterior: ExecucaoLab | null,
+  avaliacaoAnterior: AvaliacaoCega | null = null
 ): RelatorioLab {
   const skills = atual.skills.map((s) => s.id);
   const metricas: RelatorioLab["metricas"] = {};
@@ -75,9 +117,20 @@ export function compararExecucoes(
       }
     }
   }
+  if (
+    avaliacao &&
+    avaliacaoAnterior &&
+    avaliacao.distinguibilidade < avaliacaoAnterior.distinguibilidade - 0.15
+  ) {
+    regressoes.push(
+      `distinguibilidade piorou (${(avaliacaoAnterior.distinguibilidade * 100).toFixed(1)}% → ${(avaliacao.distinguibilidade * 100).toFixed(1)}%)`
+    );
+  }
+
+  const falhasDistincao = avaliacao ? falhasAvaliacaoCega(avaliacao) : [];
 
   let decisao: RelatorioLab["decisao"];
-  if (regressoes.length > 0 || vazamentos.length > 0) decisao = "rejeitar";
+  if (regressoes.length > 0 || vazamentos.length > 0 || falhasDistincao.length > 0) decisao = "rejeitar";
   else if (!avaliacao) decisao = "pendente";
   else decisao = "aprovar";
 
@@ -86,7 +139,10 @@ export function compararExecucoes(
     anterior: anterior?.id,
     metricas,
     distinguibilidade: avaliacao?.distinguibilidade,
+    distinguibilidadeAnterior: avaliacaoAnterior?.distinguibilidade,
     matrizConfusao: avaliacao?.matrizConfusao,
+    criteriosCegos: CRITERIOS_CEGOS,
+    falhasDistincao,
     regressoes,
     vazamentos,
     decisao,
