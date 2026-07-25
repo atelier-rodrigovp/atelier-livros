@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { hashText } from "../quality-state.js";
 import { Gravador } from "./gravador.js";
 import { DiscoPersistencia } from "./persistencia.js";
 import { executarMeta9, type DepsMeta9 } from "./meta9.js";
@@ -96,6 +97,30 @@ function parecerCapitulo(): string {
   return JSON.stringify(p);
 }
 
+function parecerCapituloReprovado(): string {
+  const eixo = { nota: 2, evidencia: "o fechamento continua sem consequência" };
+  const p: Parecer = {
+    schema: "parecer/v1",
+    dramatic_progression: eixo,
+    skill_adherence: eixo,
+    clarity: eixo,
+    emotional_effect: eixo,
+    continuity: eixo,
+    hook_effectiveness: eixo,
+    verdict: "reprovado",
+    evidencias: [],
+    sinais: [],
+    correcoes: [],
+  };
+  return JSON.stringify(p);
+}
+
+function parecerCapituloComExcecao(): string {
+  const p = JSON.parse(parecerCapitulo()) as Parecer;
+  p.verdict = "aprovado_com_excecao";
+  return JSON.stringify(p);
+}
+
 // Fixture no schema v2: todas as dez dimensões com a MESMA nota (a média ponderada
 // calculada pelo código devolve exatamente esse valor; floor = a própria nota).
 function avaliacao(nota: number, reescrever: { capitulo: number; problemas: string[]; instrucoes: string[] }[] = []): string {
@@ -136,6 +161,20 @@ beforeEach(async () => {
   await gravador.mudarFase("estrutura");
   await gravador.mudarFase("escrita");
   await gravador.registrarCapituloEscrito(1, caminho, { palavras: 26, spec_versao: 1, spec_hash: "h1" });
+  const parecerBase = JSON.parse(parecerCapitulo()) as Parecer;
+  const reviewBase = await disco.inserirReview({
+    project_id: "proj-1",
+    edition_id: null,
+    capitulo: 1,
+    text_hash: hashText(PROSA_BASE),
+    verdict: "aprovado",
+    parecer: parecerBase,
+  });
+  await gravador.aprovarCapitulo(
+    1,
+    { id: reviewBase, text_hash: hashText(PROSA_BASE), verdict: "aprovado", parecer: parecerBase },
+    caminho
+  );
   await gravador.mudarFase("revisao_final");
 });
 afterEach(() => {
@@ -274,5 +313,92 @@ describe("executarMeta9", () => {
     // Review de livro reprovada persistida
     const reprovadas = lerReviews().filter((x) => x.registro.capitulo === null && x.registro.verdict === "reprovado");
     expect(reprovadas.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("reescrita reprovada restaura texto, hash, parecer e aprovação canônicos, preservando a tentativa no ledger", async () => {
+    const antes = await disco.lerEstado("proj-1");
+    const aprovadoAntes = structuredClone(antes!.doc.capitulos["1"]);
+
+    provedor.enfileirar("revisor_literario", avaliacao(7, [{
+      capitulo: 1,
+      problemas: ["final sem consequência"],
+      instrucoes: ["feche com consequência concreta"],
+    }]));
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_REESCRITA);
+    provedor.enfileirar("revisor_literario", parecerCapituloReprovado());
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    await expect(executarMeta9(deps({ meta: 9 }))).rejects.toMatchObject({
+      codigo: "META_NAO_ATINGIDA",
+    });
+
+    expect(readFileSync(path.join(dir, "manuscrito", "capitulo-01.md"), "utf8")).toBe(PROSA_BASE);
+    const depois = await disco.lerEstado("proj-1");
+    expect(depois?.doc.capitulos["1"]).toEqual(aprovadoAntes);
+    expect(depois?.doc.reversoes_meta).toHaveLength(1);
+    expect(depois?.doc.reversoes_meta?.[0]).toMatchObject({
+      capitulo: 1,
+      status_tentativa: "reprovado",
+      text_hash_tentativa: hashText(PROSA_REESCRITA),
+      text_hash_restaurado: hashText(PROSA_BASE),
+    });
+
+    const reviews = lerReviews().map((x) => x.registro);
+    expect(reviews.some((r) => r.text_hash === hashText(PROSA_REESCRITA) && r.verdict === "reprovado")).toBe(true);
+  });
+
+  it("aprovação com exceção não substitui uma aprovação plena anterior", async () => {
+    provedor.enfileirar("revisor_literario", avaliacao(7, [{
+      capitulo: 1,
+      problemas: ["cadência ainda genérica"],
+      instrucoes: ["reescreva com a cadência contratada"],
+    }]));
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_REESCRITA);
+    provedor.enfileirar("revisor_literario", parecerCapituloComExcecao());
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    await expect(executarMeta9(deps({ meta: 9 }))).rejects.toMatchObject({
+      codigo: "META_NAO_ATINGIDA",
+    });
+
+    expect(readFileSync(path.join(dir, "manuscrito", "capitulo-01.md"), "utf8")).toBe(PROSA_BASE);
+    const estado = await disco.lerEstado("proj-1");
+    expect(estado?.doc.capitulos["1"]).toMatchObject({
+      status: "aprovado",
+      text_hash: hashText(PROSA_BASE),
+    });
+    expect(estado?.doc.reversoes_meta?.[0]).toMatchObject({
+      status_tentativa: "aprovado_com_excecao",
+      text_hash_tentativa: hashText(PROSA_REESCRITA),
+      text_hash_restaurado: hashText(PROSA_BASE),
+    });
+  });
+
+  it("reescrita aprovada no capítulo só é promovida se a reavaliação do livro melhorar", async () => {
+    provedor.enfileirar("revisor_literario", avaliacao(7, [{
+      capitulo: 1,
+      problemas: ["final sem consequência"],
+      instrucoes: ["feche com consequência concreta"],
+    }]));
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_REESCRITA);
+    provedor.enfileirar("revisor_literario", parecerCapitulo());
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+    provedor.enfileirar("revisor_literario", avaliacao(6.5));
+
+    await expect(executarMeta9(deps({ meta: 9 }))).rejects.toMatchObject({
+      codigo: "META_SEM_MELHORA",
+    });
+
+    expect(readFileSync(path.join(dir, "manuscrito", "capitulo-01.md"), "utf8")).toBe(PROSA_BASE);
+    const estado = await disco.lerEstado("proj-1");
+    expect(estado?.doc.capitulos["1"]).toMatchObject({
+      status: "aprovado",
+      text_hash: hashText(PROSA_BASE),
+    });
+    expect(estado?.doc.avaliacao?.nota).toBe(7);
+    expect(estado?.doc.bloqueios.some((b) => b.codigo === "META_SEM_MELHORA" && b.alvo === "livro")).toBe(true);
   });
 });

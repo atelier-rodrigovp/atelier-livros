@@ -312,6 +312,18 @@ export interface EstadoCanonicoDoc {
   edicao_estrutural?: { run_id?: string; propostas: number; aplicadas: number; detalhe: string[]; em: string };
   // Meta-nota (avaliação de livro): última nota alcançada e o alvo comercial.
   avaliacao?: { nota?: number; meta: number; iteracoes: number; relatorio_path?: string; em: string };
+  // Tentativas da meta-nota que não puderam substituir uma versão já aprovada.
+  // Runs/reviews preservam o detalhe completo; esta trilha explica por que o
+  // estado canônico voltou ao melhor hash conhecido.
+  reversoes_meta?: {
+    capitulo: number;
+    status_tentativa: CapituloStatusV2 | "erro";
+    text_hash_tentativa?: string;
+    review_id_tentativa?: string;
+    text_hash_restaurado: string;
+    motivo: string;
+    em: string;
+  }[];
   capitulos: Record<string, CapituloEstado>;
   // status_anterior: guarda o status do capítulo antes do bloqueio, para restauração fiel
   bloqueios: { codigo: string; alvo: string; detalhe: string; desde: string; status_anterior?: CapituloStatusV2 }[];

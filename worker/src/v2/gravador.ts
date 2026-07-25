@@ -254,6 +254,68 @@ export class Gravador {
     });
   }
 
+  /**
+   * Restaura uma versão anteriormente aprovada depois de uma tentativa de
+   * reescrita da meta-nota falhar. O chamador restaura primeiro o arquivo de
+   * forma atômica; este método confere o hash no disco antes de promover o
+   * snapshot de volta ao estado canônico.
+   *
+   * A tentativa fracassada continua auditável em runs/reviews. O resumo da
+   * reversão também fica no estado para a UI explicar por que o melhor texto
+   * foi preservado.
+   */
+  async restaurarCapituloAprovado(
+    cap: number,
+    caminhoArquivo: string,
+    snapshot: CapituloEstado,
+    tentativa: {
+      status: CapituloEstado["status"] | "erro";
+      text_hash?: string;
+      review_id?: string;
+      motivo: string;
+    }
+  ): Promise<void> {
+    if (
+      (snapshot.status !== "aprovado" && snapshot.status !== "aprovado_com_excecao") ||
+      !snapshot.text_hash ||
+      !snapshot.review_id ||
+      !snapshot.aprovacao ||
+      snapshot.aprovacao.text_hash !== snapshot.text_hash
+    ) {
+      throw new ErroEngine({
+        codigo: "META_SNAPSHOT_INVALIDO",
+        classe: "qualidade",
+        mensagem: `Capítulo ${cap}: snapshot da meta-nota não representa uma aprovação verificável.`,
+        detalhe: { capitulo: cap, status: snapshot.status, text_hash: snapshot.text_hash },
+      });
+    }
+    const hashDisco = hashArquivo(caminhoArquivo);
+    if (hashDisco !== snapshot.text_hash) {
+      throw new ErroEngine({
+        codigo: "GATE_ESTADO_INCONSISTENTE",
+        classe: "qualidade",
+        mensagem: `Capítulo ${cap}: não foi possível restaurar o estado porque o arquivo não corresponde ao melhor hash aprovado.`,
+        detalhe: { capitulo: cap, hash_esperado: snapshot.text_hash, hash_disco: hashDisco },
+      });
+    }
+
+    const chave = String(cap);
+    await this.mutarEstado((doc) => {
+      doc.capitulos[chave] = structuredClone(snapshot);
+      doc.bloqueios = doc.bloqueios.filter((b) => b.alvo !== `capitulo:${cap}`);
+      doc.reversoes_meta ??= [];
+      doc.reversoes_meta.push({
+        capitulo: cap,
+        status_tentativa: tentativa.status,
+        ...(tentativa.text_hash ? { text_hash_tentativa: tentativa.text_hash } : {}),
+        ...(tentativa.review_id ? { review_id_tentativa: tentativa.review_id } : {}),
+        text_hash_restaurado: snapshot.text_hash!,
+        motivo: tentativa.motivo,
+        em: this.agora(),
+      });
+    });
+  }
+
   // -------------------------------------------------------------------------
   // Bloqueios
   // -------------------------------------------------------------------------

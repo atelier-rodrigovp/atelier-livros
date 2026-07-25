@@ -15,6 +15,7 @@ import type { ProvedorModelo } from "./provedor.js";
 import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
 import { tarefaAvaliadorLivro, tarefaSinteseArco } from "./tarefas.js";
 import { ErroEngine, type ContratoCompilado, type MapaModelos, type Parecer } from "./tipos.js";
+import type { CapituloEstado } from "./tipos.js";
 
 // Acima disso, o manuscrito é avaliado em blocos de capítulos e as avaliações são agregadas.
 const LIMITE_PALAVRAS_BLOCO = 40000;
@@ -126,6 +127,59 @@ function gravarAtomico(caminho: string, conteudo: string): void {
   const tmp = `${caminho}.tmp`;
   writeFileSync(tmp, conteudo, "utf8");
   renameSync(tmp, caminho);
+}
+
+function snapshotAprovado(
+  capitulo: number,
+  texto: string,
+  estado: CapituloEstado | undefined
+): CapituloEstado {
+  const hash = hashText(texto);
+  if (
+    !estado ||
+    (estado.status !== "aprovado" && estado.status !== "aprovado_com_excecao") ||
+    estado.text_hash !== hash ||
+    estado.aprovacao?.text_hash !== hash ||
+    !estado.review_id
+  ) {
+    throw new ErroEngine({
+      codigo: "META_BASE_NAO_APROVADA",
+      classe: "qualidade",
+      mensagem: `Capítulo ${capitulo}: a meta-nota só reescreve uma base canônica aprovada e consistente com o disco.`,
+      detalhe: {
+        capitulo,
+        status: estado?.status,
+        hash_estado: estado?.text_hash,
+        hash_disco: hash,
+      },
+    });
+  }
+  return structuredClone(estado);
+}
+
+interface SnapshotReescritaMeta {
+  capitulo: number;
+  caminho: string;
+  texto: string;
+  estado: CapituloEstado;
+}
+
+interface TentativaReescritaMeta {
+  status: CapituloEstado["status"] | "erro";
+  text_hash?: string;
+  review_id?: string;
+}
+
+/**
+ * Ordem total usada para decidir promoção entre versões já aprovadas:
+ * atingir a meta domina; depois vêm headline e floor. Empate não é melhora.
+ */
+function compararAvaliacao(a: AvaliacaoLivro, b: AvaliacaoLivro, meta: number): number {
+  const aprovadaA = atingiuMeta(a, meta) ? 1 : 0;
+  const aprovadaB = atingiuMeta(b, meta) ? 1 : 0;
+  if (aprovadaA !== aprovadaB) return aprovadaA - aprovadaB;
+  if (a.nota !== b.nota) return a.nota - b.nota;
+  return a.floor.nota - b.floor.nota;
 }
 
 /** Lê os capítulos 1..total do disco (na ordem). Lança se algum arquivo faltar. */
@@ -441,14 +495,54 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
   const depsPipeline = depsPipelineDe(deps);
   let ultimaNota = 0;
   let relatorioPath: string | undefined;
+  let lotePendente: {
+    snapshots: SnapshotReescritaMeta[];
+    tentativas: Map<number, TentativaReescritaMeta>;
+    avaliacaoBase: AvaliacaoLivro;
+    estadoAvaliacaoBase: NonNullable<(typeof estado.doc)["avaliacao"]>;
+  } | null = null;
+
+  const restaurarLote = async (
+    lote: NonNullable<typeof lotePendente>,
+    motivo: string
+  ): Promise<void> => {
+    for (const snapshot of lote.snapshots) {
+      const tentativa = lote.tentativas.get(snapshot.capitulo);
+      // Capítulo ainda não tentado não foi alterado.
+      if (!tentativa) continue;
+      gravarAtomico(snapshot.caminho, snapshot.texto);
+      await deps.gravador.restaurarCapituloAprovado(
+        snapshot.capitulo,
+        snapshot.caminho,
+        snapshot.estado,
+        { ...tentativa, motivo }
+      );
+    }
+    await deps.gravador.registrarAvaliacao({
+      nota: lote.estadoAvaliacaoBase.nota,
+      meta: lote.estadoAvaliacaoBase.meta,
+      iteracoes: lote.estadoAvaliacaoBase.iteracoes,
+      relatorio_path: lote.estadoAvaliacaoBase.relatorio_path,
+    });
+  };
 
   for (let iteracao = 1; iteracao <= maxIteracoes; iteracao++) {
-    if (iteracao > 1) consolidado = consolidarManuscrito(deps.dirManuscrito, deps.dirProjeto, total);
-    await reportar("AVALIACAO", { iteracao, meta });
+    let avaliacaoExecutada: Awaited<ReturnType<typeof avaliarLivro>>;
+    try {
+      if (iteracao > 1) consolidado = consolidarManuscrito(deps.dirManuscrito, deps.dirProjeto, total);
+      await reportar("AVALIACAO", { iteracao, meta });
 
-    const capitulos = lerCapitulos(deps.dirManuscrito, total);
-    const manuscritoTexto = readFileSync(consolidado.caminho, "utf8");
-    const { av, runId } = await avaliarLivro(deps, meta, capitulos, manuscritoTexto, consolidado.palavras);
+      const capitulos = lerCapitulos(deps.dirManuscrito, total);
+      const manuscritoTexto = readFileSync(consolidado.caminho, "utf8");
+      avaliacaoExecutada = await avaliarLivro(deps, meta, capitulos, manuscritoTexto, consolidado.palavras);
+    } catch (erro) {
+      if (lotePendente) {
+        await restaurarLote(lotePendente, `reavaliação do livro falhou: ${erro instanceof Error ? erro.message : String(erro)}`);
+        lotePendente = null;
+      }
+      throw erro;
+    }
+    const { av, runId } = avaliacaoExecutada;
     ultimaNota = av.nota;
     relatorioPath = salvarRelatorio(deps.dirProjeto, iteracao, av);
 
@@ -463,6 +557,34 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
     });
     await deps.gravador.registrarAvaliacao({ nota: av.nota, meta, iteracoes: iteracao, relatorio_path: relatorioPath });
 
+    if (lotePendente) {
+      if (compararAvaliacao(av, lotePendente.avaliacaoBase, meta) <= 0) {
+        const notaTentativa = av.nota;
+        const notaRestaurada = lotePendente.avaliacaoBase.nota;
+        await restaurarLote(
+          lotePendente,
+          `reavaliação não melhorou o livro (nota ${notaTentativa}; melhor nota ${notaRestaurada})`
+        );
+        lotePendente = null;
+        // O relatório/review da tentativa permanece no ledger; o manuscrito e
+        // a avaliação canônicos voltam ao melhor lote comprovado.
+        consolidado = consolidarManuscrito(deps.dirManuscrito, deps.dirProjeto, total);
+        await deps.gravador.registrarBloqueio(
+          "META_SEM_MELHORA",
+          "livro",
+          `reescrita não melhorou a avaliação (${notaTentativa} <= ${notaRestaurada}); melhor versão restaurada`
+        );
+        throw new ErroEngine({
+          codigo: "META_SEM_MELHORA",
+          classe: "qualidade",
+          mensagem: `meta ${meta} não atingida: a reescrita não melhorou o livro e a melhor versão foi restaurada`,
+          detalhe: { nota_tentativa: notaTentativa, nota_restaurada: notaRestaurada },
+        });
+      }
+      // A nova avaliação comprovou melhora; o lote passa a ser o melhor estado.
+      lotePendente = null;
+    }
+
     if (atingiuMeta(av, meta)) {
       await deps.gravador.mudarFase("concluido");
       await reportar("CONCLUIDO", { nota: av.nota, meta, iteracoes: iteracao });
@@ -475,37 +597,101 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
     const piores = selecionarPiores(av.capitulos_a_reescrever, N_REESCRITA);
     if (piores.length === 0) break; // nota baixa sem capítulos a reescrever: não há como melhorar
 
+    const estadoAntesDoLote = await deps.gravador.carregarEstado();
+    const snapshots: SnapshotReescritaMeta[] = [];
+    const fichas = new Map<number, Awaited<ReturnType<PersistenciaV2["lerFichaMaisRecente"]>>>();
     for (const alvo of piores) {
       const caminho = path.join(deps.dirManuscrito, nomeCapitulo(alvo.capitulo));
       if (!existsSync(caminho)) {
         throw new ErroEngine({ codigo: "GATE_ARTEFATO_AUSENTE", classe: "qualidade", mensagem: `reescrita: ${nomeCapitulo(alvo.capitulo)} ausente no disco` });
       }
       const textoBase = readFileSync(caminho, "utf8");
+      snapshots.push({
+        capitulo: alvo.capitulo,
+        caminho,
+        texto: textoBase,
+        estado: snapshotAprovado(
+          alvo.capitulo,
+          textoBase,
+          estadoAntesDoLote.doc.capitulos[String(alvo.capitulo)]
+        ),
+      });
       const ficha = await deps.persistencia.lerFichaMaisRecente(deps.projectId, alvo.capitulo);
       if (!ficha) {
         throw new ErroEngine({ codigo: "FICHA_AUSENTE", classe: "qualidade", mensagem: `reescrita: ficha do capítulo ${alvo.capitulo} não encontrada` });
       }
+      fichas.set(alvo.capitulo, ficha);
+    }
+
+    lotePendente = {
+      snapshots,
+      tentativas: new Map(),
+      avaliacaoBase: av,
+      estadoAvaliacaoBase: {
+        nota: av.nota,
+        meta,
+        iteracoes: iteracao,
+        relatorio_path: relatorioPath,
+        em: new Date().toISOString(),
+      },
+    };
+
+    for (const alvo of piores) {
+      const snapshot = snapshots.find((s) => s.capitulo === alvo.capitulo)!;
       const correcoes = alvo.problemas.map((p, i) => ({
         local: `capítulo ${alvo.capitulo}`,
         problema: p,
         instrucao: alvo.instrucoes[i] ?? alvo.instrucoes[0] ?? "reescreva conforme o problema apontado",
       }));
-      const r = await escreverCapitulo(depsPipeline, alvo.capitulo, {
-        fichaExistente: ficha,
-        textoBase,
-        reescritaDirigida: { correcoes },
-      });
-      if (r.status !== "aprovado" && r.status !== "aprovado_com_excecao") {
+      try {
+        const r = await escreverCapitulo(depsPipeline, alvo.capitulo, {
+          fichaExistente: fichas.get(alvo.capitulo)!,
+          textoBase: snapshot.texto,
+          reescritaDirigida: { correcoes },
+        });
+        lotePendente.tentativas.set(alvo.capitulo, {
+          status: r.status === "necessita_decisao_humana" ? "bloqueado" : r.status,
+          text_hash: r.textHash,
+          review_id: r.reviewId,
+        });
+        // A meta-nota é um funil de melhora: uma exceção nova não substitui uma
+        // versão já aprovada. Canários e estado final exigem aprovação plena.
+        if (r.status === "aprovado") continue;
+
+        const motivo = `tentativa da meta-nota terminou "${r.status}" e não substituiu a versão aprovada`;
+        await restaurarLote(lotePendente, motivo);
+        lotePendente = null;
         await deps.gravador.registrarBloqueio(
           "META_NAO_ATINGIDA",
           "livro",
-          `capítulo ${alvo.capitulo} terminou "${r.status}" na reescrita dirigida (nota ${ultimaNota} < meta ${meta})`
+          `capítulo ${alvo.capitulo} terminou "${r.status}" na reescrita dirigida; melhor versão aprovada restaurada (nota ${ultimaNota} < meta ${meta})`
         );
         throw new ErroEngine({
           codigo: "META_NAO_ATINGIDA",
           classe: "qualidade",
-          mensagem: `meta ${meta} não atingida: reescrita do capítulo ${alvo.capitulo} terminou "${r.status}" (nota ${ultimaNota})`,
+          mensagem: `meta ${meta} não atingida: reescrita do capítulo ${alvo.capitulo} terminou "${r.status}" e a melhor versão aprovada foi restaurada (nota ${ultimaNota})`,
         });
+      } catch (erro) {
+        if (erro instanceof ErroEngine && erro.codigo === "META_NAO_ATINGIDA") throw erro;
+        if (!lotePendente) throw erro;
+
+        // Falhas técnicas/modelo também não podem deixar texto parcial ou estado
+        // rebaixado como versão canônica.
+        const estadoFalho = await deps.gravador.carregarEstado();
+        const tentativa = estadoFalho.doc.capitulos[String(alvo.capitulo)];
+        lotePendente.tentativas.set(alvo.capitulo, {
+          status: "erro",
+          text_hash: tentativa?.text_hash,
+          review_id: tentativa?.review_id,
+        });
+        await restaurarLote(lotePendente, erro instanceof Error ? erro.message : String(erro));
+        lotePendente = null;
+        await deps.gravador.registrarBloqueio(
+          "META_REESCRITA_FALHOU",
+          "livro",
+          `capítulo ${alvo.capitulo}: tentativa falhou; melhor versão aprovada restaurada`
+        );
+        throw erro;
       }
     }
   }
