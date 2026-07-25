@@ -14,9 +14,9 @@ operacional ainda não foram comprovados.
 
 - Branch isolada: `codex/engine-v2-conclusao`
 - Base remota: `origin/master` em `d6578fd5`
-- Divergência após fetch: 0 commits atrás; 32 à frente
-- Último marco de código antes deste ledger: `764657f`
-- Suíte: 75 arquivos, 775 testes aprovados, 3 pulados
+- Divergência após fetch: 0 commits atrás; 34 à frente
+- Último commit de código validado: `3fed80f3e158d9cebb57b357e57362064012ceae`
+- Suíte: 76 arquivos, 777 testes aprovados, 3 pulados
 - Lint: 0 erros; 3 warnings antigos de Fast Refresh
 - Worker typecheck: aprovado
 - Build de produção: aprovado (warning de chunk grande)
@@ -27,10 +27,10 @@ operacional ainda não foram comprovados.
 | # | Critério | Estado | Evidência / pendência |
 |---|---|---|---|
 | 1 | Regressão meta-9 corrigida | comprovado em código | Snapshot, promoção condicional, restauração e ledger; testes Hoover/Romantasy |
-| 2 | Calibração reproduzível | parcial | Corpus/splits/hashes/métricas/promoção fail-closed implementados; 14 amostras aguardam rótulo humano |
+| 2 | Calibração reproduzível | parcial | Corpus/splits/hashes/métricas/promoção fail-closed implementados; 14 amostras e 596 ocorrências aguardam rótulo humano |
 | 3 | Três canários 3/3 plenos | pendente | Claude CLI respondeu 429 antes de qualquer token; não foi substituído por mock |
 | 4 | Dois capítulos atuais aprovados por canário | pendente | Depende da execução real dos canários |
-| 5 | Vozes distinguíveis em leitura cega | pendente | Protocolo v2 corrigido e testado; execução real aguarda reset do Claude |
+| 5 | Vozes distinguíveis em leitura cega | pendente | Protocolo v2 corrigido/testado; IDs humanos são únicos, resultado é persistido e release não pode sobrepor reprovação; execução real aguarda reset |
 | 6 | Corte, fusão e reordenação | parcial | Staging/rollback e pipeline integrados testados; confirmação com modelo real virá nos canários |
 | 7 | Meta-9 em livro longo real | parcial | Fluxo >40 mil palavras testado integralmente com provedor controlado; execução real ainda falta |
 | 8 | Wizard V2 completo no navegador | parcial | UI desktop/mobile e estados locais verificados; criação autenticada ponta a ponta ainda falta |
