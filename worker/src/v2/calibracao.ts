@@ -31,6 +31,7 @@ export interface AmostraCalibracao {
     status: StatusRotulacao;
     revisor?: string;
     revisado_em?: string;
+    pacote_sha256?: string;
   };
 }
 
@@ -43,6 +44,12 @@ export interface CorpusCalibracao {
 
 export interface RotuloSinal {
   sinal: string;
+  atestacao_humana?: {
+    declaracao: string;
+    revisor: string;
+    revisado_em: string;
+    pacote_sha256: string;
+  };
   ocorrencias: {
     indice_detector: number;
     trecho: string;
@@ -163,6 +170,16 @@ function validarRotulos(
   if (rotulos.schema !== SCHEMA_ROTULOS_CALIBRACAO) throw new Error(`${amostra.id}: schema de rótulos inválido`);
   if (rotulos.amostra_id !== amostra.id) throw new Error(`${amostra.id}: arquivo de rótulos aponta para ${rotulos.amostra_id}`);
   if (rotulos.texto_sha256 !== amostra.sha256) throw new Error(`${amostra.id}: hash dos rótulos difere do corpus`);
+  if (amostra.rotulos.status === "validado_humano") {
+    if (
+      !amostra.rotulos.revisor?.trim() ||
+      !amostra.rotulos.revisado_em ||
+      !Number.isFinite(Date.parse(amostra.rotulos.revisado_em)) ||
+      !/^[a-f0-9]{64}$/.test(amostra.rotulos.pacote_sha256 ?? "")
+    ) {
+      throw new Error(`${amostra.id}: validação humana sem revisor, data ou hash do pacote`);
+    }
+  }
 
   const medidos = sinais.filter(ehOcorrencia);
   for (const medido of medidos) {
@@ -173,6 +190,17 @@ function validarRotulos(
       throw new Error(`${amostra.id}: sinal ${medido.sinal} exige exatamente um bloco de rótulos`);
     }
     const bloco = candidatos[0];
+    if (amostra.rotulos.status === "validado_humano") {
+      const atestacao = bloco.atestacao_humana;
+      if (
+        !atestacao?.declaracao.trim() ||
+        atestacao.revisor !== amostra.rotulos.revisor ||
+        atestacao.revisado_em !== amostra.rotulos.revisado_em ||
+        atestacao.pacote_sha256 !== amostra.rotulos.pacote_sha256
+      ) {
+        throw new Error(`${amostra.id}/${medido.sinal}: atestação humana ausente ou inconsistente`);
+      }
+    }
     const esperadas = medido.exemplos.map(normalizarTrecho);
     if (
       esperadas.length !== bloco.ocorrencias.length ||

@@ -47,6 +47,12 @@ function montarCorpus(
       texto_sha256: sha(a.texto),
       sinais: sinais.map((s) => ({
         sinal: s.sinal,
+        atestacao_humana: a.status === "pendente_humano" ? undefined : {
+          declaracao: "Fixture revisada integralmente para todos os falsos negativos.",
+          revisor: "fixture",
+          revisado_em: "2026-07-25T00:00:00.000Z",
+          pacote_sha256: "a".repeat(64),
+        },
         ocorrencias: s.exemplos.map((trecho, i) => ({
           indice_detector: i + 1,
           trecho,
@@ -70,6 +76,7 @@ function montarCorpus(
         status: a.status ?? "validado_humano",
         revisor: "fixture",
         revisado_em: "2026-07-25T00:00:00.000Z",
+        pacote_sha256: "a".repeat(64),
       },
     });
   }
