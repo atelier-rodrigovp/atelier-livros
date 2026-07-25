@@ -9,6 +9,7 @@ import type { Job } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { podeAprovarReleaseLab } from "@/lib/laboratorioV2";
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning";
 
@@ -17,7 +18,15 @@ interface LabRelatorio {
   anterior?: string;
   metricas: Record<string, { porSkill: Record<string, number> }>;
   distinguibilidade?: number;
+  distinguibilidadeAnterior?: number;
   matrizConfusao?: Record<string, Record<string, number>>;
+  criteriosCegos?: {
+    distinguibilidadeMinima: number;
+    acertoMinimoPorSkill: number;
+    aderenciaMediaMinima: number;
+    notaMediaMinimaPorDimensao: number;
+  };
+  falhasDistincao?: string[];
   regressoes: string[];
   vazamentos: string[];
   decisao: "aprovar" | "rejeitar" | "pendente";
@@ -42,6 +51,15 @@ interface LabRelease {
   em: string;
 }
 
+interface LabAvaliacaoHumana {
+  palpites: Record<string, string>;
+  acertos: number;
+  total: number;
+  distinguibilidade: number;
+  por: "autor";
+  em: string;
+}
+
 interface ProgressoLab {
   fase?: string;
   etapa?: string;
@@ -53,6 +71,7 @@ interface ProgressoLab {
   lab_skills?: LabSkillVersao[];
   // Decisão do autor sobre o release, registrada manualmente pela UI.
   lab_release?: LabRelease;
+  lab_avaliacao_humana?: LabAvaliacaoHumana;
 }
 
 const DECISAO: Record<string, { label: string; variant: BadgeVariant }> = {
@@ -173,6 +192,26 @@ function Relatorio({ rel, skillsVersoes }: { rel: LabRelatorio; skillsVersoes?: 
         </div>
       )}
 
+      {!!rel.falhasDistincao?.length && (
+        <div>
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Falhas da distinção cega
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-xs text-destructive">
+            {rel.falhasDistincao.map((falha, i) => <li key={i}>{falha}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {rel.criteriosCegos && (
+        <p className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          Critérios: distinguibilidade ≥ {pct(rel.criteriosCegos.distinguibilidadeMinima)} · acerto por skill ≥{" "}
+          {pct(rel.criteriosCegos.acertoMinimoPorSkill)} · aderência média ≥{" "}
+          {fmtNum(rel.criteriosCegos.aderenciaMediaMinima)} · cada dimensão ≥{" "}
+          {fmtNum(rel.criteriosCegos.notaMediaMinimaPorDimensao)}.
+        </p>
+      )}
+
       {matriz && colunas.length > 0 && (
         <div>
           <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -212,12 +251,18 @@ function AvaliacaoCega({
   gabarito,
   skills,
   distinguibilidade,
+  resultadoPersistido,
+  registrando,
+  onRegistrar,
 }: {
   jobId: string;
   cegas: LabCega[];
   gabarito: Record<string, string>;
   skills: string[];
   distinguibilidade?: number;
+  resultadoPersistido?: LabAvaliacaoHumana;
+  registrando: boolean;
+  onRegistrar: (resultado: Omit<LabAvaliacaoHumana, "por" | "em">) => Promise<void>;
 }) {
   const chave = `lab-cego-${jobId}`;
   const [palpites, setPalpites] = useState<Record<string, string>>(() => {
@@ -256,6 +301,21 @@ function AvaliacaoCega({
               ? " Você distinguiu as vozes tão bem ou melhor que o avaliador cego automático."
               : " O avaliador cego automático distinguiu as vozes melhor que você nesta rodada.")}
         </p>
+        {resultadoPersistido ? (
+          <p className="text-xs text-muted-foreground">
+            Resultado registrado por {resultadoPersistido.por} em {fmtData(resultadoPersistido.em)}.
+          </p>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={registrando}
+            onClick={() => onRegistrar({ palpites, acertos, total: cegas.length, distinguibilidade: humano })}
+          >
+            {registrando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            Registrar avaliação humana
+          </Button>
+        )}
       </div>
     );
   }
@@ -346,6 +406,15 @@ export default function Laboratorio() {
         .single();
       if (errLeitura) throw errLeitura;
       const atualProg = (data?.progresso ?? {}) as ProgressoLab;
+      if (
+        decisao === "aprovada" &&
+        !podeAprovarReleaseLab({
+          decisaoAutomatica: atualProg.lab_relatorio?.decisao,
+          resultadoHumano: atualProg.lab_avaliacao_humana,
+        })
+      ) {
+        throw new Error("A aprovação exige decisão automática aprovada e leitura humana registrada com ao menos 80% de acerto.");
+      }
       const merged: ProgressoLab = {
         ...atualProg,
         lab_release: { decisao, por: "autor", em: new Date().toISOString() },
@@ -361,11 +430,53 @@ export default function Laboratorio() {
     }
   }
 
+  async function registrarAvaliacaoHumana(
+    jobId: string,
+    resultado: Omit<LabAvaliacaoHumana, "por" | "em">
+  ) {
+    setRegistrando(true);
+    try {
+      const { data, error: errLeitura } = await supabase
+        .from("jobs")
+        .select("progresso")
+        .eq("id", jobId)
+        .single();
+      if (errLeitura) throw errLeitura;
+      const atualProg = (data?.progresso ?? {}) as ProgressoLab;
+      const { error } = await supabase
+        .from("jobs")
+        .update({
+          progresso: {
+            ...atualProg,
+            lab_avaliacao_humana: {
+              ...resultado,
+              por: "autor",
+              em: new Date().toISOString(),
+            },
+          },
+        })
+        .eq("id", jobId);
+      if (error) throw error;
+      toast.success("Avaliação humana registrada.");
+      await carregar();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setRegistrando(false);
+    }
+  }
+
   const atual = jobs[0];
   const pgAtual = atual ? progressoDe(atual) : undefined;
   const jobRelatorio = jobs.find((j) => j.status === "done" && progressoDe(j).lab_relatorio);
   const pgRelatorio = jobRelatorio ? progressoDe(jobRelatorio) : undefined;
   const emAndamento = atual?.status === "queued" || atual?.status === "running";
+  const podeAprovarRelease = podeAprovarReleaseLab({
+    decisaoAutomatica: pgRelatorio?.lab_relatorio?.decisao,
+    resultadoHumano: pgRelatorio?.lab_avaliacao_humana,
+  });
+  const releaseRegistradaValida =
+    pgRelatorio?.lab_release?.decisao !== "aprovada" || podeAprovarRelease;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -467,20 +578,39 @@ export default function Laboratorio() {
                   </Badge>
                 </div>
                 {pgRelatorio.lab_release ? (
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="text-xs text-muted-foreground">Decisão do autor:</span>
-                    <Badge variant={pgRelatorio.lab_release.decisao === "aprovada" ? "success" : "destructive"}>
-                      {pgRelatorio.lab_release.decisao}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground">
-                      · {pgRelatorio.lab_release.por} · {fmtData(pgRelatorio.lab_release.em)}
-                    </span>
-                  </div>
+                  <>
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="text-xs text-muted-foreground">Decisão do autor:</span>
+                      <Badge
+                        variant={
+                          pgRelatorio.lab_release.decisao === "aprovada"
+                            ? releaseRegistradaValida ? "success" : "warning"
+                            : "destructive"
+                        }
+                      >
+                        {pgRelatorio.lab_release.decisao}
+                        {!releaseRegistradaValida ? " · sem prova vigente" : ""}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        · {pgRelatorio.lab_release.por} · {fmtData(pgRelatorio.lab_release.em)}
+                      </span>
+                    </div>
+                    {!releaseRegistradaValida && (
+                      <p className="text-xs text-amber-700 dark:text-amber-400">
+                        Este registro é legado e não satisfaz o protocolo atual; execute e registre a leitura humana v2.
+                      </p>
+                    )}
+                  </>
                 ) : (
                   <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
-                      disabled={registrando}
+                      disabled={registrando || !podeAprovarRelease}
+                      title={
+                        podeAprovarRelease
+                          ? undefined
+                          : "Exige decisão automática aprovada e leitura humana registrada com ao menos 80%."
+                      }
                       onClick={() => registrarDecisao(jobRelatorio.id, "aprovada")}
                     >
                       {registrando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
@@ -517,6 +647,9 @@ export default function Laboratorio() {
                   gabarito={pgRelatorio.lab_gabarito}
                   skills={skillsDoRelatorio(pgRelatorio.lab_relatorio, pgRelatorio.lab_gabarito)}
                   distinguibilidade={pgRelatorio.lab_relatorio?.distinguibilidade}
+                  resultadoPersistido={pgRelatorio.lab_avaliacao_humana}
+                  registrando={registrando}
+                  onRegistrar={(resultado) => registrarAvaliacaoHumana(jobRelatorio.id, resultado)}
                 />
               </CardContent>
             </Card>

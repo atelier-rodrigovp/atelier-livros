@@ -104,6 +104,20 @@ export function ordenarAmostrasCegas(exec: ExecucaoLab): {
   return { seed, amostras };
 }
 
+export function amostrasCegasParaUi(exec: ExecucaoLab): {
+  amostraId: string;
+  hash: string;
+  categoria: string;
+  texto: string;
+}[] {
+  return ordenarAmostrasCegas(exec).amostras.map((amostra, indice) => ({
+    amostraId: `A-${String(indice + 1).padStart(2, "0")}-${amostra.textoHash.slice(0, 12)}`,
+    hash: amostra.textoHash,
+    categoria: amostra.categoria,
+    texto: amostra.texto,
+  }));
+}
+
 function validarNotas(notas: NotasCegas): NotasCegas {
   const nomes: (keyof NotasCegas)[] = [
     "voz",

@@ -9,7 +9,7 @@ import { validarSpec } from "../spec.js";
 import { DiscoPersistencia } from "../persistencia.js";
 import { adaptarFichaParaSkill, CENAS_LAB } from "./cenas.js";
 import { rodarLab, type ExecucaoLab } from "./rodar.js";
-import { avaliarCego, ordenarAmostrasCegas, type AvaliacaoCega } from "./avaliar.js";
+import { amostrasCegasParaUi, avaliarCego, ordenarAmostrasCegas, type AvaliacaoCega } from "./avaliar.js";
 import { compararExecucoes, falhasAvaliacaoCega } from "./relatorio.js";
 
 const SKILLS = ["dan-brown", "hoover-mcfadden", "romantasy"];
@@ -127,6 +127,15 @@ describe("lab — avaliação cega e relatório", () => {
       expect(chamada.prompt).toContain("Skill: avaliacao-cega@2");
       expect(chamada.prompt).not.toMatch(/Skill: (dan-brown|hoover-mcfadden|romantasy)@/);
     }
+  });
+
+  it("publica amostras humanas com IDs anônimos únicos e sem origem", async () => {
+    const { exec } = await execComMock();
+    const publicas = amostrasCegasParaUi(exec);
+    expect(new Set(publicas.map((a) => a.amostraId)).size).toBe(publicas.length);
+    expect(publicas.every((a) => /^A-\d{2}-[0-9a-f]{12}$/.test(a.amostraId))).toBe(true);
+    expect(JSON.stringify(publicas)).not.toContain("skillId");
+    expect(publicas.map((a) => a.hash)).toEqual(ordenarAmostrasCegas(exec).amostras.map((a) => a.textoHash));
   });
 
   it("relatório: sem anterior + avaliado → aprovar; regressão de tique → rejeitar", async () => {

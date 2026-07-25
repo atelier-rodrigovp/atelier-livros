@@ -9,7 +9,7 @@ import { mapaModelosDoAmbiente } from "../config.js";
 import { ProvedorClaudeCli } from "../provedor.js";
 import { MAPA_SKILL_V1_V2 } from "../contrato.js";
 import { rodarLab } from "./rodar.js";
-import { avaliarCego, gravarAvaliacaoCega, lerAvaliacaoCega } from "./avaliar.js";
+import { amostrasCegasParaUi, avaliarCego, gravarAvaliacaoCega, lerAvaliacaoCega } from "./avaliar.js";
 import { compararExecucoes, execucaoAnterior, gravarRelatorio } from "./relatorio.js";
 import type { CategoriaCena } from "./cenas.js";
 
@@ -68,9 +68,7 @@ export async function executarLaboratorio(job: JobLab): Promise<void> {
     // Versões dos contratos desta execução (a UI mostra "dan-brown@1.1.0 …").
     lab_skills: exec.skills,
     // Amostras cegas para avaliação HUMANA: sem skillId (a UI revela só depois do palpite).
-    lab_cegas: [...exec.amostras]
-      .sort((a, b) => a.textoHash.localeCompare(b.textoHash))
-      .map((a) => ({ amostraId: a.id.replace(/^[^:]+:/, "amostra:"), hash: a.textoHash, categoria: a.categoria, texto: a.texto.slice(0, 2000) })),
+    lab_cegas: amostrasCegasParaUi(exec),
     // Gabarito separado (a UI só consulta após o palpite do usuário).
     lab_gabarito: Object.fromEntries(exec.amostras.map((a) => [a.textoHash, a.skillId])),
   });
