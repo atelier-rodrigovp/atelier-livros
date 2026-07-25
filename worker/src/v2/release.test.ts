@@ -2,7 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { hashText } from "../quality-state.js";
 import type { ResultadoCalibracao } from "./calibracao.js";
+import { hashJsonCanonico } from "./hash.js";
 import { ordenarAmostrasCegas, type AvaliacaoCega, type NotasCegas } from "./lab/avaliar.js";
 import type { RelatorioLab } from "./lab/relatorio.js";
 import type { AmostraLab, ExecucaoLab } from "./lab/rodar.js";
@@ -34,30 +36,40 @@ const NOTAS: NotasCegas = {
 function amostras(): AmostraLab[] {
   const categorias = ["abertura", "confronto", "revelacao"] as const;
   return SKILLS.flatMap((skill) =>
-    categorias.map((categoria, indice) => ({
-      id: `${skill.id}:${categoria}`,
-      skillId: skill.id,
-      skillVersao: skill.versao,
-      contratoHash: skill.hash,
-      categoria,
-      capitulo: indice + 1,
-      texto: `${skill.id} ${categoria}`,
-      textoHash: `${skill.hash.slice(0, 48)}${String(indice).repeat(16)}`,
-      sinais: [],
-      gates: [],
-      palavras: 1000,
-      runId: `run-${skill.id}-${categoria}`,
-    }))
+    categorias.map((categoria, indice) => {
+      const texto = `${skill.id} ${categoria}`;
+      return {
+        id: `${skill.id}:${categoria}`,
+        skillId: skill.id,
+        skillVersao: skill.versao,
+        contratoHash: skill.hash,
+        categoria,
+        capitulo: indice + 1,
+        texto,
+        textoHash: hashText(texto),
+        sinais: [],
+        gates: [],
+        palavras: 1000,
+        runId: `run-${skill.id}-${categoria}`,
+      };
+    })
   );
 }
 
 function fixture(): { evidencias: EvidenciasParaCertificar; estado: EstadoAtualRelease } {
+  const amostrasLab = amostras();
   const execucaoLab: ExecucaoLab = {
-    id: "lab-validado",
+    id: hashJsonCanonico(
+      amostrasLab.map((amostra) => ({
+        skill: amostra.skillId,
+        categoria: amostra.categoria,
+        texto: amostra.textoHash,
+      }))
+    ).slice(0, 12),
     executadaEm: "2026-07-25T12:00:00.000Z",
     engineVersion: "2.0.0",
     skills: structuredClone(SKILLS),
-    amostras: amostras(),
+    amostras: amostrasLab,
   };
   const ordenadas = ordenarAmostrasCegas(execucaoLab).amostras;
   const porAmostra = ordenadas.map((amostra, indice) => ({
@@ -72,7 +84,7 @@ function fixture(): { evidencias: EvidenciasParaCertificar; estado: EstadoAtualR
     parecerResumo: "aderente",
     runId: `blind-${indice}`,
     saidaBruta: "{}",
-    saidaBrutaHash: "e".repeat(64),
+    saidaBrutaHash: hashJsonCanonico("{}"),
   }));
   const avaliacaoAutomatica: AvaliacaoCega = {
     schema: "blind-evaluation/v2",
@@ -139,8 +151,8 @@ function fixture(): { evidencias: EvidenciasParaCertificar; estado: EstadoAtualR
     total_capitulos: 2,
     criterio_3de3: true,
     capitulos_estado_final: [
-      { capitulo: 1, status: "aprovado", hash_confere: true },
-      { capitulo: 2, status: "aprovado", hash_confere: true },
+      { capitulo: 1, status: "aprovado", text_hash: "7".repeat(64), review_id: "review-1", hash_confere: true },
+      { capitulo: 2, status: "aprovado", text_hash: "8".repeat(64), review_id: "review-2", hash_confere: true },
     ],
   }));
   const estado: EstadoAtualRelease = {
@@ -229,6 +241,28 @@ describe("certificação de release V2", () => {
     evidencias.avaliacaoHumana.gabarito[ids[0]] = "romantasy";
     expect(() => criarCertificadoRelease(evidencias, estado))
       .toThrow(/gabarito adulterado|distinguibilidade/);
+  });
+
+  it("recalcula prosa, saída cega e gates em vez de confiar no JSON", () => {
+    const texto = fixture();
+    texto.evidencias.execucaoLab.amostras[0].texto += " adulterado";
+    expect(() => criarCertificadoRelease(texto.evidencias, texto.estado))
+      .toThrow(/texto vazio ou hash adulterado/);
+
+    const cego = fixture();
+    cego.evidencias.avaliacaoAutomatica.porAmostra[0].acertou = false;
+    cego.evidencias.avaliacaoAutomatica.porAmostra[1].saidaBrutaHash = "0".repeat(64);
+    expect(() => criarCertificadoRelease(cego.evidencias, cego.estado))
+      .toThrow(/skillReal\/acertou inconsistente|saída bruta ausente ou hash adulterado/);
+
+    const gate = fixture();
+    gate.evidencias.execucaoLab.amostras[0].gates.push({
+      gate: "texto_truncado",
+      passou: false,
+      evidencia: "frase sem fecho",
+    });
+    expect(() => criarCertificadoRelease(gate.evidencias, gate.estado))
+      .toThrow(/gate texto_truncado falhou/);
   });
 
   it("invalida automaticamente mudança posterior de contrato, corpus ou skill", () => {

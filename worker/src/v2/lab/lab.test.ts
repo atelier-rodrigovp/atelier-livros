@@ -25,10 +25,10 @@ const CALIBRACAO_PRONTA = {
 // Prosa mock distinta por skill (voz reconhecível; termina com pontuação; sem aforismo).
 const PROSA: Record<string, string> = {
   "dan-brown": [
-    "Marina cruzou o arquivo em três passos. O registro de 1987 estava aberto sobre a mesa.",
-    "Alguém tinha raspado o nome com lâmina. Três volumes, três anos, o mesmo corte.",
-    "Ela fotografou a página. No corredor, os passos de Heitor pararam diante da porta.",
-    "A pergunta agora tinha dono. Faltava descobrir há quanto tempo ele sabia.",
+    "Marina cruzou o apartamento em três passos. O recibo de Aveiro estava aberto sobre a mesa.",
+    "Alguém pagara o cofre três dias antes da morte de Tomás. A data contrariava a agenda.",
+    "Ela fotografou o papel. O telefone do irmão tocou no cômodo vazio.",
+    "A pergunta agora tinha endereço. Faltava descobrir quem ainda conhecia aquele número.",
   ].join("\n\n"),
   "hoover-mcfadden": [
     "Eu conto os azulejos do corredor enquanto espero a campainha da madrugada. Doze até a porta. Eu sei porque contei todas as noites desta semana.",
@@ -42,10 +42,10 @@ const PROSA: Record<string, string> = {
   ].join("\n\n"),
 };
 
-function mockEscritor(): ProvedorMock {
+function mockEscritor(categorias = CENAS_LAB.map((cena) => cena.categoria)): ProvedorMock {
   const p = new ProvedorMock();
   for (const s of SKILLS) {
-    for (let i = 0; i < CENAS_LAB.length; i++) p.enfileirar("escritor", PROSA[s]);
+    for (let i = 0; i < categorias.length; i++) p.enfileirar("escritor", PROSA[s]);
   }
   return p;
 }
@@ -136,7 +136,8 @@ describe("lab — avaliação cega e relatório", () => {
 
   async function execComMock(): Promise<{ exec: ExecucaoLab; dir: string }> {
     const dir = await mkdtemp(path.join(tmpdir(), "lab-"));
-    const exec = await rodarLab({ skills: SKILLS, provedor: mockEscritor(), mapa, dirSaida: dir, categorias: ["abertura", "confronto"] });
+    const categorias = ["abertura", "confronto"] as const;
+    const exec = await rodarLab({ skills: SKILLS, provedor: mockEscritor([...categorias]), mapa, dirSaida: dir, categorias: [...categorias] });
     return { exec, dir };
   }
 

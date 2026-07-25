@@ -7,6 +7,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { hashText } from "../quality-state.js";
 import { analisarCalibracao, type ResultadoCalibracao } from "./calibracao.js";
 import { carregarContrato } from "./contrato.js";
 import { hashJsonCanonico } from "./hash.js";
@@ -64,6 +65,8 @@ export interface CertificadoReleaseV2 {
 interface CapituloFinalCanario {
   capitulo?: number;
   status?: string;
+  text_hash?: string;
+  review_id?: string | null;
   hash_confere?: boolean;
 }
 
@@ -141,7 +144,12 @@ function validarCanarios(
       rel.criterio_3de3 !== true ||
       rel.aprovados_plenos !== total ||
       caps.length !== total ||
-      caps.some((cap) => cap.status !== "aprovado" || cap.hash_confere !== true)
+      caps.some((cap) =>
+        cap.status !== "aprovado" ||
+        cap.hash_confere !== true ||
+        !/^[0-9a-f]{64}$/.test(cap.text_hash ?? "") ||
+        !cap.review_id?.trim()
+      )
     ) {
       erros.push(`canários/${skill.id}: capítulos não estão 100% aprovados plenos e hash-bound`);
     }
@@ -163,8 +171,35 @@ function validarLaboratorio(
 ): string[] {
   const erros: string[] = [];
   if (execucao.engineVersion !== ENGINE_V2_VERSION) erros.push("laboratório: engine_version divergente");
+  const idCalculado = hashJsonCanonico(
+    execucao.amostras.map((amostra) => ({
+      skill: amostra.skillId,
+      categoria: amostra.categoria,
+      texto: amostra.textoHash,
+    }))
+  ).slice(0, 12);
+  if (execucao.id !== idCalculado) erros.push("laboratório: id da execução não corresponde ao conteúdo");
   if (execucao.id !== avaliacao.labExecucaoId || execucao.id !== relatorio.execucaoId) {
     erros.push("laboratório: execução, avaliação e relatório não apontam para o mesmo id");
+  }
+  const idsAmostras = new Set<string>();
+  const hashesAmostras = new Set<string>();
+  for (const amostra of execucao.amostras) {
+    if (idsAmostras.has(amostra.id)) erros.push(`laboratório: amostra duplicada ${amostra.id}`);
+    if (hashesAmostras.has(amostra.textoHash)) erros.push(`laboratório: texto duplicado ${amostra.textoHash}`);
+    idsAmostras.add(amostra.id);
+    hashesAmostras.add(amostra.textoHash);
+    const skill = skills.find((item) => item.id === amostra.skillId);
+    if (!skill || amostra.skillVersao !== skill.versao || amostra.contratoHash !== skill.hash) {
+      erros.push(`laboratório/${amostra.id}: contrato da amostra diverge`);
+    }
+    if (!amostra.texto.trim() || hashText(amostra.texto) !== amostra.textoHash) {
+      erros.push(`laboratório/${amostra.id}: texto vazio ou hash adulterado`);
+    }
+    if (!amostra.runId?.trim()) erros.push(`laboratório/${amostra.id}: run_id ausente`);
+    for (const gate of amostra.gates.filter((item) => !item.passou)) {
+      erros.push(`laboratório/${amostra.id}: gate ${gate.gate} falhou`);
+    }
   }
   for (const skill of skills) {
     const meta = execucao.skills.find((item) => item.id === skill.id);
@@ -175,6 +210,41 @@ function validarLaboratorio(
     if (amostras.length < 3) erros.push(`laboratório/${skill.id}: exige ao menos 3 amostras`);
   }
   if (execucao.skills.length !== skills.length) erros.push("laboratório: conjunto de skills difere do certificado");
+  if (avaliacao.porAmostra.length !== execucao.amostras.length) {
+    erros.push("laboratório/cego: avaliação não cobre todas as amostras");
+  }
+  const avaliadas = new Set<string>();
+  for (const item of avaliacao.porAmostra) {
+    const amostra = execucao.amostras.find((candidata) => candidata.id === item.amostraId);
+    if (!amostra || avaliadas.has(item.amostraId)) {
+      erros.push(`laboratório/cego: amostra ausente ou duplicada ${item.amostraId}`);
+      continue;
+    }
+    avaliadas.add(item.amostraId);
+    if (
+      item.skillReal !== amostra.skillId ||
+      item.acertou !== (item.skillAdivinhada === amostra.skillId)
+    ) {
+      erros.push(`laboratório/cego/${item.amostraId}: skillReal/acertou inconsistente`);
+    }
+    if (!skills.some((skill) => skill.id === item.skillAdivinhada)) {
+      erros.push(`laboratório/cego/${item.amostraId}: palpite fora das skills`);
+    }
+    if (
+      !item.runId?.trim() ||
+      !item.saidaBruta?.trim() ||
+      item.saidaBrutaHash !== hashJsonCanonico(item.saidaBruta)
+    ) {
+      erros.push(`laboratório/cego/${item.amostraId}: saída bruta ausente ou hash adulterado`);
+    }
+    if (
+      item.aderencia < 0 ||
+      item.aderencia > 5 ||
+      Object.values(item.notas).some((nota) => nota < 0 || nota > 5)
+    ) {
+      erros.push(`laboratório/cego/${item.amostraId}: notas fora de 0-5`);
+    }
+  }
   if (relatorio.decisao !== "aprovar") erros.push(`laboratório: decisão automática é ${relatorio.decisao}`);
   if (!relatorio.calibracao?.pronta || relatorio.calibracao.corpusHash !== corpusHash) {
     erros.push("laboratório: calibração ausente, pendente ou com hash divergente");

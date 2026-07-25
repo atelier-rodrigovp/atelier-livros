@@ -128,11 +128,14 @@ export function compararExecucoes(
     metricas["fora_da_cota"].porSkill[sk] = foraDaCotaTotal(atual.amostras.filter((a) => a.skillId === sk));
   }
 
-  // Vazamentos determinísticos: gate de POV falho = voz estruturalmente fora do contrato.
+  // Qualquer gate universal falho invalida a amostra. Historicamente este campo
+  // se chamou "vazamentos"; ele preserva o nome no schema, mas não limita o
+  // release apenas a POV.
   const vazamentos: string[] = [];
   for (const a of atual.amostras) {
-    const pov = a.gates.find((g) => g.gate === "pov_impossivel" && !g.passou);
-    if (pov) vazamentos.push(`${a.id}: POV fora do contrato (${pov.evidencia ?? ""})`);
+    for (const gate of a.gates.filter((item) => !item.passou)) {
+      vazamentos.push(`${a.id}: gate ${gate.gate} falhou (${gate.evidencia ?? "sem evidência"})`);
+    }
   }
 
   // Regressões contra a execução anterior: métrica de tique piorou >30% em QUALQUER skill,
