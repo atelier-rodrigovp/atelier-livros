@@ -14,7 +14,7 @@ import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
 import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
 import { tarefaAvaliadorLivro, tarefaSinteseArco } from "./tarefas.js";
-import { ErroEngine, type ContratoCompilado, type MapaModelos, type Parecer } from "./tipos.js";
+import { ErroEngine, type ContratoCompilado, type MapaModelos, type Parecer, type SceneSpec } from "./tipos.js";
 import type { CapituloEstado } from "./tipos.js";
 
 // Acima disso, o manuscrito é avaliado em blocos de capítulos e as avaliações são agregadas.
@@ -310,11 +310,31 @@ function selecionarPiores(
 // Avaliação (com fatiamento em blocos para manuscritos longos)
 // ---------------------------------------------------------------------------
 
+function validarAlvosReescrita(
+  av: AvaliacaoLivro,
+  capitulosPermitidos: readonly number[],
+  rotulo: string
+): AvaliacaoLivro {
+  const permitidos = new Set(capitulosPermitidos);
+  for (const alvo of av.capitulos_a_reescrever) {
+    if (!permitidos.has(alvo.capitulo)) {
+      throw new ErroEngine({
+        codigo: "AVALIACAO_ALVO_INVALIDO",
+        classe: "qualidade",
+        mensagem: `${rotulo}: avaliador apontou o capítulo ${alvo.capitulo}, que não pertence ao material avaliado`,
+        detalhe: { capitulo: alvo.capitulo, capitulos_permitidos: [...permitidos] },
+      });
+    }
+  }
+  return av;
+}
+
 async function avaliarBloco(
   deps: DepsMeta9,
   meta: number,
   textoManuscrito: string,
-  rotulo: string
+  rotulo: string,
+  capitulosPermitidos: readonly number[]
 ): Promise<{ av: AvaliacaoLivro; runId: string }> {
   const comp = compilarPacote({
     papel: "revisor_literario",
@@ -342,7 +362,10 @@ async function avaliarBloco(
     tarefa: tarefaAvaliadorLivro(meta, deps.contrato.contrato),
     parse: (t) => validarAvaliacaoLivro(extrairJson(t)),
   });
-  return { av: r.valor, runId: r.runId };
+  return {
+    av: validarAlvosReescrita(r.valor, capitulosPermitidos, `avaliação de ${rotulo}`),
+    runId: r.runId,
+  };
 }
 
 /** Fatia os capítulos em blocos cujo total de palavras fica abaixo do limite. */
@@ -375,14 +398,31 @@ function unirReescritas(
     for (const c of lista) {
       const existente = porCapitulo.get(c.capitulo);
       if (existente) {
-        existente.problemas.push(...c.problemas);
-        existente.instrucoes.push(...c.instrucoes);
+        existente.problemas = [...new Set([...existente.problemas, ...c.problemas])];
+        existente.instrucoes = [...new Set([...existente.instrucoes, ...c.instrucoes])];
       } else {
         porCapitulo.set(c.capitulo, { capitulo: c.capitulo, problemas: [...c.problemas], instrucoes: [...c.instrucoes] });
       }
     }
   }
   return [...porCapitulo.values()].sort((a, b) => a.capitulo - b.capitulo);
+}
+
+function resumirFicha(ficha: SceneSpec): Record<string, unknown> {
+  return {
+    capitulo: ficha.capitulo,
+    pov: ficha.pov,
+    local: ficha.local,
+    tempo: ficha.tempo,
+    objetivo: ficha.objetivo,
+    obstaculo: ficha.obstaculo,
+    informacao_nova: ficha.informacao_nova,
+    virada: ficha.virada,
+    mudanca_estado: ficha.mudanca_estado,
+    gancho: ficha.gancho,
+    fatos_obrigatorios: ficha.fatos_obrigatorios,
+    fios_avancados: ficha.fios_avancados,
+  };
 }
 
 async function avaliarLivro(
@@ -392,8 +432,9 @@ async function avaliarLivro(
   manuscritoTexto: string,
   manuscritoPalavras: number
 ): Promise<{ av: AvaliacaoLivro; runId: string }> {
+  const numerosCapitulos = capitulos.map((c) => c.numero);
   if (manuscritoPalavras <= LIMITE_PALAVRAS_BLOCO) {
-    return avaliarBloco(deps, meta, manuscritoTexto, "livro completo");
+    return avaliarBloco(deps, meta, manuscritoTexto, "livro completo", numerosCapitulos);
   }
   // Manuscrito longo: blocos para leitura integral + SÍNTESE DE ARCO para a visão
   // do livro inteiro (as dimensões finais saem da síntese, nunca de média de blocos).
@@ -402,8 +443,21 @@ async function avaliarLivro(
   for (const bloco of blocos) {
     const texto = bloco.map((c) => c.texto.trim()).join("\n\n");
     const rotulo = `capítulos ${bloco[0].numero}–${bloco[bloco.length - 1].numero}`;
-    const r = await avaliarBloco(deps, meta, texto, rotulo);
+    const r = await avaliarBloco(deps, meta, texto, rotulo, bloco.map((c) => c.numero));
     partes.push({ rotulo, av: r.av });
+  }
+  const fichas: SceneSpec[] = [];
+  for (const capitulo of numerosCapitulos) {
+    const ficha = await deps.persistencia.lerFichaMaisRecente(deps.projectId, capitulo);
+    if (!ficha) {
+      throw new ErroEngine({
+        codigo: "FICHA_AUSENTE",
+        classe: "qualidade",
+        mensagem: `síntese de arco: ficha do capítulo ${capitulo} não encontrada`,
+        detalhe: { capitulo },
+      });
+    }
+    fichas.push(ficha);
   }
   const materialArco: SecaoContexto[] = [
     {
@@ -413,8 +467,17 @@ async function avaliarLivro(
         .join("\n\n"),
       fonte: "avaliacoes-blocos",
     },
+    {
+      titulo: "MAPA ESTRUTURAL DOS CAPÍTULOS",
+      texto: JSON.stringify(fichas.map(resumirFicha), null, 1),
+      fonte: "scene-specs-validadas",
+    },
     { titulo: `PRIMEIRO CAPÍTULO (integral)`, texto: capitulos[0].texto, fonte: "capitulo-1" },
-    { titulo: `ÚLTIMO CAPÍTULO (integral)`, texto: capitulos[capitulos.length - 1].texto, fonte: `capitulo-${capitulos.length}` },
+    {
+      titulo: `ÚLTIMO CAPÍTULO (integral)`,
+      texto: capitulos[capitulos.length - 1].texto,
+      fonte: `capitulo-${capitulos[capitulos.length - 1].numero}`,
+    },
   ];
   const comp = compilarPacote({ papel: "revisor_literario", alvo: "livro", contrato: deps.contrato, perfil: deps.perfil, fatos: [...materialArco, ...(deps.docsFactuais ?? [])] });
   if (!comp.ok) {
@@ -433,9 +496,10 @@ async function avaliarLivro(
     parse: (t) => validarAvaliacaoLivro(extrairJson(t)),
   });
   // Reescritas: união dos blocos + o que a síntese apontou.
+  const sintese = validarAlvosReescrita(r.valor, numerosCapitulos, "síntese de arco");
   const av: AvaliacaoLivro = {
-    ...r.valor,
-    capitulos_a_reescrever: unirReescritas([...partes.map((p) => p.av.capitulos_a_reescrever), r.valor.capitulos_a_reescrever]),
+    ...sintese,
+    capitulos_a_reescrever: unirReescritas([...partes.map((p) => p.av.capitulos_a_reescrever), sintese.capitulos_a_reescrever]),
   };
   return { av, runId: r.runId };
 }

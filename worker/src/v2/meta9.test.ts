@@ -202,7 +202,101 @@ function lerReviews(): { op: string; registro: Record<string, unknown> }[] {
   return readFileSync(destino, "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
 }
 
+async function semearCapituloAprovado(capitulo: number, texto: string): Promise<void> {
+  const caminho = path.join(dir, "manuscrito", `capitulo-${String(capitulo).padStart(2, "0")}.md`);
+  writeFileSync(caminho, texto, "utf8");
+  await disco.inserirSpec({
+    project_id: "proj-1",
+    edition_id: null,
+    capitulo,
+    versao: 1,
+    hash: `h${capitulo}`,
+    status: "validada",
+    ficha: fichaDe(capitulo),
+  });
+  await gravador.registrarCapituloEscrito(capitulo, caminho, {
+    palavras: texto.split(/\s+/).filter(Boolean).length,
+    spec_versao: 1,
+    spec_hash: `h${capitulo}`,
+  });
+  const parecer = JSON.parse(parecerCapitulo()) as Parecer;
+  const reviewId = await disco.inserirReview({
+    project_id: "proj-1",
+    edition_id: null,
+    capitulo,
+    text_hash: hashText(texto),
+    verdict: "aprovado",
+    parecer,
+  });
+  await gravador.aprovarCapitulo(
+    capitulo,
+    { id: reviewId, text_hash: hashText(texto), verdict: "aprovado", parecer },
+    caminho
+  );
+}
+
 describe("executarMeta9", () => {
+  it("livro >40 mil palavras lê blocos integrais e sintetiza o arco com todas as fichas", async () => {
+    const capituloLongo = (numero: number, palavra: string) =>
+      [`## Capítulo ${numero}`, "", `${palavra} `.repeat(21_000).trim() + "."].join("\n");
+    await semearCapituloAprovado(2, capituloLongo(2, "travessia"));
+    await semearCapituloAprovado(3, capituloLongo(3, "retorno"));
+
+    // Dois blocos integrais (caps. 1–2 e cap. 3), seguidos pela síntese do livro.
+    provedor.enfileirar("revisor_literario", avaliacao(8.1, [{
+      capitulo: 2,
+      problemas: ["travessia longa"],
+      instrucoes: ["comprimir a travessia"],
+    }]));
+    provedor.enfileirar("revisor_literario", avaliacao(8.4, [{
+      capitulo: 3,
+      problemas: ["retorno tardio"],
+      instrucoes: ["antecipar a consequência"],
+    }]));
+    provedor.enfileirar("revisor_literario", avaliacao(9.2, [{
+      capitulo: 2,
+      problemas: ["travessia longa"],
+      instrucoes: ["comprimir a travessia"],
+    }]));
+
+    const r = await executarMeta9(deps({ meta: 9 }));
+
+    expect(r).toMatchObject({ atingiu: true, nota: 9.2, iteracoes: 1 });
+    const chamadas = provedor.chamadas.filter((c) => c.papel === "revisor_literario");
+    expect(chamadas).toHaveLength(3);
+    expect(chamadas[0].prompt).toContain("MANUSCRITO (capítulos 1–2)");
+    expect(chamadas[1].prompt).toContain("MANUSCRITO (capítulos 3–3)");
+    expect(chamadas[2].prompt).toContain("AVALIAÇÕES POR BLOCO");
+    expect(chamadas[2].prompt).toContain("MAPA ESTRUTURAL DOS CAPÍTULOS");
+    expect(chamadas[2].prompt).toContain('"capitulo": 1');
+    expect(chamadas[2].prompt).toContain('"capitulo": 2');
+    expect(chamadas[2].prompt).toContain('"capitulo": 3');
+
+    const relatorio = JSON.parse(
+      readFileSync(path.join(dir, "avaliacoes", "avaliacao-01.json"), "utf8")
+    ) as { capitulos_a_reescrever: { capitulo: number }[] };
+    expect(relatorio.capitulos_a_reescrever.map((c) => c.capitulo)).toEqual([2, 3]);
+    expect((await disco.lerEstado("proj-1"))?.doc.fase).toBe("concluido");
+  });
+
+  it("rejeita alvo de reescrita fora do material avaliado antes de tocar o manuscrito", async () => {
+    provedor.enfileirar("revisor_literario", avaliacao(7, [{
+      capitulo: 99,
+      problemas: ["alvo inventado"],
+      instrucoes: ["reescrever"],
+    }]));
+
+    await expect(executarMeta9(deps({ meta: 9 }))).rejects.toMatchObject({
+      codigo: "AVALIACAO_ALVO_INVALIDO",
+      classe: "qualidade",
+    });
+    expect(readFileSync(path.join(dir, "manuscrito", "capitulo-01.md"), "utf8")).toBe(PROSA_BASE);
+    expect((await disco.lerEstado("proj-1"))?.doc.capitulos["1"]).toMatchObject({
+      status: "aprovado",
+      text_hash: hashText(PROSA_BASE),
+    });
+  });
+
   it("floor decide: média acima da meta com UMA dimensão major fraca REPROVA (floor principle)", async () => {
     // Nove dimensões em 9.7 e estrutura_ritmo em 6: média ponderada ≈ 9.4 (≥ meta 9),
     // mas o floor (6) fica abaixo do mínimo da rubrica (7) → reprovado, nunca aprovado.
