@@ -414,18 +414,71 @@ export class Gravador {
    * edição estrutural (corte + reordenação) e ajusta total_capitulos. Capítulos
    * ausentes do mapa (cortados) são descartados. Mapa vazio = no-op.
    */
-  async aplicarMapaCapitulos(mapa: Record<number, number>): Promise<void> {
+  async aplicarMapaCapitulos(
+    mapa: Record<number, number>,
+    opts?: {
+      edicao?: {
+        run_id?: string;
+        propostas: number;
+        aplicadas: number;
+        detalhe: string[];
+      };
+      specs?: { destino: number; versao: number; hash: string }[];
+      fusoes?: {
+        origens: number[];
+        destino: number;
+        text_hash: string;
+        palavras: number;
+        review_id: string;
+        spec_versao: number;
+        spec_hash: string;
+      }[];
+    }
+  ): Promise<void> {
     const entradas = Object.entries(mapa);
-    if (entradas.length === 0) return;
+    if (entradas.length === 0 && !opts?.fusoes?.length && !opts?.edicao) return;
     await this.mutarEstado((doc) => {
-      const antigo = doc.capitulos;
-      const novo: Record<string, CapituloEstado> = {};
-      for (const [de, para] of entradas) {
-        const est = antigo[String(de)];
-        if (est) novo[String(para)] = est;
+      if (entradas.length > 0 || opts?.fusoes?.length) {
+        const antigo = doc.capitulos;
+        const novo: Record<string, CapituloEstado> = {};
+        const fusoesPorDestino = new Map((opts?.fusoes ?? []).map((f) => [f.destino, f]));
+        const specsPorDestino = new Map((opts?.specs ?? []).map((s) => [s.destino, s]));
+        for (const [de, para] of entradas) {
+          if (fusoesPorDestino.has(para)) continue;
+          const est = antigo[String(de)];
+          if (est) {
+            const spec = specsPorDestino.get(para);
+            novo[String(para)] = {
+              ...est,
+              ...(spec ? { spec_versao: spec.versao, spec_hash: spec.hash } : {}),
+            };
+          }
+        }
+        for (const fusao of opts?.fusoes ?? []) {
+          const lider = antigo[String(fusao.origens[0])] ?? {};
+          const { bloqueio: _bloqueio, ...base } = lider;
+          novo[String(fusao.destino)] = {
+            ...base,
+            status: "aprovado",
+            text_hash: fusao.text_hash,
+            palavras: fusao.palavras,
+            review_id: fusao.review_id,
+            aprovacao: {
+              review_id: fusao.review_id,
+              text_hash: fusao.text_hash,
+              em: this.agora(),
+            },
+            spec_versao: fusao.spec_versao,
+            spec_hash: fusao.spec_hash,
+            origens_estruturais: [...fusao.origens],
+          };
+        }
+        doc.capitulos = novo;
+        doc.total_capitulos = Object.keys(novo).length;
       }
-      doc.capitulos = novo;
-      doc.total_capitulos = Object.keys(novo).length;
+      if (opts?.edicao) {
+        doc.edicao_estrutural = { ...opts.edicao, em: this.agora() };
+      }
     });
   }
 }

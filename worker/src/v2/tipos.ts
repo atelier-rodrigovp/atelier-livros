@@ -291,6 +291,8 @@ export interface CapituloEstado {
   review_id?: string;
   aprovacao?: { review_id: string; run_id?: string; text_hash: string; em: string };
   bloqueio?: { codigo: string; detalhe: string; desde: string };
+  /** Numeração anterior combinada por uma fusão estrutural auditável. */
+  origens_estruturais?: number[];
 }
 
 export interface EstadoCanonicoDoc {
@@ -308,7 +310,7 @@ export interface EstadoCanonicoDoc {
   skill?: { id: string; versao: string; hash: string };
   fundacao?: { versao: string; hash: string; docs: Record<string, string> }; // doc → sha256
   total_capitulos?: number;
-  // Edição estrutural (editor_estrutural PROPÕE; o pipeline aplica os cortes/reordenações).
+  // Edição estrutural (editor propõe; o pipeline aplica cortes/fusões/reordenações).
   edicao_estrutural?: { run_id?: string; propostas: number; aplicadas: number; detalhe: string[]; em: string };
   // Meta-nota (avaliação de livro): última nota alcançada e o alvo comercial.
   avaliacao?: { nota?: number; meta: number; iteracoes: number; relatorio_path?: string; em: string };

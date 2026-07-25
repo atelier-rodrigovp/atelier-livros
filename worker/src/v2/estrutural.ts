@@ -5,9 +5,10 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { hashText } from "../quality-state.js";
 import { hashJsonCanonico } from "./hash.js";
 
-export type TipoProposta = "nenhuma" | "corte" | "reordenacao";
+export type TipoProposta = "nenhuma" | "corte" | "fusao" | "reordenacao";
 
 export interface PropostaEstrutural {
   tipo: TipoProposta;
@@ -26,6 +27,15 @@ export interface RelatorioEdicao {
   /** número antigo → número novo, apenas para capítulos SOBREVIVENTES (cortados ausentes). */
   mapa: Record<number, number>;
   totalFinal: number;
+  assinatura?: string;
+  arquivoOriginais?: string;
+  fusoes: {
+    origens: number[];
+    origemPrincipal: number;
+    destino: number;
+    textHash: string;
+    palavras: number;
+  }[];
 }
 
 const MANIFESTO = "_edicao-estrutural.json"; // marca planos já aplicados (idempotência)
@@ -61,7 +71,7 @@ export function validarPropostas(obj: unknown, totalCaps: number): PlanoEstrutur
   for (let i = 0; i < o.propostas.length; i++) {
     const p = o.propostas[i] as Record<string, unknown>;
     const tipo = p?.tipo;
-    if (tipo !== "nenhuma" && tipo !== "corte" && tipo !== "reordenacao") {
+    if (tipo !== "nenhuma" && tipo !== "corte" && tipo !== "fusao" && tipo !== "reordenacao") {
       throw new Error(`propostas[${i}].tipo inválido: ${String(tipo)}`);
     }
     if (typeof p.justificativa !== "string" || !p.justificativa.trim()) {
@@ -82,6 +92,18 @@ export function validarPropostas(obj: unknown, totalCaps: number): PlanoEstrutur
         cortados.add(c);
       }
     }
+    if (tipo === "fusao") {
+      if (capitulos.length < 2) throw new Error(`propostas[${i}]: fusao exige ao menos 2 capítulos`);
+      const ordenados = [...capitulos].sort((a, b) => a - b);
+      if (ordenados.some((n, j) => n !== capitulos[j])) {
+        throw new Error(`propostas[${i}]: fusao exige capítulos em ordem crescente`);
+      }
+      for (let j = 1; j < capitulos.length; j++) {
+        if (capitulos[j] !== capitulos[j - 1] + 1) {
+          throw new Error(`propostas[${i}]: fusao só aceita capítulos adjacentes`);
+        }
+      }
+    }
     if (tipo === "reordenacao") reordenacoes++;
 
     const proposta: PropostaEstrutural = { tipo, capitulos, justificativa: p.justificativa };
@@ -94,9 +116,25 @@ export function validarPropostas(obj: unknown, totalCaps: number): PlanoEstrutur
 
   if (reordenacoes > 1) throw new Error("mais de uma reordenação no mesmo plano (operações conflitantes)");
 
-  // A permutação é validada contra o conjunto PÓS-CORTE (capítulos sobreviventes).
+  const usadosEmFusao = new Set<number>();
+  for (const p of propostas.filter((x) => x.tipo === "fusao")) {
+    for (const cap of p.capitulos) {
+      if (usadosEmFusao.has(cap)) throw new Error(`capítulo ${cap} aparece em mais de uma fusão`);
+      if (cortados.has(cap)) throw new Error(`capítulo ${cap} não pode ser cortado e fundido no mesmo plano`);
+      usadosEmFusao.add(cap);
+    }
+  }
+
+  // A permutação é validada contra o conjunto PÓS-CORTE/PÓS-FUSÃO. Em uma
+  // fusão, o primeiro número identifica a unidade sobrevivente.
+  const absorvidos = new Set<number>();
+  for (const p of propostas.filter((x) => x.tipo === "fusao")) {
+    p.capitulos.slice(1).forEach((n) => absorvidos.add(n));
+  }
   const sobreviventes = new Set<number>();
-  for (let n = 1; n <= totalCaps; n++) if (!cortados.has(n)) sobreviventes.add(n);
+  for (let n = 1; n <= totalCaps; n++) {
+    if (!cortados.has(n) && !absorvidos.has(n)) sobreviventes.add(n);
+  }
 
   const reord = propostas.find((p) => p.tipo === "reordenacao");
   if (reord?.nova_ordem) {
@@ -116,26 +154,75 @@ export function validarPropostas(obj: unknown, totalCaps: number): PlanoEstrutur
 }
 
 /** Deriva conjunto de cortes e ordem final (em números ANTIGOS) a partir do plano validado. */
-function derivarOperacoes(propostas: PropostaEstrutural[], total: number): { cortados: Set<number>; ordemFinal: number[] } {
+function derivarOperacoes(
+  propostas: PropostaEstrutural[],
+  total: number
+): { cortados: Set<number>; fusoes: number[][]; ordemFinal: number[] } {
   const cortados = new Set<number>();
   for (const p of propostas) if (p.tipo === "corte") for (const c of p.capitulos) cortados.add(c);
+  const fusoes = propostas.filter((p) => p.tipo === "fusao").map((p) => [...p.capitulos]);
+  const absorvidos = new Set(fusoes.flatMap((caps) => caps.slice(1)));
 
   const sobreviventes: number[] = [];
-  for (let n = 1; n <= total; n++) if (!cortados.has(n)) sobreviventes.push(n);
+  for (let n = 1; n <= total; n++) {
+    if (!cortados.has(n) && !absorvidos.has(n)) sobreviventes.push(n);
+  }
 
   const reord = propostas.find((p) => p.tipo === "reordenacao");
   const ordemFinal = reord?.nova_ordem ? [...reord.nova_ordem] : sobreviventes;
-  return { cortados, ordemFinal };
+  return { cortados, fusoes, ordemFinal };
 }
 
-function lerManifesto(dir: string): { aplicados: { assinatura: string; totalFinal: number }[] } {
+export function planejarEdicaoEstrutural(
+  propostas: PropostaEstrutural[],
+  total: number
+): {
+  mapa: Record<number, number>;
+  totalFinal: number;
+  fusoes: { origens: number[]; origemPrincipal: number; destino: number }[];
+} {
+  const { fusoes, ordemFinal } = derivarOperacoes(propostas, total);
+  const mapa: Record<number, number> = {};
+  ordemFinal.forEach((antigo, idx) => (mapa[antigo] = idx + 1));
+  return {
+    mapa,
+    totalFinal: ordemFinal.length,
+    fusoes: fusoes.map((origens) => ({
+      origens,
+      origemPrincipal: origens[0],
+      destino: mapa[origens[0]],
+    })),
+  };
+}
+
+function lerManifesto(dir: string): { aplicados: { assinatura: string; totalFinal: number; arquivoOriginais?: string }[] } {
   const caminho = path.join(dir, MANIFESTO);
   if (!existsSync(caminho)) return { aplicados: [] };
   try {
-    return JSON.parse(readFileSync(caminho, "utf8")) as { aplicados: { assinatura: string; totalFinal: number }[] };
+    return JSON.parse(readFileSync(caminho, "utf8")) as { aplicados: { assinatura: string; totalFinal: number; arquivoOriginais?: string }[] };
   } catch {
     return { aplicados: [] };
   }
+}
+
+function contarPalavras(t: string): number {
+  return t.split(/\s+/).filter(Boolean).length;
+}
+
+function semCabecalhoCapitulo(texto: string): string {
+  const linhas = texto.replace(/\r\n/g, "\n").split("\n");
+  const primeira = linhas.findIndex((l) => l.trim().length > 0);
+  if (primeira >= 0 && /^#{1,6}\s+\S/.test(linhas[primeira])) {
+    linhas.splice(primeira, 1);
+  }
+  return linhas.join("\n").trim();
+}
+
+/** Combinação mecânica conservadora: preserva toda a prosa e remove só cabeçalhos duplicados. */
+export function fundirTextosCapitulos(textos: string[]): string {
+  if (textos.length < 2) throw new Error("fusão exige ao menos dois textos");
+  const partes = [textos[0].trim(), ...textos.slice(1).map(semCabecalhoCapitulo)];
+  return partes.join("\n\n").trim() + "\n";
 }
 
 function gravarManifestoAtomico(dir: string, conteudo: unknown): void {
@@ -157,72 +244,157 @@ export function aplicarEdicaoEstrutural(entrada: {
   dirManuscrito: string;
   propostas: PropostaEstrutural[];
   total: number;
+  /** Conteúdo já aprovado pelo pipeline para cada líder de fusão (primeiro capítulo). */
+  conteudosFusao?: Record<number, string>;
 }): RelatorioEdicao {
   const { dirManuscrito, propostas, total } = entrada;
-  const { cortados, ordemFinal } = derivarOperacoes(propostas, total);
+  const { cortados, fusoes, ordemFinal } = derivarOperacoes(propostas, total);
 
   // No-op puro: sem corte e sem reordenação efetiva.
   const houveReordenacao = propostas.some((p) => p.tipo === "reordenacao");
-  if (cortados.size === 0 && !houveReordenacao) {
-    return { aplicadas: [], mapa: {}, totalFinal: total };
+  if (cortados.size === 0 && fusoes.length === 0 && !houveReordenacao) {
+    return { aplicadas: [], mapa: {}, totalFinal: total, fusoes: [] };
   }
 
   // Idempotência por assinatura do plano.
-  const assinatura = hashJsonCanonico({ propostas, total });
+  const hashesFusao = Object.fromEntries(
+    Object.entries(entrada.conteudosFusao ?? {}).map(([k, v]) => [k, hashText(v)])
+  );
+  const assinatura = hashJsonCanonico({ propostas, total, hashesFusao });
   const manifesto = lerManifesto(dirManuscrito);
   const jaAplicado = manifesto.aplicados.find((a) => a.assinatura === assinatura);
   if (jaAplicado) {
     // Segunda aplicação do MESMO plano = no-op documentado (estado já foi re-keado na 1ª).
-    return { aplicadas: [], mapa: {}, totalFinal: jaAplicado.totalFinal };
+    return {
+      aplicadas: [],
+      mapa: {},
+      totalFinal: jaAplicado.totalFinal,
+      assinatura,
+      arquivoOriginais: jaAplicado.arquivoOriginais,
+      fusoes: [],
+    };
   }
 
   const aplicadas: string[] = [];
-  const cortadosDir = path.join(dirManuscrito, "_cortados");
-
-  // 1. Cortes: liberam os nomes antigos antes da renumeração.
-  if (cortados.size > 0) {
-    mkdirSync(cortadosDir, { recursive: true });
-    for (const c of [...cortados].sort((a, b) => a - b)) {
-      const origem = path.join(dirManuscrito, nomeCapitulo(c));
-      if (!existsSync(origem)) {
-        throw new Error(`corte: ${nomeCapitulo(c)} ausente no disco (manuscrito inconsistente ou plano já aplicado)`);
-      }
-      const destino = path.join(cortadosDir, nomeCapitulo(c));
-      if (existsSync(destino)) unlinkSync(destino);
-      renameSync(origem, destino);
-      aplicadas.push(`corte: capítulo ${c} → _cortados/`);
+  const originais = new Map<number, string>();
+  for (let n = 1; n <= total; n++) {
+    const arquivo = path.join(dirManuscrito, nomeCapitulo(n));
+    if (!existsSync(arquivo)) throw new Error(`edição estrutural: ${nomeCapitulo(n)} ausente no disco`);
+    originais.set(n, readFileSync(arquivo, "utf8"));
+  }
+  for (const grupo of fusoes) {
+    if (!entrada.conteudosFusao?.[grupo[0]]) {
+      throw new Error(`fusão ${grupo.join("+")}: conteúdo pré-validado do capítulo líder ${grupo[0]} ausente`);
     }
   }
 
-  // 2. Renumeração (mapa número antigo → novo = posição 1-based em ordemFinal).
+  // Mapa número antigo sobrevivente → novo = posição 1-based em ordemFinal.
   const mapa: Record<number, number> = {};
   ordemFinal.forEach((antigo, idx) => (mapa[antigo] = idx + 1));
+  const totalFinal = ordemFinal.length;
+  const arquivoOriginais = path.join("_edicoes", assinatura, "originais").replaceAll("\\", "/");
+  const dirOriginais = path.join(dirManuscrito, arquivoOriginais);
+  if (existsSync(dirOriginais) && readdirSync(dirOriginais).length > 0) {
+    throw new Error(`arquivo de edição já existe sem manifesto: ${dirOriginais}`);
+  }
+  mkdirSync(dirOriginais, { recursive: true });
 
-  const renomeados = ordemFinal
-    .map((antigo, idx) => ({ antigo, novo: idx + 1 }))
-    .filter((r) => r.antigo !== r.novo);
+  const temporarios: string[] = [];
+  try {
+    // Prepara todas as saídas antes de mover qualquer original.
+    for (const [idx, antigo] of ordemFinal.entries()) {
+      const novo = idx + 1;
+      const fusao = fusoes.find((f) => f[0] === antigo);
+      const conteudo = fusao ? entrada.conteudosFusao![antigo] : originais.get(antigo)!;
+      const tmp = path.join(dirManuscrito, `.${nomeCapitulo(novo)}.${assinatura}.tmp-struct`);
+      writeFileSync(tmp, conteudo, "utf8");
+      temporarios.push(tmp);
+    }
 
-  if (renomeados.length > 0) {
-    // Passada A: cada sobrevivente → capitulo-<novo>.md.tmp-reord (nomes novos são únicos).
-    for (const { antigo, novo } of renomeados) {
-      const origem = path.join(dirManuscrito, nomeCapitulo(antigo));
-      if (!existsSync(origem)) {
-        throw new Error(`reordenação: ${nomeCapitulo(antigo)} ausente no disco (manuscrito inconsistente ou plano já aplicado)`);
-      }
-      renameSync(origem, path.join(dirManuscrito, `${nomeCapitulo(novo)}.tmp-reord`));
+    // Arquiva TODOS os originais; rollback e auditoria não dependem de inferência.
+    for (let n = 1; n <= total; n++) {
+      renameSync(path.join(dirManuscrito, nomeCapitulo(n)), path.join(dirOriginais, nomeCapitulo(n)));
     }
-    // Passada B: os temporários assumem os nomes finais.
-    for (const { antigo, novo } of renomeados) {
-      renameSync(path.join(dirManuscrito, `${nomeCapitulo(novo)}.tmp-reord`), path.join(dirManuscrito, nomeCapitulo(novo)));
-      aplicadas.push(`reordenação: capítulo ${antigo} → ${novo}`);
+    for (const [idx, tmp] of temporarios.entries()) {
+      renameSync(tmp, path.join(dirManuscrito, nomeCapitulo(idx + 1)));
     }
+  } catch (erro) {
+    for (let n = 1; n <= totalFinal; n++) {
+      const parcial = path.join(dirManuscrito, nomeCapitulo(n));
+      if (existsSync(parcial)) unlinkSync(parcial);
+    }
+    for (const tmp of temporarios) if (existsSync(tmp)) unlinkSync(tmp);
+    for (let n = 1; n <= total; n++) {
+      const salvo = path.join(dirOriginais, nomeCapitulo(n));
+      if (existsSync(salvo)) renameSync(salvo, path.join(dirManuscrito, nomeCapitulo(n)));
+    }
+    throw erro;
   }
 
-  const totalFinal = ordemFinal.length;
-  manifesto.aplicados.push({ assinatura, totalFinal });
+  for (const c of [...cortados].sort((a, b) => a - b)) {
+    aplicadas.push(`corte: capítulo ${c} → ${arquivoOriginais}/`);
+  }
+  const fusoesAplicadas = fusoes.map((origens) => {
+    const origemPrincipal = origens[0];
+    const destino = mapa[origemPrincipal];
+    const texto = entrada.conteudosFusao![origemPrincipal];
+    aplicadas.push(`fusão: capítulos ${origens.join("+")} → ${destino}`);
+    return {
+      origens,
+      origemPrincipal,
+      destino,
+      textHash: hashText(texto),
+      palavras: contarPalavras(texto),
+    };
+  });
+  for (const [antigoS, novo] of Object.entries(mapa)) {
+    const antigo = Number(antigoS);
+    if (antigo !== novo) aplicadas.push(`reordenação: capítulo ${antigo} → ${novo}`);
+  }
+
+  manifesto.aplicados.push({ assinatura, totalFinal, arquivoOriginais });
   gravarManifestoAtomico(dirManuscrito, manifesto);
 
-  return { aplicadas, mapa, totalFinal };
+  return { aplicadas, mapa, totalFinal, assinatura, arquivoOriginais, fusoes: fusoesAplicadas };
+}
+
+/**
+ * Compensação de falha entre disco/banco: preserva a edição produzida em
+ * `_edicoes/<assinatura>/revertido/` e restaura os arquivos originais.
+ */
+export function reverterEdicaoEstrutural(entrada: {
+  dirManuscrito: string;
+  assinatura: string;
+  arquivoOriginais: string;
+  totalOriginal: number;
+  totalFinal: number;
+}): void {
+  const { dirManuscrito, assinatura, arquivoOriginais, totalOriginal, totalFinal } = entrada;
+  const dirOriginais = path.join(dirManuscrito, arquivoOriginais);
+  if (!existsSync(dirOriginais)) throw new Error(`rollback estrutural: originais ausentes em ${dirOriginais}`);
+  const baseRevertido = path.join(dirManuscrito, "_edicoes", assinatura, "revertido");
+  let dirRevertido = baseRevertido;
+  for (let tentativa = 2; existsSync(dirRevertido) && readdirSync(dirRevertido).length > 0; tentativa++) {
+    dirRevertido = `${baseRevertido}-${tentativa}`;
+  }
+  mkdirSync(dirRevertido, { recursive: true });
+
+  for (let n = 1; n <= totalFinal; n++) {
+    const atual = path.join(dirManuscrito, nomeCapitulo(n));
+    if (existsSync(atual)) {
+      const destino = path.join(dirRevertido, nomeCapitulo(n));
+      if (existsSync(destino)) unlinkSync(destino);
+      renameSync(atual, destino);
+    }
+  }
+  for (let n = 1; n <= totalOriginal; n++) {
+    const salvo = path.join(dirOriginais, nomeCapitulo(n));
+    if (!existsSync(salvo)) throw new Error(`rollback estrutural: ${nomeCapitulo(n)} ausente no arquivo`);
+    renameSync(salvo, path.join(dirManuscrito, nomeCapitulo(n)));
+  }
+  const manifesto = lerManifesto(dirManuscrito);
+  manifesto.aplicados = manifesto.aplicados.filter((a) => a.assinatura !== assinatura);
+  gravarManifestoAtomico(dirManuscrito, manifesto);
 }
 
 /** Utilitário de teste/inspeção: lista os capitulo-NN.md presentes, ordenados. */

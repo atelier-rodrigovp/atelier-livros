@@ -205,6 +205,46 @@ describe("Gravador — bloqueios e fase", () => {
     await gravador.mudarFase("estrutura");
     await esperarErroEngine(gravador.mudarFase("fundacao"), "ESTADO_INCONSISTENTE"); // regressão proibida
   });
+
+  it("aplicarMapaCapitulos remapeia specs e materializa fusão aprovada sem herdar review antigo", async () => {
+    const c1 = escreverCapitulo("capitulo-01.md", "Capítulo um.");
+    const c2 = escreverCapitulo("capitulo-02.md", "Capítulo dois.");
+    const c3 = escreverCapitulo("capitulo-03.md", "Capítulo três.");
+    await gravador.registrarCapituloEscrito(1, c1, { palavras: 2, spec_versao: 1, spec_hash: "spec-1" });
+    await gravador.registrarCapituloEscrito(2, c2, { palavras: 2, spec_versao: 1, spec_hash: "spec-2" });
+    await gravador.registrarCapituloEscrito(3, c3, { palavras: 2, spec_versao: 1, spec_hash: "spec-3" });
+
+    await gravador.aplicarMapaCapitulos(
+      { 1: 1, 2: 2 },
+      {
+        specs: [{ destino: 2, versao: 4, hash: "spec-fusao" }],
+        fusoes: [{
+          origens: [2, 3],
+          destino: 2,
+          text_hash: "hash-fusao",
+          palavras: 4,
+          review_id: "review-fusao",
+          spec_versao: 4,
+          spec_hash: "spec-fusao",
+        }],
+      }
+    );
+
+    const estado = await disco.lerEstado("proj-1");
+    expect(estado?.doc.total_capitulos).toBe(2);
+    expect(estado?.doc.capitulos["1"]?.text_hash).toBe(hashText("Capítulo um."));
+    expect(estado?.doc.capitulos["2"]).toMatchObject({
+      status: "aprovado",
+      text_hash: "hash-fusao",
+      palavras: 4,
+      review_id: "review-fusao",
+      spec_versao: 4,
+      spec_hash: "spec-fusao",
+      origens_estruturais: [2, 3],
+      aprovacao: { review_id: "review-fusao", text_hash: "hash-fusao" },
+    });
+    expect(estado?.doc.capitulos["3"]).toBeUndefined();
+  });
 });
 
 describe("Gravador — concorrência (duas instâncias, mesma persistência)", () => {

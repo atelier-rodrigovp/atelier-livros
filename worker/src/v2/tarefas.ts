@@ -146,16 +146,17 @@ export function tarefaArquitetoEnredo(briefing: { titulo: string; premissa: stri
   ].join("\n");
 }
 
-/** Editor estrutural: PROPÕE corte/reordenação de capítulos inteiros — nunca escreve prosa. */
+/** Editor estrutural: PROPÕE corte/fusão/reordenação — nunca escreve prosa. */
 export function tarefaEditorEstrutural(totalCaps: number, contrato: SkillContract): string {
   return [
     `Avalie a MACRO-ESTRUTURA do livro completo (${totalCaps} capítulos) — seção CAPÍTULOS — e proponha edições estruturais.`,
-    `Você PROPÕE; você NÃO escreve prosa. Saída APENAS JSON no schema "structural-edit/v1": { "schema":"structural-edit/v1", "propostas":[{"tipo":"nenhuma"|"corte"|"reordenacao","capitulos":[number],"nova_ordem"?:[number],"justificativa":string}] }.`,
+    `Você PROPÕE; você NÃO escreve prosa. Saída APENAS JSON no schema "structural-edit/v1": { "schema":"structural-edit/v1", "propostas":[{"tipo":"nenhuma"|"corte"|"fusao"|"reordenacao","capitulos":[number],"nova_ordem"?:[number],"justificativa":string}] }.`,
     `REGRAS DURAS:`,
-    `- PROIBIDO propor fusão, reescrita ou qualquer prosa. Só é permitido cortar um capítulo inteiro OU reordenar capítulos.`,
+    `- PROIBIDO escrever ou reescrever prosa. O worker pré-valida qualquer fusão pelo pipeline literário antes de promovê-la.`,
     `- "corte": SOMENTE com justificativa estrutural forte — capítulo redundante que não avança nenhum fio. "capitulos" lista o(s) número(s) a cortar.`,
-    `- "reordenacao": "nova_ordem" traz TODOS os números de 1 a ${totalCaps} (menos os cortados) exatamente uma vez, na nova sequência.`,
-    `- Na dúvida, responda [{"tipo":"nenhuma","capitulos":[],"justificativa":"estrutura sólida; sem corte nem reordenação"}].`,
+    `- "fusao": dois ou mais capítulos ADJACENTES e em ordem crescente, quando cumprem a mesma unidade dramática e separados produzem repetição/queda de tensão. O primeiro número identifica a unidade resultante.`,
+    `- "reordenacao": "nova_ordem" traz cada unidade sobrevivente exatamente uma vez: números cortados e números absorvidos por fusão (todos menos o primeiro de cada fusão) ficam de fora.`,
+    `- Na dúvida, responda [{"tipo":"nenhuma","capitulos":[],"justificativa":"estrutura sólida; sem corte, fusão nem reordenação"}].`,
     `Julgue pela família editorial "${contrato.familia_editorial}" e pelo motor narrativo "${contrato.motor_narrativo}".`,
     `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
   ].join("\n");

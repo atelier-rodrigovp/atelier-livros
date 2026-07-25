@@ -5,9 +5,10 @@
 
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import { hashText } from "../quality-state.js";
 import type { Job } from "../jobs.js"; // import type: não executa jobs.ts
 import { Gravador } from "./gravador.js";
-import { criarPersistencia } from "./persistencia.js";
+import { criarPersistencia, type PersistenciaV2 } from "./persistencia.js";
 import { carregarContrato, MAPA_SKILL_V1_V2 } from "./contrato.js";
 import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
 import { mapaModelosDoAmbiente } from "./config.js";
@@ -17,9 +18,17 @@ import { compilarPacote, type SecaoContexto } from "./compilador.js";
 import { executarPapel } from "./papeis.js";
 import { tarefaCanarioVoz, tarefaEditorEstrutural } from "./tarefas.js";
 import { gerarFundacaoV2, materializarFundacao } from "./fundacao.js";
-import { aplicarEdicaoEstrutural, validarPropostas, type PlanoEstrutural } from "./estrutural.js";
+import {
+  aplicarEdicaoEstrutural,
+  fundirTextosCapitulos,
+  planejarEdicaoEstrutural,
+  reverterEdicaoEstrutural,
+  validarPropostas,
+  type PlanoEstrutural,
+} from "./estrutural.js";
+import { fundirFichas, PersistenciaEstadoIsolado } from "./estrutural-staging.js";
 import { executarMeta9 } from "./meta9.js";
-import { ErroEngine } from "./tipos.js";
+import { ErroEngine, type EstadoCanonico, type SceneSpec } from "./tipos.js";
 
 /** Tipos de job que a V2 sabe executar (os demais permanecem na V1 mesmo em modo v2). */
 export const TIPOS_V2 = new Set(["escrever_livro", "criar_fundacao", "laboratorio_v2"]);
@@ -72,6 +81,130 @@ async function atualizarProgresso(jobId: string, progresso: Record<string, unkno
   const { data } = await sb.from("jobs").select("progresso").eq("owner", OWNER).eq("id", jobId).single();
   const atual = ((data as { progresso?: Record<string, unknown> } | null)?.progresso ?? {}) as Record<string, unknown>;
   await sb.from("jobs").update({ progresso: { ...atual, ...progresso } }).eq("owner", OWNER).eq("id", jobId);
+}
+
+interface FusaoPrevalidada {
+  origens: number[];
+  destino: number;
+  conteudo: string;
+  textHash: string;
+  palavras: number;
+  reviewId: string;
+  ficha: SceneSpec;
+}
+
+function contarPalavras(texto: string): number {
+  return texto.split(/\s+/).filter(Boolean).length;
+}
+
+export async function prepararEdicaoEstrutural(opts: {
+  plano: PlanoEstrutural;
+  total: number;
+  deps: DepsPipeline;
+  persistencia: PersistenciaV2;
+  estado: EstadoCanonico;
+  dirProjeto: string;
+  jobId: string;
+}): Promise<{
+  fichasOriginais: Map<number, SceneSpec>;
+  fichasFinais: Map<number, SceneSpec>;
+  fusoes: FusaoPrevalidada[];
+  conteudosFusao: Record<number, string>;
+}> {
+  const previa = planejarEdicaoEstrutural(opts.plano.propostas, opts.total);
+  const fichasOriginais = new Map<number, SceneSpec>();
+  for (let cap = 1; cap <= opts.total; cap++) {
+    const ficha = await opts.persistencia.lerFichaMaisRecente(opts.deps.projectId, cap);
+    if (!ficha) {
+      throw new ErroEngine({
+        codigo: "EDICAO_ESTRUTURAL_FICHA_AUSENTE",
+        classe: "qualidade",
+        mensagem: `edição estrutural: ficha canônica do capítulo ${cap} ausente; nenhuma renumeração foi aplicada`,
+      });
+    }
+    fichasOriginais.set(cap, ficha);
+  }
+
+  const fusoes: FusaoPrevalidada[] = [];
+  const conteudosFusao: Record<number, string> = {};
+  for (const fusao of previa.fusoes) {
+    const textos = await Promise.all(
+      fusao.origens.map((cap) =>
+        fs.readFile(path.join(opts.deps.dirManuscrito, `capitulo-${String(cap).padStart(2, "0")}.md`), "utf8")
+      )
+    );
+    const textoBase = fundirTextosCapitulos(textos);
+    const ficha = fundirFichas(
+      fusao.origens.map((cap) => fichasOriginais.get(cap)!),
+      fusao.destino
+    );
+    const dirStaging = path.join(
+      opts.dirProjeto,
+      "engine-v2",
+      "edicoes-candidatas",
+      opts.jobId,
+      `fusao-${fusao.origens.join("-")}`,
+      "manuscrito"
+    );
+    await fs.mkdir(dirStaging, { recursive: true });
+    const persistenciaIsolada = new PersistenciaEstadoIsolado(opts.persistencia, opts.estado);
+    const gravadorIsolado = new Gravador({
+      persistencia: persistenciaIsolada,
+      projectId: opts.deps.projectId,
+    });
+    const resultado = await escreverCapitulo(
+      {
+        ...opts.deps,
+        gravador: gravadorIsolado,
+        persistencia: persistenciaIsolada,
+        dirManuscrito: dirStaging,
+      },
+      fusao.destino,
+      { fichaExistente: ficha, textoBase }
+    );
+    if (resultado.status !== "aprovado" || !resultado.reviewId || !resultado.textHash) {
+      throw new ErroEngine({
+        codigo: "FUSAO_NAO_APROVADA",
+        classe: "qualidade",
+        mensagem: `fusão ${fusao.origens.join("+")} terminou "${resultado.status}" no staging; manuscrito canônico preservado`,
+        detalhe: { origens: fusao.origens, destino: fusao.destino, problemas: resultado.problemas },
+      });
+    }
+    const caminhoCandidato = path.join(dirStaging, `capitulo-${String(fusao.destino).padStart(2, "0")}.md`);
+    const conteudo = await fs.readFile(caminhoCandidato, "utf8");
+    if (hashText(conteudo) !== resultado.textHash) {
+      throw new ErroEngine({
+        codigo: "GATE_ESTADO_INCONSISTENTE",
+        classe: "tecnica",
+        mensagem: `fusão ${fusao.origens.join("+")}: hash do staging diverge do review aprovado`,
+      });
+    }
+    conteudosFusao[fusao.origemPrincipal] = conteudo;
+    fusoes.push({
+      origens: fusao.origens,
+      destino: fusao.destino,
+      conteudo,
+      textHash: resultado.textHash,
+      palavras: contarPalavras(conteudo),
+      reviewId: resultado.reviewId,
+      ficha,
+    });
+  }
+
+  const fusaoPorLider = new Map(previa.fusoes.map((f) => [f.origemPrincipal, f]));
+  const fichaFusaoPorDestino = new Map(fusoes.map((f) => [f.destino, f.ficha]));
+  const fichasFinais = new Map<number, SceneSpec>();
+  for (const [origemS, destino] of Object.entries(previa.mapa)) {
+    const origem = Number(origemS);
+    const fusao = fusaoPorLider.get(origem);
+    fichasFinais.set(
+      destino,
+      fusao
+        ? fichaFusaoPorDestino.get(destino)!
+        : { ...structuredClone(fichasOriginais.get(origem)!), capitulo: destino }
+    );
+  }
+  return { fichasOriginais, fichasFinais, fusoes, conteudosFusao };
 }
 
 /** Executa escrever_livro no pipeline V2, capítulo a capítulo, retomável. */
@@ -314,18 +447,119 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     }
     throw e;
   }
-  const relatorioEd = aplicarEdicaoEstrutural({ dirManuscrito: deps.dirManuscrito, propostas: plano.propostas, total });
-  await gravador.registrarEdicaoEstrutural({
-    run_id: runIdEd,
-    propostas: plano.propostas.length,
-    aplicadas: relatorioEd.aplicadas.length,
-    detalhe: relatorioEd.aplicadas,
+  const haOperacaoReal = plano.propostas.some((p) => p.tipo !== "nenhuma");
+  let relatorioEd = aplicarEdicaoEstrutural({
+    dirManuscrito: deps.dirManuscrito,
+    propostas: [{ tipo: "nenhuma", capitulos: [], justificativa: "prévia sem mutação" }],
+    total,
   });
-  await gravador.aplicarMapaCapitulos(relatorioEd.mapa);
+
+  if (!haOperacaoReal) {
+    // Ainda registra que o editor rodou; retomadas não pedem um novo julgamento.
+    await gravador.aplicarMapaCapitulos({}, {
+      edicao: {
+        run_id: runIdEd,
+        propostas: plano.propostas.length,
+        aplicadas: 0,
+        detalhe: [],
+      },
+    });
+  } else {
+    // Fusão é validada em staging com ledger real e estado isolado. Corte e
+    // reordenação também exigem fichas canônicas para não trocar spec após renumerar.
+    const preparacao = await prepararEdicaoEstrutural({
+      plano,
+      total,
+      deps,
+      persistencia,
+      estado: estadoPosEscrita,
+      dirProjeto,
+      jobId: job.id,
+    });
+    relatorioEd = aplicarEdicaoEstrutural({
+      dirManuscrito: deps.dirManuscrito,
+      propostas: plano.propostas,
+      total,
+      conteudosFusao: preparacao.conteudosFusao,
+    });
+
+    const specsPersistidas: { destino: number; versao: number; hash: string }[] = [];
+    try {
+      for (const [destino, ficha] of [...preparacao.fichasFinais.entries()].sort((a, b) => a[0] - b[0])) {
+        const versao = (await persistencia.maiorVersaoSpec(projectId, destino)) + 1;
+        const hash = hashJsonCanonico(ficha);
+        await persistencia.inserirSpec({
+          project_id: projectId,
+          edition_id: job.edition_id ?? null,
+          capitulo: destino,
+          versao,
+          hash,
+          status: "validada",
+          ficha,
+          origem_run_id: runIdEd,
+        });
+        specsPersistidas.push({ destino, versao, hash });
+      }
+      const specsPorDestino = new Map(specsPersistidas.map((s) => [s.destino, s]));
+      await gravador.aplicarMapaCapitulos(relatorioEd.mapa, {
+        edicao: {
+          run_id: runIdEd,
+          propostas: plano.propostas.length,
+          aplicadas: relatorioEd.aplicadas.length,
+          detalhe: relatorioEd.aplicadas,
+        },
+        specs: specsPersistidas,
+        fusoes: preparacao.fusoes.map((f) => {
+          const spec = specsPorDestino.get(f.destino)!;
+          return {
+            origens: f.origens,
+            destino: f.destino,
+            text_hash: f.textHash,
+            palavras: f.palavras,
+            review_id: f.reviewId,
+            spec_versao: spec.versao,
+            spec_hash: spec.hash,
+          };
+        }),
+      });
+    } catch (erro) {
+      // Compensação: restaura arquivos e reinsere as fichas originais em versão
+      // superior, neutralizando qualquer spec parcial já persistida.
+      if (relatorioEd.assinatura && relatorioEd.arquivoOriginais) {
+        reverterEdicaoEstrutural({
+          dirManuscrito: deps.dirManuscrito,
+          assinatura: relatorioEd.assinatura,
+          arquivoOriginais: relatorioEd.arquivoOriginais,
+          totalOriginal: total,
+          totalFinal: relatorioEd.totalFinal,
+        });
+      }
+      for (const [capitulo, ficha] of preparacao.fichasOriginais) {
+        const versao = (await persistencia.maiorVersaoSpec(projectId, capitulo)) + 1;
+        await persistencia.inserirSpec({
+          project_id: projectId,
+          edition_id: job.edition_id ?? null,
+          capitulo,
+          versao,
+          hash: hashJsonCanonico(ficha),
+          status: "validada",
+          ficha,
+          origem_run_id: runIdEd,
+        });
+      }
+      throw new ErroEngine({
+        codigo: "EDICAO_ESTRUTURAL_REVERTIDA",
+        classe: "tecnica",
+        mensagem: `edição estrutural falhou na promoção e os arquivos/fichas originais foram restaurados: ${erro instanceof Error ? erro.message : String(erro)}`,
+      });
+    }
+  }
   await atualizarProgresso(job.id, {
     fase: "EDICAO_ESTRUTURAL",
     propostas: plano.propostas.length,
     aplicadas: relatorioEd.aplicadas.length,
+    total_final: relatorioEd.totalFinal,
+    fusoes: relatorioEd.fusoes,
   });
 
   // ---------------------------------------------------------------------------
