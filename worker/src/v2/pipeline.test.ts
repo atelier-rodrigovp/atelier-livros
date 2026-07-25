@@ -10,6 +10,7 @@ import { Gravador } from "./gravador.js";
 import { DiscoPersistencia } from "./persistencia.js";
 import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
 import { ProvedorMock } from "./provedor.js";
+import { medirSinais } from "./sinais.js";
 import type { Parecer, SceneSpec, SkillContract } from "./tipos.js";
 
 // ---------------------------------------------------------------------------
@@ -380,6 +381,23 @@ describe("escreverCapitulo — violação difusa entra em modo reescrita (caso d
     "",
     "Marina não sabia o que dizer, mas não podia ficar parada diante do arquivista. Ela não entendia o registro, mas não ousava perguntar nada ali dentro. O arquivista atendeu o telefone na sala ao lado. Ela fotografou a linha com o nome do irmão. A chave girou na fechadura.",
   ].join("\n");
+  const sinaisSanfona = medirSinais(PROSA_SANFONA, contrato);
+  const disposicaoMedida = (nome: string) => {
+    const medido = sinaisSanfona.find((s) => s.sinal === nome)!;
+    const ocorrencias = medido.exemplos.length
+      ? {
+          ocorrencias_citadas: [{ trecho: medido.exemplos[0] }],
+          falsos_positivos: Number(medido.valor) - 1,
+        }
+      : {};
+    return {
+      sinal: medido.sinal,
+      valor: medido.valor,
+      disposicao: "violacao_confirmada" as const,
+      evidencia: "violação confirmada no texto",
+      ...ocorrencias,
+    };
+  };
 
   it("violacao_confirmada de sinal medido → instrução global com trechos flagrados + modo reescrita; platô de 1 rodada é tolerado", async () => {
     deps.maxCorrecoes = 3;
@@ -389,15 +407,7 @@ describe("escreverCapitulo — violação difusa entra em modo reescrita (caso d
       JSON.stringify(
         parecer({
           verdict: "reprovado",
-          sinais: [{
-            sinal: "sanfona",
-            valor: 9,
-            disposicao: "violacao_confirmada",
-            evidencia: "reformulações em cadeia",
-            // Regra do adendo 2: cada ocorrência confirmada citada; o resto declarado falso positivo.
-            ocorrencias_citadas: [{ trecho: "não sabia o que dizer, mas não podia ficar parada", posicao: "L:3" }],
-            falsos_positivos: 8,
-          }],
+          sinais: [disposicaoMedida("sanfona")],
           correcoes: [], // revisor não listou correção cirúrgica — só a violação difusa
         })
       );
@@ -436,14 +446,9 @@ describe("escreverCapitulo — violação difusa entra em modo reescrita (caso d
       JSON.stringify(
         parecer({
           verdict: "reprovado",
-          sinais: Array.from({ length: n }, (_, i) => ({
-            sinal: i === 0 ? "sanfona" : `sinal_${i}`,
-            valor: 9,
-            disposicao: "violacao_confirmada" as const,
-            evidencia: "violação",
-            ocorrencias_citadas: [{ trecho: "não sabia o que dizer, mas não podia ficar parada" }],
-            falsos_positivos: 8,
-          })),
+          sinais: ["sanfona", "declarativas_pct", "dialogo_pct"]
+            .slice(0, n)
+            .map(disposicaoMedida),
           correcoes: [{ local: "L:1", problema: "reformulação", instrucao: "corte a reformulação" }],
         })
       );

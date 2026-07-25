@@ -1,0 +1,248 @@
+{
+  "schema": "detector-labels/v1",
+  "amostra_id": "dan-brown-aprovado-02",
+  "texto_sha256": "35f506e057fc20f41fcffd23c78d3828af3d602de78a86e0b3d06a10685c010f",
+  "sinais": [
+    {
+      "sinal": "gnomico",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "Um operador que retém material não é um operador.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "personificacao",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "Era o que o chamavam quando precisavam chamá-lo de algo — o operador que catalogava, o que fazia a l",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 2,
+          "trecho": "Faltava só a mão que fechasse o arquivo.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 3,
+          "trecho": "Faltava só a mão que fechasse o arquivo.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "sanfona",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "E, no campo do assunto, onde deveria haver o nome de um velho de Woodbridge ou de uma viúva que ele riscaria n",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 2,
+          "trecho": "E agora estava no campo do objeto, com uma causa provável já redigida embaixo, e uma hora de recolhimento que ",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 3,
+          "trecho": "Reyland avaliava Cole como avaliava qualquer peça do aparato — pelo desempenho, não pelo apego — e trocava peç",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 4,
+          "trecho": "Esticou o braço até o compartimento atrás do porta-luvas, o que ele mesmo forrara de feltro para o metal não t",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 5,
+          "trecho": "Ele o guardara porque os ponteiros não tinham como mentir, e agora entendia, com o telefone frio no colo, o qu",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 6,
+          "trecho": "Esticou o braço até o compartimento atrás do porta-luvas, o que ele mesmo forrara de feltro para o metal não t",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 7,
+          "trecho": "Ele o guardara porque os ponteiros não tinham como mentir, e agora entendia, com o telefone frio no colo, o qu",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "metafora_elaborada",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "como sempre apontou. E a causa provável estava no molde que ele mesmo aprendera",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 2,
+          "trecho": "como quem carrega perguntas que tem medo de responder. O método que ele decorara",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.fragmentos colados (≤4 palavras)",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "O rascunho estava lá. Formato conhecido, campos conhecidos.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 2,
+          "trecho": "Formato conhecido, campos conhecidos. Recolhimento agendado.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 3,
+          "trecho": "*Curador.* Cole leu de novo.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 4,
+          "trecho": "Cole leu de novo. A palavra não mudou.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 5,
+          "trecho": "Fuga estava fechada. Moeda, também.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.staccato (frases curtas)",
+      "ocorrencias": [],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.clipe de negação curto",
+      "ocorrencias": [],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.anáfora (frases coladas, mesmo início)",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "Ele conhecia o lugar: sem vizinho para anotar placa, câmera do posto apagando a fita toda semana. / Ele escolh",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 2,
+          "trecho": "Ele carregara aquelas duas folhas meses a fio sem abri-las — até agora. / Ele sempre soubera que abrir aquelas",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.epigrama antitético",
+      "ocorrencias": [],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.fragmento de ênfase (Regra 4 ≤1–2)",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "Recolhimento agendado.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 2,
+          "trecho": "*Curador.*",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 3,
+          "trecho": "Fuga.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 4,
+          "trecho": "Fuga.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 5,
+          "trecho": "A médica.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 6,
+          "trecho": "Moeda, também.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.fragmentos de ênfase COLADOS (Regra 4: nunca dois)",
+      "ocorrencias": [],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.pensamento em itálico (Regra 4 ≤2–3)",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "Curador.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 2,
+          "trecho": "variável",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.pergunta retórica (Regra 4 ≤1–2)",
+      "ocorrencias": [],
+      "nao_detectadas": []
+    }
+  ]
+}

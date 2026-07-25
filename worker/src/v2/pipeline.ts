@@ -15,7 +15,7 @@ import { hashJsonCanonico } from "./hash.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
-import { conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
+import { acharSinalMedido, conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
 import { medirSinais, resumoSinais } from "./sinais.js";
 import { validarSpec } from "./spec.js";
 import {
@@ -565,11 +565,10 @@ export async function escreverCapitulo(
     // instrução global com a cota-alvo do contrato E os trechos que o detector
     // flagrou — o escritor precisa saber QUAIS frases contam (achados do canário
     // hoover).
-    const medidos = new Map(sinais.map((s) => [s.sinal, s]));
     const globais = parecer.sinais
       .filter((s) => s.disposicao === "violacao_confirmada")
       .map((s) => {
-        const medido = medidos.get(s.sinal);
+        const medido = acharSinalMedido(s.sinal, sinais);
         const cota = medido?.cota;
         const alvo = cota?.max != null ? `no máximo ${cota.max}` : cota?.min != null ? `no mínimo ${cota.min}` : "dentro da cota do contrato";
         // O escritor corrige as ocorrências que o REVISOR confirmou (citadas uma a

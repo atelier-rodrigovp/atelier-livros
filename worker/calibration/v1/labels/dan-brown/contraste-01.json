@@ -1,0 +1,151 @@
+{
+  "schema": "detector-labels/v1",
+  "amostra_id": "dan-brown-contraste-01",
+  "texto_sha256": "abcc7c5eaf2d4b3204747cb5469017575a1515f6adb8c23c5d15b5dc291f7814",
+  "sinais": [
+    {
+      "sinal": "gnomico",
+      "ocorrencias": [],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "personificacao",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "O sistema oficial devolveu a mesma frase seca de antes, o nenhum resultado de sempre.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "sanfona",
+      "ocorrencias": [],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "metafora_elaborada",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "como uma cicatriz clara. Uma âncora dentro de um círculo, com três estrelas acim",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.fragmentos colados (≤4 palavras)",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "*Inventário classificado. Interdição por ordem superior.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 2,
+          "trecho": "Interdição por ordem superior. Não catalogável.*",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.staccato (frases curtas)",
+      "ocorrencias": [],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.clipe de negação curto",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "Não catalogável.*",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.anáfora (frases coladas, mesmo início)",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "Cada moinho tinha a sua. / Cada década tinha a sua variação.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.epigrama antitético",
+      "ocorrencias": [],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.fragmento de ênfase (Regra 4 ≤1–2)",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "*Inventário classificado.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 2,
+          "trecho": "Não catalogável.*",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 3,
+          "trecho": "Era logística.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 4,
+          "trecho": "Duas casas.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.fragmentos de ênfase COLADOS (Regra 4: nunca dois)",
+      "ocorrencias": [],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.pensamento em itálico (Regra 4 ≤2–3)",
+      "ocorrencias": [
+        {
+          "indice_detector": 1,
+          "trecho": "Inventário classificado. Interdição por ordem superior. Não catalogável.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        },
+        {
+          "indice_detector": 2,
+          "trecho": "Dividido em três. Vedada a reunião das partes.",
+          "rotulo": "legitima",
+          "justificativa": "PRÉ-RÓTULO AUTOMÁTICO: substituir por julgamento humano específico antes de validar"
+        }
+      ],
+      "nao_detectadas": []
+    },
+    {
+      "sinal": "cadencia.pergunta retórica (Regra 4 ≤1–2)",
+      "ocorrencias": [],
+      "nao_detectadas": []
+    }
+  ]
+}

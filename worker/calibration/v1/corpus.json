@@ -1,0 +1,189 @@
+{
+  "schema": "calibration-corpus/v1",
+  "versao": "1.0.0",
+  "descricao": "Corpus inicial autocontido da calibração Engine V2; splits congelados antes da rotulagem humana.",
+  "amostras": [
+    {
+      "id": "dan-brown-aprovado-01",
+      "skill": "dan-brown",
+      "split": "calibracao",
+      "classe": "aprovada",
+      "arquivo": "samples/dan-brown/aprovado-01.md",
+      "sha256": "94b727a5d7bb4166de20ba3bd85ca79e43d241d183b96074c97747c6cb9fa92f",
+      "origem": "benchmark A/B dan-brown 2026-07-18 (cap-05 regenerado e aceito; HANDOFF-CORRECAO-ESTILO.md §3)",
+      "rotulos": {
+        "arquivo": "labels/dan-brown/aprovado-01.json",
+        "status": "pendente_humano"
+      }
+    },
+    {
+      "id": "dan-brown-aprovado-02",
+      "skill": "dan-brown",
+      "split": "calibracao",
+      "classe": "aprovada",
+      "arquivo": "samples/dan-brown/aprovado-02.md",
+      "sha256": "35f506e057fc20f41fcffd23c78d3828af3d602de78a86e0b3d06a10685c010f",
+      "origem": "benchmark A/B dan-brown 2026-07-18 (cap-37, pior baseline → aprovado 3/3)",
+      "rotulos": {
+        "arquivo": "labels/dan-brown/aprovado-02.json",
+        "status": "pendente_humano"
+      }
+    },
+    {
+      "id": "dan-brown-aprovado-03",
+      "skill": "dan-brown",
+      "split": "holdout",
+      "classe": "aprovada",
+      "arquivo": "samples/dan-brown/aprovado-03.md",
+      "sha256": "f556d452820e36524438e6e6ab2ee1a0989a22a8d1052af77a45aead8ac3751a",
+      "origem": "benchmark A/B dan-brown 2026-07-18 (cap-38 regenerado e aceito)",
+      "rotulos": {
+        "arquivo": "labels/dan-brown/aprovado-03.json",
+        "status": "pendente_humano"
+      }
+    },
+    {
+      "id": "dan-brown-contraste-01",
+      "skill": "dan-brown",
+      "split": "holdout",
+      "classe": "contraste",
+      "arquivo": "samples/dan-brown/contraste-01.md",
+      "sha256": "abcc7c5eaf2d4b3204747cb5469017575a1515f6adb8c23c5d15b5dc291f7814",
+      "origem": "canário V2 dan-brown 2026-07-21 (cap reprovado)",
+      "rotulos": {
+        "arquivo": "labels/dan-brown/contraste-01.json",
+        "status": "pendente_humano"
+      }
+    },
+    {
+      "id": "hoover-mcfadden-aprovado-01",
+      "skill": "hoover-mcfadden",
+      "split": "calibracao",
+      "classe": "aprovada",
+      "arquivo": "samples/hoover-mcfadden/aprovado-01.md",
+      "sha256": "934039ab66174f414a076641bb29298a5d8f74e28cddf14e4aee546cdd7acb80",
+      "origem": "benchmark hoover 2026-07-18 (PASSA 3/3; HANDOFF-CORRECAO-ESTILO.md §4)",
+      "rotulos": {
+        "arquivo": "labels/hoover-mcfadden/aprovado-01.json",
+        "status": "pendente_humano"
+      }
+    },
+    {
+      "id": "hoover-mcfadden-aprovado-02",
+      "skill": "hoover-mcfadden",
+      "split": "calibracao",
+      "classe": "aprovada",
+      "arquivo": "samples/hoover-mcfadden/aprovado-02.md",
+      "sha256": "6581e727f42e8f0eb95e00e6cbc19d69cbaff1e6e8f169ac3be4e298e65ac375",
+      "origem": "benchmark hoover 2026-07-18 (PASSA 3/3)",
+      "rotulos": {
+        "arquivo": "labels/hoover-mcfadden/aprovado-02.json",
+        "status": "pendente_humano"
+      }
+    },
+    {
+      "id": "hoover-mcfadden-aprovado-03",
+      "skill": "hoover-mcfadden",
+      "split": "holdout",
+      "classe": "aprovada",
+      "arquivo": "samples/hoover-mcfadden/aprovado-03.md",
+      "sha256": "ac8f1939536d9b205a4b8dc5b27b463d69f63264c0d666929d3c41f45ff0c934",
+      "origem": "benchmark hoover 2026-07-18 (PASSA 3/3)",
+      "rotulos": {
+        "arquivo": "labels/hoover-mcfadden/aprovado-03.json",
+        "status": "pendente_humano"
+      }
+    },
+    {
+      "id": "hoover-mcfadden-contraste-01",
+      "skill": "hoover-mcfadden",
+      "split": "calibracao",
+      "classe": "contraste",
+      "arquivo": "samples/hoover-mcfadden/contraste-01.md",
+      "sha256": "7d91ae4188e94f222a5c751efde33ffbf4f54b878a97862d0d1a681d86400855",
+      "origem": "baseline pré-correção do benchmark hoover (reprovado na régua 2026-07-18)",
+      "rotulos": {
+        "arquivo": "labels/hoover-mcfadden/contraste-01.json",
+        "status": "pendente_humano"
+      }
+    },
+    {
+      "id": "hoover-mcfadden-contraste-02",
+      "skill": "hoover-mcfadden",
+      "split": "calibracao",
+      "classe": "contraste",
+      "arquivo": "samples/hoover-mcfadden/contraste-02.md",
+      "sha256": "7b24acd645367c00ebcb424fb366bfa0a8ee20a2dc1734d71aa831c29358955a",
+      "origem": "baseline pré-correção do benchmark hoover",
+      "rotulos": {
+        "arquivo": "labels/hoover-mcfadden/contraste-02.json",
+        "status": "pendente_humano"
+      }
+    },
+    {
+      "id": "hoover-mcfadden-contraste-03",
+      "skill": "hoover-mcfadden",
+      "split": "holdout",
+      "classe": "contraste",
+      "arquivo": "samples/hoover-mcfadden/contraste-03.md",
+      "sha256": "a0c89d83a9fda529ab878683efcf3b8292703674e03f312aba214e9c99c79a0a",
+      "origem": "canário V2 hoover 2026-07-21 (cap reprovado; parecer sanfona 15)",
+      "rotulos": {
+        "arquivo": "labels/hoover-mcfadden/contraste-03.json",
+        "status": "pendente_humano"
+      }
+    },
+    {
+      "id": "romantasy-aprovado-01",
+      "skill": "romantasy",
+      "split": "calibracao",
+      "classe": "aprovada",
+      "arquivo": "samples/romantasy/aprovado-01.md",
+      "sha256": "5b4312775809a219ebbf47f7f02fdbca3f3e98d658b321189c374cc38482d239",
+      "origem": "piloto da AUDITORIA-HOOVER-ROMANTASY (SPEC-RM3, n=3) — julgado conforme à craft na página (POV com ganho, custo pago, burn por mérito); única prosa romantasy avaliada positivamente que existe",
+      "rotulos": {
+        "arquivo": "labels/romantasy/aprovado-01.json",
+        "status": "pendente_humano"
+      }
+    },
+    {
+      "id": "romantasy-aprovado-02",
+      "skill": "romantasy",
+      "split": "calibracao",
+      "classe": "aprovada",
+      "arquivo": "samples/romantasy/aprovado-02.md",
+      "sha256": "1435b5c3935026dc7fb621db9350536956dc12ebff4a02444fab3b87d9f68347",
+      "origem": "piloto da AUDITORIA-HOOVER-ROMANTASY (SPEC-RM3, n=3)",
+      "rotulos": {
+        "arquivo": "labels/romantasy/aprovado-02.json",
+        "status": "pendente_humano"
+      }
+    },
+    {
+      "id": "romantasy-aprovado-03",
+      "skill": "romantasy",
+      "split": "holdout",
+      "classe": "aprovada",
+      "arquivo": "samples/romantasy/aprovado-03.md",
+      "sha256": "be449a5d1281d60e7ed573fc1a8c8472a204c4ec43efdb2f53a50c78a7f7aee2",
+      "origem": "piloto da AUDITORIA-HOOVER-ROMANTASY (SPEC-RM3, n=3)",
+      "rotulos": {
+        "arquivo": "labels/romantasy/aprovado-03.json",
+        "status": "pendente_humano"
+      }
+    },
+    {
+      "id": "romantasy-contraste-01",
+      "skill": "romantasy",
+      "split": "holdout",
+      "classe": "contraste",
+      "arquivo": "samples/romantasy/contraste-01.md",
+      "sha256": "28e9537613cb2e65ec306b8eef4453c2fe3b2c33f9b84404b3e20f0d4ac7b78b",
+      "origem": "canário V2 romantasy 2026-07-21 (cap reprovado)",
+      "rotulos": {
+        "arquivo": "labels/romantasy/contraste-01.json",
+        "status": "pendente_humano"
+      }
+    }
+  ]
+}

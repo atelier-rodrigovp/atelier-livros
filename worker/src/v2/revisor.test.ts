@@ -2,7 +2,7 @@
 // ocorrências citadas uma a uma; disposição parcial exige a conta fechada. A regra
 // vive em validarParecer (parse → retry técnico do revisor), verificável por código.
 import { describe, expect, it } from "vitest";
-import { exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
+import { conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
 import type { SinalMedido } from "./sinais.js";
 import type { Parecer } from "./tipos.js";
 
@@ -92,6 +92,23 @@ describe("validarParecer — auditabilidade dos sinais de contagem", () => {
     expect(parcial.sinais[0].falsos_positivos).toBe(8);
   });
 
+  it("falsos_positivos negativo, fracionário ou excedente é rejeitado", () => {
+    for (const falsos_positivos of [-1, 0.5, 2]) {
+      expect(() =>
+        validarParecer(
+          base([{
+            sinal: "sanfona",
+            valor: 2,
+            disposicao: "violacao_confirmada",
+            evidencia: "e",
+            ocorrencias_citadas: [{ trecho: "uma ocorrência" }],
+            falsos_positivos,
+          }])
+        )
+      ).toThrow(/falsos_positivos/);
+    }
+  });
+
   it("falso_positivo e excecao_valida não exigem citações", () => {
     expect(() =>
       validarParecer(base([{ sinal: "sanfona", valor: 13, disposicao: "falso_positivo", evidencia: "descrição concreta por acúmulo, não reformulação" }]))
@@ -121,7 +138,7 @@ describe("validarParecer — auditabilidade dos sinais de contagem", () => {
 // reprovava o capítulo inteiro em vez de re-pedir o parecer).
 describe("exigirDisposicaoCompleta — sinal fora da cota omitido aciona retry do revisor", () => {
   const medido = (sinal: string, valor: number, fora: boolean): SinalMedido =>
-    ({ sinal, valor, fora_da_cota: fora } as SinalMedido);
+    ({ sinal, valor, fora_da_cota: fora, exemplos: [] } as SinalMedido);
 
   const parecerCom = (sinais: unknown[]): Parecer =>
     validarParecer(base(sinais)) as Parecer;
@@ -160,5 +177,68 @@ describe("exigirDisposicaoCompleta — sinal fora da cota omitido aciona retry d
     ]);
     // "cadencia enfase" é subcadeia de ambos os dispostos → ambíguo → segue omitido
     expect(() => exigirDisposicaoCompleta(p, [medido("cadencia.enfase", 9, true)])).toThrow(/cadencia\.enfase/);
+  });
+
+  it("rejeita valor diferente do detector e citação inventada", () => {
+    const sinais: SinalMedido[] = [{
+      sinal: "sanfona",
+      valor: 2,
+      fora_da_cota: true,
+      exemplos: ["trecho medido um", "trecho medido dois"],
+    }];
+    const valorErrado = parecerCom([{
+      sinal: "sanfona",
+      valor: 1,
+      disposicao: "violacao_confirmada",
+      evidencia: "e",
+      ocorrencias_citadas: [{ trecho: "trecho medido um" }],
+    }]);
+    expect(() => exigirDisposicaoCompleta(valorErrado, sinais)).toThrow(/difere da medição/);
+
+    const inventada = parecerCom([{
+      sinal: "sanfona",
+      valor: 2,
+      disposicao: "violacao_confirmada",
+      evidencia: "e",
+      ocorrencias_citadas: [{ trecho: "trecho que não existe" }],
+      falsos_positivos: 1,
+    }]);
+    expect(() => exigirDisposicaoCompleta(inventada, sinais)).toThrow(/nenhuma ocorrência medida/);
+  });
+
+  it("rejeita a mesma ocorrência citada duas vezes", () => {
+    const p = parecerCom([{
+      sinal: "gnomico",
+      valor: 2,
+      disposicao: "violacao_confirmada",
+      evidencia: "e",
+      ocorrencias_citadas: [{ trecho: "máxima repetida" }, { trecho: "máxima repetida" }],
+    }]);
+    expect(() =>
+      exigirDisposicaoCompleta(p, [{
+        sinal: "gnomico",
+        valor: 2,
+        fora_da_cota: true,
+        exemplos: ["máxima repetida", "outra máxima"],
+      }])
+    ).toThrow(/duplicidade/);
+  });
+
+  it("escalonamento humano usa o mesmo casamento tolerante do protocolo", () => {
+    const p = parecerCom([{
+      sinal: "anáfora",
+      valor: 3,
+      disposicao: "necessita_decisao_humana",
+      evidencia: "decisão autoral genuína",
+    }]);
+    p.verdict = "aprovado";
+    p.evidencias = [{ local: "L:1", trecho: "x", observacao: "e" }];
+    const resultado = conferirParecer(p, [{
+      sinal: "cadencia.anáfora (frases coladas, mesmo início)",
+      valor: 3,
+      fora_da_cota: true,
+      exemplos: [],
+    }]);
+    expect(resultado.verdictEfetivo).toBe("necessita_decisao_humana");
   });
 });

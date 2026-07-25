@@ -67,12 +67,11 @@ export function validarParecer(obj: unknown): Parecer {
           throw new Error(`sinal "${x.sinal}": ocorrencias_citadas[${i}].trecho obrigatório (citação literal)`);
         }
       }
-      if (citadas.length < x.valor) {
-        if (typeof x.falsos_positivos !== "number" || citadas.length + x.falsos_positivos !== x.valor) {
-          throw new Error(
-            `sinal "${x.sinal}": ${citadas.length} citada(s) de ${x.valor} medidas — disposição parcial exige "falsos_positivos" = ${x.valor - citadas.length} (citadas + falsos_positivos = valor)`
-          );
-        }
+      const falsos = x.falsos_positivos ?? 0;
+      if (typeof falsos !== "number" || !Number.isInteger(falsos) || falsos < 0 || citadas.length + falsos !== x.valor) {
+        throw new Error(
+          `sinal "${x.sinal}": ${citadas.length} citada(s) de ${x.valor} medidas — exige "falsos_positivos" = ${x.valor - citadas.length} (citadas + falsos_positivos = valor)`
+        );
       }
     }
   }
@@ -139,6 +138,61 @@ function acharDisposto(sinalMedido: string, sinais: SinalDisposto[]): SinalDispo
   return parciais.length === 1 ? parciais[0] : undefined;
 }
 
+/** Mesmo casamento tolerante, no sentido parecer → medição real. */
+export function acharSinalMedido(sinalParecer: string, sinais: SinalMedido[]): SinalMedido | undefined {
+  const alvo = normalizarNomeSinal(sinalParecer);
+  const exato = sinais.find((s) => normalizarNomeSinal(s.sinal) === alvo);
+  if (exato) return exato;
+  const parciais = sinais.filter((s) => {
+    const n = normalizarNomeSinal(s.sinal);
+    return n.length > 2 && (alvo.includes(n) || n.includes(alvo));
+  });
+  return parciais.length === 1 ? parciais[0] : undefined;
+}
+
+function normalizarTrechoLiteral(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Vincula o julgamento do modelo à saída real do detector. Sem isto, o revisor
+ * podia declarar outro valor ou fabricar uma citação e ainda reprovar o texto.
+ */
+function problemasDeCitacao(parecer: Parecer, sinaisMedidos: SinalMedido[]): string[] {
+  const problemas: string[] = [];
+  for (const disposto of parecer.sinais) {
+    if (disposto.disposicao !== "violacao_confirmada") continue;
+    const medido = acharSinalMedido(disposto.sinal, sinaisMedidos);
+    if (!medido) {
+      problemas.push(`sinal "${disposto.sinal}": não corresponde a nenhum sinal produzido pelo detector`);
+      continue;
+    }
+
+    if (disposto.valor !== medido.valor) {
+      problemas.push(
+        `sinal "${disposto.sinal}": valor do parecer (${String(disposto.valor)}) difere da medição (${String(medido.valor)})`
+      );
+    }
+    if (ehSinalEscalar(medido.sinal) || typeof medido.valor !== "number") continue;
+
+    const permitidas = new Set(medido.exemplos.map(normalizarTrechoLiteral));
+    const vistas = new Set<string>();
+    for (const ocorrencia of disposto.ocorrencias_citadas ?? []) {
+      const trecho = normalizarTrechoLiteral(ocorrencia.trecho);
+      if (vistas.has(trecho)) {
+        problemas.push(`sinal "${disposto.sinal}": ocorrência citada em duplicidade: ${JSON.stringify(ocorrencia.trecho)}`);
+      }
+      vistas.add(trecho);
+      if (!permitidas.has(trecho)) {
+        problemas.push(
+          `sinal "${disposto.sinal}": citação não corresponde a nenhuma ocorrência medida: ${JSON.stringify(ocorrencia.trecho)}`
+        );
+      }
+    }
+  }
+  return problemas;
+}
+
 /**
  * Parecer INCOMPLETO (sinal medido fora da cota sem disposição) é falha de
  * protocolo do revisor, não julgamento do texto: usada no `parse` do executor
@@ -153,6 +207,12 @@ export function exigirDisposicaoCompleta(parecer: Parecer, sinaisMedidos: SinalM
       `parecer incompleto — todo sinal FORA DA COTA exige disposição no array "sinais". Faltou dispor: ${omitidos
         .map((m) => `"${m.sinal}" (valor ${m.valor})`)
         .join(", ")}. Julgue cada um (violacao_confirmada com ocorrencias_citadas, excecao_valida, falso_positivo ou necessita_decisao_humana) e reenvie o parecer completo.`
+    );
+  }
+  const citacoesInvalidas = problemasDeCitacao(parecer, sinaisMedidos);
+  if (citacoesInvalidas.length > 0) {
+    throw new Error(
+      `parecer não auditável — use exatamente o valor e os trechos numerados produzidos pelo detector: ${citacoesInvalidas.join(" · ")}`
     );
   }
   return parecer;
@@ -183,6 +243,12 @@ export function conferirParecer(parecer: Parecer, sinaisMedidos: SinalMedido[]):
     verdict = "reprovado";
   }
 
+  const citacoesInvalidas = problemasDeCitacao(parecer, sinaisMedidos);
+  if (citacoesInvalidas.length > 0) {
+    problemas.push(...citacoesInvalidas);
+    if (verdict !== "necessita_decisao_humana") verdict = "reprovado";
+  }
+
   for (const m of sinaisMedidos) {
     if (!m.fora_da_cota) continue;
     if (!acharDisposto(m.sinal, parecer.sinais)) {
@@ -202,10 +268,10 @@ export function conferirParecer(parecer: Parecer, sinaisMedidos: SinalMedido[]):
   // Escalação a decisão humana só por sinal FORA DA COTA (ou pelo próprio verdict
   // do revisor). Sinal dentro da cota do contrato disposto como "decisão humana"
   // vira anotação — cota é do contrato; dentro dela, produção não para.
-  const foraDaCota = new Set(sinaisMedidos.filter((m) => m.fora_da_cota).map((m) => normalizarNomeSinal(m.sinal)));
+  const foraDaCota = sinaisMedidos.filter((m) => m.fora_da_cota);
   for (const s of parecer.sinais) {
     if (s.disposicao !== "necessita_decisao_humana") continue;
-    if (foraDaCota.has(normalizarNomeSinal(s.sinal))) {
+    if (acharSinalMedido(s.sinal, foraDaCota)) {
       verdict = "necessita_decisao_humana";
     } else {
       problemas.push(`anotação (sem pausa): ${s.sinal} dentro da cota disposto como decisão humana — ${s.evidencia.slice(0, 80)}`);
