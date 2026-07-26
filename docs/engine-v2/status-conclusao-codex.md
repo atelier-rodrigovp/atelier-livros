@@ -9,15 +9,17 @@ O núcleo e a interface receberam correções estruturais e estão verdes
 localmente, mas o goal permanece aberto: canários reais, laboratório cego real,
 rotulagem humana, fluxo autenticado, prova não-canário, CI remoto e restauração
 operacional ainda não foram comprovados. Fundação e escrita V2 agora falham
-fechado enquanto essas provas não gerarem um certificado de release.
+fechado enquanto essas provas não gerarem um certificado de release. O release
+fixa `claude-opus-5` como único escritor, `claude-sonnet-5` para
+raciocínio/julgamento e `claude-haiku-4-5-20251001` para fatos.
 
 ## Branch e evidência local
 
 - Branch isolada: `codex/engine-v2-conclusao`
 - Base remota: `origin/master` em `d6578fd5`
-- Divergência após fetch: 0 commits atrás; 43 à frente (incluindo este ledger)
-- Último commit de código validado: `70afacfff2d5c1fc32abefec437afeb58a14d93d`
-- Suíte: 78 arquivos, 796 testes aprovados, 3 pulados
+- Divergência após fetch: 0 commits atrás; 45 à frente (incluindo este ledger)
+- Último commit de código validado: `bc5f1a5bf9e6d8209936057c6ff382ad600741ae`
+- Suíte: 79 arquivos, 802 testes aprovados, 3 pulados
 - Lint: 0 erros; 3 warnings antigos de Fast Refresh
 - Worker typecheck: aprovado
 - Build de produção: aprovado (warning de chunk grande)
@@ -37,7 +39,7 @@ fechado enquanto essas provas não gerarem um certificado de release.
 | 8 | Wizard V2 completo no navegador | parcial | UI desktop/mobile e estados locais verificados; criação autenticada ponta a ponta ainda falta |
 | 9 | Erro, timeout e worker offline | comprovado em código/UI | Resolver operacional testado; tela de configuração ausente e recuperação de job implementadas |
 | 10 | Prova real não-canário autorizada | pendente | O Índice não foi alterado; sandbox/cópia ainda exige escolha/autorização |
-| 11 | Banco/arquivo/hash/parecer consistentes | parcial | Certificação recalcula hashes da prosa, IDs, contratos, cobertura e vínculos de parecer; invariantes e testes verdes; falta conferência em execução real |
+| 11 | Banco/arquivo/hash/parecer consistentes | parcial | Certificação recalcula hashes da prosa, IDs, contratos, cobertura, vínculos de parecer e pins de modelo; o provedor rejeita fallback/ausência de `modelUsage`; falta conferência em execução real |
 | 12 | Testes e checks verdes | parcial | Suíte/lint/typecheck/build locais verdes; gate de release reprova intencionalmente enquanto não existir certificado; remoto não pode rodar sem push |
 | 13 | Ambiente restaurado | pendente | `AtelierWorkerFechamento` ainda existe no Windows; principal está desabilitado |
 | 14 | PR contém código auditado | pendente | PR #3 está desatualizado; push não autorizado |
@@ -45,9 +47,10 @@ fechado enquanto essas provas não gerarem um certificado de release.
 
 ## Bloqueio externo atual
 
-O health-check mínimo do Claude CLI retornou HTTP 429, limite semanal, com zero
-tokens processados e reset informado às 13h. Até o reset, executar novamente
-canários ou laboratório seria uma repetição idêntica sem nova hipótese.
+O health-check mínimo do Claude CLI com o ID oficial `claude-opus-5` alcançou o
+serviço, mas retornou HTTP 429, limite semanal, com zero tokens processados e
+reset informado às 13h. Até o reset, executar novamente canários ou laboratório
+seria uma repetição idêntica sem nova hipótese.
 
 ## Próxima sequência
 
@@ -61,7 +64,7 @@ canários ou laboratório seria uma repetição idêntica sem nova hipótese.
    se precisão, recall, holdout e não-regressão passarem.
 4. Registrar/exportar a avaliação humana do laboratório e executar
    `v2-certificar-release.ts`; o certificado precisa casar com runtime,
-   contratos, corpus, canários e cinco hashes de evidência.
+   modelos fixos, contratos, corpus, canários e cinco hashes de evidência.
 5. Executar fluxo autenticado do wizard e meta-9 longa em sandbox seguro.
 6. Solicitar a autorização mínima para a prova real não-canário.
 7. Restaurar ambiente, atualizar matriz, apresentar SHA/diff e pedir autorização
