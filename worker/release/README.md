@@ -5,6 +5,8 @@ Fundação e escrita V2 operam em modo **fail-closed**. O worker procura
 
 - versão da engine;
 - hash determinístico do runtime do worker e lockfile;
+- IDs fixos dos modelos (`Opus 5` na prosa, `Sonnet 5` em
+  raciocínio/julgamento e `Haiku 4.5` em fatos);
 - versões e hashes dos contratos;
 - versão e hash do corpus;
 - calibração/holdout prontos para todas as skills;
@@ -14,7 +16,7 @@ Fundação e escrita V2 operam em modo **fail-closed**. O worker procura
 
 O arquivo só deve ser criado pelo comando `scripts/v2-certificar-release.ts`.
 Editar um JSON à mão não cria as evidências ausentes e o verificador rejeita
-qualquer divergência posterior de contrato ou corpus.
+qualquer divergência posterior de contrato, corpus, runtime ou modelo.
 
 Canário de voz e laboratório continuam disponíveis sem certificado, pois são
 justamente os fluxos que produzem evidência. `criar_fundacao` e

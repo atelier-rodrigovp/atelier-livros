@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { hashText } from "../quality-state.js";
 import type { ResultadoCalibracao } from "./calibracao.js";
+import { MODELOS_V2_FIXOS } from "./config.js";
 import { hashJsonCanonico } from "./hash.js";
 import { ordenarAmostrasCegas, type AvaliacaoCega, type NotasCegas } from "./lab/avaliar.js";
 import type { RelatorioLab } from "./lab/relatorio.js";
@@ -51,6 +52,8 @@ function amostras(): AmostraLab[] {
         gates: [],
         palavras: 1000,
         runId: `run-${skill.id}-${categoria}`,
+        modeloSolicitado: MODELOS_V2_FIXOS.prosa,
+        modeloExecutado: MODELOS_V2_FIXOS.prosa,
       };
     })
   );
@@ -59,15 +62,17 @@ function amostras(): AmostraLab[] {
 function fixture(): { evidencias: EvidenciasParaCertificar; estado: EstadoAtualRelease } {
   const amostrasLab = amostras();
   const execucaoLab: ExecucaoLab = {
-    id: hashJsonCanonico(
-      amostrasLab.map((amostra) => ({
+    id: hashJsonCanonico({
+      modelos: MODELOS_V2_FIXOS,
+      amostras: amostrasLab.map((amostra) => ({
         skill: amostra.skillId,
         categoria: amostra.categoria,
         texto: amostra.textoHash,
-      }))
-    ).slice(0, 12),
+      })),
+    }).slice(0, 12),
     executadaEm: "2026-07-25T12:00:00.000Z",
     engineVersion: "2.0.0",
+    modelos: { ...MODELOS_V2_FIXOS },
     skills: structuredClone(SKILLS),
     amostras: amostrasLab,
   };
@@ -83,6 +88,7 @@ function fixture(): { evidencias: EvidenciasParaCertificar; estado: EstadoAtualR
     tracosDistintivos: ["voz distinguível"],
     parecerResumo: "aderente",
     runId: `blind-${indice}`,
+    modeloExecutado: MODELOS_V2_FIXOS.julgamento,
     saidaBruta: "{}",
     saidaBrutaHash: hashJsonCanonico("{}"),
   }));
@@ -92,7 +98,7 @@ function fixture(): { evidencias: EvidenciasParaCertificar; estado: EstadoAtualR
     labExecucaoId: execucaoLab.id,
     executadaEm: "2026-07-25T13:00:00.000Z",
     seedOrdem: "seed",
-    modeloAvaliador: "sonnet",
+    modeloAvaliador: MODELOS_V2_FIXOS.julgamento,
     porAmostra,
     distinguibilidade: 1,
     matrizConfusao: Object.fromEntries(SKILLS.map((skill) => [skill.id, { [skill.id]: 3 }])),
@@ -147,6 +153,7 @@ function fixture(): { evidencias: EvidenciasParaCertificar; estado: EstadoAtualR
   };
   const canarios = SKILLS.map((skill) => ({
     skill,
+    modelos: { ...MODELOS_V2_FIXOS },
     aprovados_plenos: 2,
     total_capitulos: 2,
     criterio_3de3: true,
@@ -158,6 +165,7 @@ function fixture(): { evidencias: EvidenciasParaCertificar; estado: EstadoAtualR
   const estado: EstadoAtualRelease = {
     engineVersion: "2.0.0",
     runtimeHash: "6".repeat(64),
+    modelos: { ...MODELOS_V2_FIXOS },
     skills: structuredClone(SKILLS),
     calibracao: {
       corpusVersao: "1.0.0",
@@ -217,6 +225,7 @@ describe("certificação de release V2", () => {
     const certificado = criarCertificadoRelease(evidencias, estado);
     expect(certificado.status).toBe("certificado");
     expect(certificado.runtime_hash).toBe(estado.runtimeHash);
+    expect(certificado.modelos.prosa).toBe("claude-opus-5");
     expect(certificado.canarios.capitulos_por_skill).toEqual({
       "dan-brown": 2,
       "hoover-mcfadden": 2,
@@ -265,17 +274,36 @@ describe("certificação de release V2", () => {
       .toThrow(/gate texto_truncado falhou/);
   });
 
-  it("invalida automaticamente mudança posterior de contrato, corpus ou skill", () => {
+  it("rejeita canário, prosa ou julgamento produzidos fora dos modelos fixos", () => {
+    const canario = fixture();
+    (canario.evidencias.canarios as any[])[0].modelos.prosa = "claude-opus-4-8";
+    expect(() => criarCertificadoRelease(canario.evidencias, canario.estado))
+      .toThrow(/canários\/dan-brown: modelos não correspondem/);
+
+    const escritor = fixture();
+    escritor.evidencias.execucaoLab.amostras[0].modeloExecutado = "claude-opus-4-8";
+    expect(() => criarCertificadoRelease(escritor.evidencias, escritor.estado))
+      .toThrow(/escritor não executou no modelo de prosa fixo/);
+
+    const avaliador = fixture();
+    avaliador.evidencias.avaliacaoAutomatica.porAmostra[0].modeloExecutado = "claude-sonnet-4-6";
+    expect(() => criarCertificadoRelease(avaliador.evidencias, avaliador.estado))
+      .toThrow(/avaliador não executou no modelo de julgamento fixo/);
+  });
+
+  it("invalida automaticamente mudança posterior de contrato, corpus, modelo ou skill", () => {
     const { evidencias, estado } = fixture();
     const certificado = criarCertificadoRelease(evidencias, estado);
     const alterado = structuredClone(estado);
     alterado.skills[0].hash = "0".repeat(64);
     alterado.calibracao.corpusHash = "9".repeat(64);
     alterado.runtimeHash = "8".repeat(64);
+    alterado.modelos.prosa = "claude-opus-4-8";
     const erros = validarCertificadoContraEstado(certificado, alterado, "skill-inexistente");
     expect(erros.join(" | ")).toMatch(/corpus de calibração mudou/);
     expect(erros.join(" | ")).toMatch(/contrato dan-brown mudou/);
     expect(erros.join(" | ")).toMatch(/código do runtime mudou/);
+    expect(erros.join(" | ")).toMatch(/modelos fixos mudaram/);
     expect(erros.join(" | ")).toMatch(/skill skill-inexistente não consta/);
   });
 

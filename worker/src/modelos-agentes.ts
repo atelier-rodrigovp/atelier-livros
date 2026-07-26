@@ -9,14 +9,14 @@
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-// Papel → modelo. Escritor SEMPRE opus (a prosa nasce nele). Editor é tarefa barata
-// (aplicar edições cirúrgicas + gravar estado-narrativo) → haiku.
+// Papel → ID fixo. Escritor SEMPRE Opus 5 (a prosa nasce nele). Editor é tarefa
+// barata (aplicar edições cirúrgicas + gravar estado-narrativo) → Haiku 4.5.
 export const MODELO_POR_AGENTE: Record<string, string> = {
-  "livro-escritor": "opus",
-  "livro-revisor": "sonnet",
-  "livro-editor": "haiku",
-  "livro-contextualizador": "haiku",
-  "livro-arquiteto-comercial": "sonnet",
+  "livro-escritor": "claude-opus-5",
+  "livro-revisor": "claude-sonnet-5",
+  "livro-editor": "claude-haiku-4-5-20251001",
+  "livro-contextualizador": "claude-haiku-4-5-20251001",
+  "livro-arquiteto-comercial": "claude-sonnet-5",
 };
 
 export interface ModeloAjuste {

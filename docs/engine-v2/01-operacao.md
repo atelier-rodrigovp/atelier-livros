@@ -12,18 +12,22 @@ Cada capítulo passa por papéis isolados — arquiteto de cena → contextualiz
 
 ## Papéis × classes de capacidade
 
-| Papel | Classe | Modelo (default) | Escreve prosa? |
+| Papel | Classe | Modelo fixo | Escreve prosa? |
 |---|---|---|---|
-| arquiteto_enredo | raciocinio | sonnet | não (fundação sem parágrafos-modelo) |
-| arquiteto_cena | raciocinio | sonnet | não (ficha estruturada) |
-| contextualizador | fatos | haiku | **proibido** (itens >60 palavras são rejeitados) |
-| escritor | prosa | opus | **único** |
-| revisor_literario | julgamento | sonnet | não (parecer JSON) |
-| auditor_factual | fatos | haiku | não |
-| editor_estrutural | raciocinio | sonnet | não (propõe; worker aplica) |
+| arquiteto_enredo | raciocinio | `claude-sonnet-5` | não (fundação sem parágrafos-modelo) |
+| arquiteto_cena | raciocinio | `claude-sonnet-5` | não (ficha estruturada) |
+| contextualizador | fatos | `claude-haiku-4-5-20251001` | **proibido** (itens >60 palavras são rejeitados) |
+| escritor | prosa | `claude-opus-5` | **único** |
+| revisor_literario | julgamento | `claude-sonnet-5` | não (parecer JSON) |
+| auditor_factual | fatos | `claude-haiku-4-5-20251001` | não |
+| editor_estrutural | raciocinio | `claude-sonnet-5` | não (propõe; worker aplica) |
 | gravador de estado | — | — (código determinístico) | — |
 
-Override por ambiente: `V2_MODEL_RACIOCINIO|FATOS|PROSA|JULGAMENTO`. Nenhum nome de modelo no núcleo.
+Os IDs são pins de release em `worker/src/v2/config.ts`. As variáveis
+`V2_MODEL_RACIOCINIO|FATOS|PROSA|JULGAMENTO` só podem repetir esses valores;
+qualquer divergência falha antes da primeira chamada. O envelope do Claude Code
+também precisa reportar exatamente o ID solicitado em `modelUsage`: ausência,
+fallback ou mistura de modelos bloqueia o run sem retry.
 
 ## Ativar a V2 num projeto
 
@@ -36,7 +40,8 @@ update projects set engine_mode = 'v2' where id = '<uuid>';
 podem rodar para produzir evidências, mas `criar_fundacao` e `escrever_livro`
 exigem `worker/release/engine-v2.json` válido. O worker recalcula hashes dos
 contratos, do corpus e de todo o runtime não-teste (incluindo lockfile) em cada
-verificação; mudança posterior invalida o certificado.
+verificação; mudança posterior de código, contrato, corpus **ou modelo fixo**
+invalida o certificado.
 
 ## Gates universais vs sinais editoriais
 
@@ -94,7 +99,8 @@ npx tsx scripts/v2-verificar-release.ts
 O primeiro comando rejeita exceções, hashes divergentes, menos de dois
 capítulos plenos por skill, menos de três amostras de laboratório por skill,
 regressão, vazamento, avaliação automática abaixo dos pisos ou avaliação humana
-abaixo de 80%. O segundo é o mesmo gate executado pelo CI.
+abaixo de 80%, além de evidência produzida por modelos diferentes dos pins. O
+segundo é o mesmo gate executado pelo CI.
 
 ## Recuperação de falhas
 

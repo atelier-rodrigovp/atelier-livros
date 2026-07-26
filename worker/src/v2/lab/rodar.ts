@@ -32,12 +32,15 @@ export interface AmostraLab {
   gates: ResultadoGate[];
   palavras: number;
   runId: string;
+  modeloSolicitado: string;
+  modeloExecutado: string;
 }
 
 export interface ExecucaoLab {
   id: string;
   executadaEm: string;
   engineVersion: string;
+  modelos: MapaModelos;
   skills: { id: string; versao: string; hash: string }[];
   amostras: AmostraLab[];
 }
@@ -135,16 +138,23 @@ export async function rodarLab(opts: {
         gates: rodarGatesCapitulo({ texto, contrato: contrato.contrato, ficha }),
         palavras: contarPalavras(texto),
         runId: r.runId,
+        modeloSolicitado: opts.mapa.prosa,
+        modeloExecutado: r.resposta.modeloExecutado!,
       });
     }
   }
 
-  // Id determinístico: hash curto do conteúdo (skill + categoria + hash do texto).
-  const id = hashJsonCanonico(amostras.map((a) => ({ skill: a.skillId, categoria: a.categoria, texto: a.textoHash }))).slice(0, 12);
+  // Id determinístico: modelos + conteúdo. Trocar pesos nunca reutiliza o
+  // diretório/ID de uma execução anterior, mesmo se a prosa coincidir.
+  const id = hashJsonCanonico({
+    modelos: opts.mapa,
+    amostras: amostras.map((a) => ({ skill: a.skillId, categoria: a.categoria, texto: a.textoHash })),
+  }).slice(0, 12);
   const exec: ExecucaoLab = {
     id,
     executadaEm: new Date().toISOString(),
     engineVersion: ENGINE_V2_VERSION,
+    modelos: { ...opts.mapa },
     skills,
     amostras,
   };

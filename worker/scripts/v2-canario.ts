@@ -92,6 +92,27 @@ async function rodarCanario(skillId: string, totalCaps: number, dirExistente?: s
   const gravador = new Gravador({ persistencia, projectId });
   const provedor = new ProvedorClaudeCli(process.env.CLAUDE_BIN!, dirProjeto);
   const mapa = mapaModelosDoAmbiente();
+  const caminhoModelos = path.join(dirProjeto, "engine-v2", "modelos-release.json");
+  if (dirExistente) {
+    let modelosAnteriores: unknown;
+    try {
+      modelosAnteriores = JSON.parse(await fs.readFile(caminhoModelos, "utf8"));
+    } catch {
+      throw new Error(
+        "CANARIO_MODELO_DIVERGENTE: diretório retomado não comprova os modelos fixos; " +
+        "crie um canário novo para o release Opus 5"
+      );
+    }
+    if (hashJsonCanonico(modelosAnteriores) !== hashJsonCanonico(mapa)) {
+      throw new Error(
+        "CANARIO_MODELO_DIVERGENTE: o canário foi iniciado com outro mapa de modelos; " +
+        "crie um canário novo para o release Opus 5"
+      );
+    }
+  } else {
+    await fs.mkdir(path.dirname(caminhoModelos), { recursive: true });
+    await fs.writeFile(caminhoModelos, JSON.stringify(mapa, null, 2), "utf8");
+  }
 
   console.log(`\n=== CANÁRIO ${skillId} (${contrato.contrato.versao}) — ${brief.titulo}`);
   console.log(
@@ -282,6 +303,7 @@ async function continuarCapitulos(skillId: string, totalCaps: number, ctx: CtxCa
   const relatorio = {
     projectId,
     skill: { id: contrato.contrato.id, versao: contrato.contrato.versao, hash: contrato.hash },
+    modelos: { ...mapa },
     titulo: brief.titulo,
     dirProjeto,
     migracaoPendente,

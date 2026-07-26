@@ -7,7 +7,7 @@ import { hashJsonCanonico } from "./hash.js";
 import type { Gravador } from "./gravador.js";
 import { renderizarPacote, type PacoteCompilado } from "./compilador.js";
 import { resolverModelo } from "./config.js";
-import type { ProvedorModelo, RespostaModelo } from "./provedor.js";
+import { ErroProvedor, type ProvedorModelo, type RespostaModelo } from "./provedor.js";
 import { ErroEngine, type MapaModelos, type Papel } from "./tipos.js";
 
 export interface ExecucaoPapel<T> {
@@ -73,6 +73,16 @@ export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPa
       // Limite do plano Max: NÃO é falha do papel — atravessa sem retry técnico
       // (retry local não ajuda; o loop do worker pausa com retry_at sem contar tentativa).
       if ((err as Error)?.name === "LimiteMaxError") throw err;
+      // Fallback/deriva de modelo é configuração inválida, não instabilidade:
+      // repetir a mesma chamada apenas consumiria cota no modelo errado.
+      if (err instanceof ErroProvedor && err.codigo === "PROVEDOR_MODELO_DIVERGENTE") {
+        throw new ErroEngine({
+          codigo: err.codigo,
+          classe: "configuracao",
+          mensagem: msg,
+          detalhe: err.detalhe,
+        });
+      }
       if (tentativa === max) {
         throw new ErroEngine({ codigo: "PROVEDOR_FALHOU", classe: "infra", mensagem: `papel ${e.papel} falhou após ${max} tentativas: ${msg}` });
       }
@@ -81,12 +91,33 @@ export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPa
       continue;
     }
 
+    if (resposta.modeloExecutado !== modelo) {
+      const mensagem =
+        `papel ${e.papel}: modelo solicitado ${modelo}; ` +
+        `executado ${resposta.modeloExecutado ?? "não informado"}`;
+      await e.gravador.falharRun(runId, {
+        codigo: "PROVEDOR_MODELO_DIVERGENTE",
+        classe: "configuracao",
+        mensagem,
+      });
+      throw new ErroEngine({
+        codigo: "PROVEDOR_MODELO_DIVERGENTE",
+        classe: "configuracao",
+        mensagem,
+      });
+    }
+
     try {
       const valor = e.parse(resposta.texto);
       await e.gravador.concluirRun(runId, {
         output_hash: hashJsonCanonico(resposta.texto),
         tokens_in: resposta.tokensIn,
         tokens_out: resposta.tokensOut,
+        evidencias: [{
+          tipo: "metrica",
+          referencia: "modelo_executado",
+          detalhe: resposta.modeloExecutado,
+        }],
       });
       return { valor, runId, resposta, tentativas: tentativa };
     } catch (err) {

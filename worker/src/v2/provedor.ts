@@ -17,6 +17,8 @@ export interface ChamadaModelo {
 
 export interface RespostaModelo {
   texto: string;
+  /** ID exato reportado pelo provedor, nunca o alias solicitado. */
+  modeloExecutado?: string;
   tokensIn?: number;
   tokensOut?: number;
   truncado?: boolean;
@@ -30,7 +32,11 @@ export interface ProvedorModelo {
 
 export class ErroProvedor extends Error {
   constructor(
-    public readonly codigo: "PROVEDOR_FALHOU" | "PROVEDOR_TIMEOUT" | "PROVEDOR_SAIDA_VAZIA",
+    public readonly codigo:
+      | "PROVEDOR_FALHOU"
+      | "PROVEDOR_TIMEOUT"
+      | "PROVEDOR_SAIDA_VAZIA"
+      | "PROVEDOR_MODELO_DIVERGENTE",
     mensagem: string,
     public readonly detalhe?: unknown
   ) {
@@ -75,6 +81,27 @@ export function classificarErroCli(mensagem: string, detalhe?: unknown): Error {
 /** Chamada deliberadamente sem ferramentas: o modelo recebe texto e devolve texto. */
 export function argumentosClaudeCli(modelo: string): string[] {
   return ["-p", "--model", modelo, "--output-format", "json", "--tools", ""];
+}
+
+/**
+ * O JSON final do Claude Code informa os modelos realmente usados em
+ * `modelUsage`. Como cada papel V2 roda sem ferramentas/subagentes, deve existir
+ * exatamente um ID e ele deve ser o pin solicitado. Ausência, fallback ou
+ * mistura de modelos falha fechado.
+ */
+export function exigirModeloExecutado(
+  envelope: { modelUsage?: Record<string, unknown> },
+  solicitado: string
+): string {
+  const executados = Object.keys(envelope.modelUsage ?? {});
+  if (executados.length !== 1 || executados[0] !== solicitado) {
+    throw new ErroProvedor(
+      "PROVEDOR_MODELO_DIVERGENTE",
+      `modelo solicitado ${solicitado}; executado(s): ${executados.length ? executados.join(", ") : "não informado"}`,
+      { solicitado, executados }
+    );
+  }
+  return executados[0];
 }
 
 /**
@@ -131,6 +158,7 @@ export class ProvedorClaudeCli implements ProvedorModelo {
       const env = JSON.parse(texto) as {
         result?: string;
         usage?: { input_tokens?: number; output_tokens?: number };
+        modelUsage?: Record<string, unknown>;
         is_error?: boolean;
         subtype?: string;
       };
@@ -138,8 +166,10 @@ export class ProvedorClaudeCli implements ProvedorModelo {
         if (env.is_error) {
           throw classificarErroCli(`claude CLI is_error (${env.subtype ?? "?"}): ${env.result.slice(0, 400)}`, env);
         }
+        const modeloExecutado = exigirModeloExecutado(env, c.modelo);
         return {
           texto: env.result,
+          modeloExecutado,
           tokensIn: env.usage?.input_tokens,
           tokensOut: env.usage?.output_tokens,
           bruto: env,
@@ -149,7 +179,11 @@ export class ProvedorClaudeCli implements ProvedorModelo {
       if (e instanceof ErroProvedor || e instanceof LimiteMaxError) throw e;
       // stdout não era o envelope JSON — trata como texto cru (versões antigas do CLI)
     }
-    return { texto };
+    throw new ErroProvedor(
+      "PROVEDOR_MODELO_DIVERGENTE",
+      "claude CLI não retornou envelope JSON auditável com modelUsage",
+      { solicitado: c.modelo }
+    );
   }
 }
 
@@ -170,6 +204,6 @@ export class ProvedorMock implements ProvedorModelo {
     const lista = this.filas.get(c.papel);
     const r = lista?.shift();
     if (!r) throw new ErroProvedor("PROVEDOR_FALHOU", `mock sem resposta enfileirada para papel ${c.papel}`);
-    return r;
+    return { ...r, modeloExecutado: r.modeloExecutado ?? c.modelo };
   }
 }

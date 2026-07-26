@@ -41,6 +41,7 @@ export interface AvaliacaoCega {
     tracosDistintivos: string[];
     parecerResumo: string;
     runId: string;
+    modeloExecutado: string;
     saidaBruta: string;
     saidaBrutaHash: string;
   }[];
@@ -230,6 +231,7 @@ export async function avaliarCego(
       tracosDistintivos: g.tracos_distintivos,
       parecerResumo: g.justificativa,
       runId: r.runId,
+      modeloExecutado: r.resposta.modeloExecutado!,
       saidaBruta: r.resposta.texto,
       saidaBrutaHash: hashJsonCanonico(r.resposta.texto),
     });

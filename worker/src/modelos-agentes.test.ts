@@ -37,11 +37,11 @@ describe("aplicarModeloFrontmatter", () => {
     expect(r.texto).toBe(semFm);
   });
 
-  it("política: escritor opus, revisor sonnet, editor haiku, contextualizador haiku, comercial sonnet", () => {
-    expect(MODELO_POR_AGENTE["livro-escritor"]).toBe("opus");
-    expect(MODELO_POR_AGENTE["livro-revisor"]).toBe("sonnet");
-    expect(MODELO_POR_AGENTE["livro-editor"]).toBe("haiku");
-    expect(MODELO_POR_AGENTE["livro-contextualizador"]).toBe("haiku");
-    expect(MODELO_POR_AGENTE["livro-arquiteto-comercial"]).toBe("sonnet");
+  it("política fixa: escritor Opus 5, revisor/comercial Sonnet 5, editor/contextualizador Haiku 4.5", () => {
+    expect(MODELO_POR_AGENTE["livro-escritor"]).toBe("claude-opus-5");
+    expect(MODELO_POR_AGENTE["livro-revisor"]).toBe("claude-sonnet-5");
+    expect(MODELO_POR_AGENTE["livro-editor"]).toBe("claude-haiku-4-5-20251001");
+    expect(MODELO_POR_AGENTE["livro-contextualizador"]).toBe("claude-haiku-4-5-20251001");
+    expect(MODELO_POR_AGENTE["livro-arquiteto-comercial"]).toBe("claude-sonnet-5");
   });
 });

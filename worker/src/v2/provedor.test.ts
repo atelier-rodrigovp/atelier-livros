@@ -5,7 +5,13 @@
 // tentativa) e executarPapel deixa esse erro ATRAVESSAR sem retry técnico.
 import { describe, expect, it } from "vitest";
 import { LimiteMaxError } from "../limite-max.js";
-import { argumentosClaudeCli, ErroProvedor, classificarErroCli, extrairMensagemCli } from "./provedor.js";
+import {
+  argumentosClaudeCli,
+  ErroProvedor,
+  classificarErroCli,
+  exigirModeloExecutado,
+  extrairMensagemCli,
+} from "./provedor.js";
 
 describe("argumentosClaudeCli", () => {
   it("desabilita ferramentas para manter cada papel como transformação pura de texto", () => {
@@ -38,6 +44,28 @@ describe("classificarErroCli", () => {
     const e = classificarErroCli("claude CLI rc=3221225794: ");
     expect(e).toBeInstanceOf(ErroProvedor);
     expect((e as ErroProvedor).codigo).toBe("PROVEDOR_FALHOU");
+  });
+});
+
+describe("proveniência do modelo executado", () => {
+  it("aceita somente o ID fixo solicitado", () => {
+    expect(exigirModeloExecutado({
+      modelUsage: { "claude-opus-5": { outputTokens: 10 } },
+    }, "claude-opus-5")).toBe("claude-opus-5");
+  });
+
+  it("rejeita ausência, fallback ou mistura de modelos", () => {
+    expect(() => exigirModeloExecutado({}, "claude-opus-5"))
+      .toThrow(/executado\(s\): não informado/);
+    expect(() => exigirModeloExecutado({
+      modelUsage: { "claude-sonnet-5": { outputTokens: 10 } },
+    }, "claude-opus-5")).toThrow(/claude-sonnet-5/);
+    expect(() => exigirModeloExecutado({
+      modelUsage: {
+        "claude-opus-5": { outputTokens: 10 },
+        "claude-haiku-4-5-20251001": { outputTokens: 1 },
+      },
+    }, "claude-opus-5")).toThrow(/PROVEDOR_MODELO_DIVERGENTE|executado/);
   });
 });
 
@@ -99,5 +127,49 @@ describe("executarPapel — LimiteMaxError atravessa sem retry técnico", () => 
       })
     ).rejects.toMatchObject({ name: "LimiteMaxError" });
     expect(chamadas).toBe(1); // sem 2ª tentativa
+  });
+
+  it("rejeita fallback do escritor sem tentar consumir uma segunda chamada", async () => {
+    const { executarPapel } = await import("./papeis.js");
+    let chamadas = 0;
+    const provedor = {
+      nome: "stub",
+      async chamar() {
+        chamadas++;
+        return { texto: "prosa", modeloExecutado: "claude-sonnet-5" };
+      },
+    };
+    const gravador = {
+      iniciarRun: async () => "run-fallback",
+      falharRun: async () => undefined,
+      concluirRun: async () => undefined,
+    };
+    await expect(executarPapel({
+      papel: "escritor",
+      alvo: "cap-1",
+      pacote: {
+        hash: "bundle",
+        papel: "escritor",
+        alvo: "cap-1",
+        skill: { id: "s", versao: "1", hash: "skill" },
+        instrucoes: [],
+        repeticoesRecentes: [],
+        secoes: [],
+      } as never,
+      tarefa: "escreva",
+      parse: (texto: string) => texto,
+      gravador: gravador as never,
+      provedor,
+      mapa: {
+        raciocinio: "claude-sonnet-5",
+        fatos: "claude-haiku-4-5-20251001",
+        prosa: "claude-opus-5",
+        julgamento: "claude-sonnet-5",
+      },
+    })).rejects.toMatchObject({
+      codigo: "PROVEDOR_MODELO_DIVERGENTE",
+      classe: "configuracao",
+    });
+    expect(chamadas).toBe(1);
   });
 });

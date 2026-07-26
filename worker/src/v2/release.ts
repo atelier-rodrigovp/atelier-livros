@@ -9,14 +9,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { hashText } from "../quality-state.js";
 import { analisarCalibracao, type ResultadoCalibracao } from "./calibracao.js";
+import { MODELOS_V2_FIXOS } from "./config.js";
 import { carregarContrato } from "./contrato.js";
 import { hashJsonCanonico } from "./hash.js";
 import { falhasAvaliacaoCega, type RelatorioLab } from "./lab/relatorio.js";
 import { ordenarAmostrasCegas, type AvaliacaoCega } from "./lab/avaliar.js";
 import type { ExecucaoLab } from "./lab/rodar.js";
-import { ENGINE_V2_VERSION, ErroEngine } from "./tipos.js";
+import { ENGINE_V2_VERSION, ErroEngine, type MapaModelos } from "./tipos.js";
 
-export const SCHEMA_CERTIFICADO_RELEASE_V2 = "engine-v2-release/v1" as const;
+export const SCHEMA_CERTIFICADO_RELEASE_V2 = "engine-v2-release/v2" as const;
 export const SCHEMA_AVALIACAO_HUMANA_RELEASE = "human-blind-evaluation/v1" as const;
 
 export interface AvaliacaoHumanaRelease {
@@ -37,6 +38,7 @@ export interface CertificadoReleaseV2 {
   emitido_por: string;
   emitido_em: string;
   codigo_commit: string;
+  modelos: MapaModelos;
   skills: { id: string; versao: string; hash: string }[];
   calibracao: {
     corpus_versao: string;
@@ -77,6 +79,7 @@ interface RelatorioCanario {
   total_capitulos?: number;
   criterio_3de3?: boolean;
   capitulos_estado_final?: CapituloFinalCanario[];
+  modelos?: MapaModelos;
 }
 
 export interface EvidenciasParaCertificar {
@@ -101,6 +104,7 @@ export interface EvidenciasParaCertificar {
 export interface EstadoAtualRelease {
   engineVersion: string;
   runtimeHash: string;
+  modelos: MapaModelos;
   skills: { id: string; versao: string; hash: string }[];
   calibracao: {
     corpusVersao: string;
@@ -114,9 +118,19 @@ function skillDoCanario(relatorio: RelatorioCanario): string {
   return typeof relatorio.skill === "string" ? relatorio.skill : relatorio.skill?.id ?? "";
 }
 
+function mapaModelosIgual(a: Partial<MapaModelos> | null | undefined, b: MapaModelos): boolean {
+  return !!a &&
+    a.raciocinio === b.raciocinio &&
+    a.fatos === b.fatos &&
+    a.prosa === b.prosa &&
+    a.julgamento === b.julgamento &&
+    Object.keys(a).length === 4;
+}
+
 function validarCanarios(
   bruto: unknown,
-  skills: EstadoAtualRelease["skills"]
+  skills: EstadoAtualRelease["skills"],
+  modelos: MapaModelos
 ): { erros: string[]; capitulosPorSkill: Record<string, number> } {
   const erros: string[] = [];
   const capitulosPorSkill: Record<string, number> = {};
@@ -130,6 +144,9 @@ function validarCanarios(
       continue;
     }
     const rel = encontrados[0];
+    if (!mapaModelosIgual(rel.modelos, modelos)) {
+      erros.push(`canários/${skill.id}: modelos não correspondem aos pins do release`);
+    }
     const skillMeta = typeof rel.skill === "object" ? rel.skill : undefined;
     if (rel.erro) erros.push(`canários/${skill.id}: ${rel.erro}`);
     if (skillMeta?.versao !== skill.versao || skillMeta?.hash !== skill.hash) {
@@ -167,17 +184,22 @@ function validarLaboratorio(
   avaliacao: AvaliacaoCega,
   relatorio: RelatorioLab,
   skills: EstadoAtualRelease["skills"],
-  corpusHash: string
+  corpusHash: string,
+  modelos: MapaModelos
 ): string[] {
   const erros: string[] = [];
   if (execucao.engineVersion !== ENGINE_V2_VERSION) erros.push("laboratório: engine_version divergente");
-  const idCalculado = hashJsonCanonico(
-    execucao.amostras.map((amostra) => ({
+  if (!mapaModelosIgual(execucao.modelos, modelos)) {
+    erros.push("laboratório: modelos não correspondem aos pins do release");
+  }
+  const idCalculado = hashJsonCanonico({
+    modelos: execucao.modelos,
+    amostras: execucao.amostras.map((amostra) => ({
       skill: amostra.skillId,
       categoria: amostra.categoria,
       texto: amostra.textoHash,
-    }))
-  ).slice(0, 12);
+    })),
+  }).slice(0, 12);
   if (execucao.id !== idCalculado) erros.push("laboratório: id da execução não corresponde ao conteúdo");
   if (execucao.id !== avaliacao.labExecucaoId || execucao.id !== relatorio.execucaoId) {
     erros.push("laboratório: execução, avaliação e relatório não apontam para o mesmo id");
@@ -197,6 +219,12 @@ function validarLaboratorio(
       erros.push(`laboratório/${amostra.id}: texto vazio ou hash adulterado`);
     }
     if (!amostra.runId?.trim()) erros.push(`laboratório/${amostra.id}: run_id ausente`);
+    if (
+      amostra.modeloSolicitado !== modelos.prosa ||
+      amostra.modeloExecutado !== modelos.prosa
+    ) {
+      erros.push(`laboratório/${amostra.id}: escritor não executou no modelo de prosa fixo`);
+    }
     for (const gate of amostra.gates.filter((item) => !item.passou)) {
       erros.push(`laboratório/${amostra.id}: gate ${gate.gate} falhou`);
     }
@@ -212,6 +240,9 @@ function validarLaboratorio(
   if (execucao.skills.length !== skills.length) erros.push("laboratório: conjunto de skills difere do certificado");
   if (avaliacao.porAmostra.length !== execucao.amostras.length) {
     erros.push("laboratório/cego: avaliação não cobre todas as amostras");
+  }
+  if (avaliacao.modeloAvaliador !== modelos.julgamento) {
+    erros.push("laboratório/cego: avaliador solicitado não corresponde ao modelo de julgamento fixo");
   }
   const avaliadas = new Set<string>();
   for (const item of avaliacao.porAmostra) {
@@ -229,6 +260,9 @@ function validarLaboratorio(
     }
     if (!skills.some((skill) => skill.id === item.skillAdivinhada)) {
       erros.push(`laboratório/cego/${item.amostraId}: palpite fora das skills`);
+    }
+    if (item.modeloExecutado !== modelos.julgamento) {
+      erros.push(`laboratório/cego/${item.amostraId}: avaliador não executou no modelo de julgamento fixo`);
     }
     if (
       !item.runId?.trim() ||
@@ -313,6 +347,7 @@ export function estadoAtualRelease(
   return {
     engineVersion: ENGINE_V2_VERSION,
     runtimeHash: calcularHashRuntimeV2(workerDir),
+    modelos: { ...MODELOS_V2_FIXOS },
     skills,
     calibracao: {
       corpusVersao: calibracao.corpus_versao,
@@ -344,14 +379,18 @@ export function criarCertificadoRelease(
     erros.push("calibração: resultado fornecido não corresponde ao estado atual");
   }
 
-  const canarios = validarCanarios(evidencias.canarios, estado.skills);
+  if (!mapaModelosIgual(estado.modelos, MODELOS_V2_FIXOS)) {
+    erros.push("mapa de modelos atual diverge dos pins compilados");
+  }
+  const canarios = validarCanarios(evidencias.canarios, estado.skills, estado.modelos);
   erros.push(...canarios.erros);
   erros.push(...validarLaboratorio(
     evidencias.execucaoLab,
     evidencias.avaliacaoAutomatica,
     evidencias.relatorioLab,
     estado.skills,
-    estado.calibracao.corpusHash
+    estado.calibracao.corpusHash,
+    estado.modelos
   ));
   const humana = validarHumana(
     evidencias.avaliacaoHumana,
@@ -374,6 +413,7 @@ export function criarCertificadoRelease(
     emitido_por: evidencias.emitidoPor.trim(),
     emitido_em: evidencias.emitidoEm,
     codigo_commit: evidencias.codigoCommit,
+    modelos: { ...estado.modelos },
     skills: estado.skills,
     calibracao: {
       corpus_versao: estado.calibracao.corpusVersao,
@@ -411,6 +451,9 @@ export function validarCertificadoContraEstado(
   }
   if (certificado.engine_version !== estado.engineVersion) erros.push("versão da engine mudou após certificação");
   if (certificado.runtime_hash !== estado.runtimeHash) erros.push("código do runtime mudou após certificação");
+  if (!mapaModelosIgual(certificado.modelos, estado.modelos)) {
+    erros.push("modelos fixos mudaram após certificação");
+  }
   if (!/^[0-9a-f]{40}$/.test(certificado.codigo_commit)) erros.push("commit certificado inválido");
   if (certificado.emitido_por?.trim().length < 3 || !Number.isFinite(Date.parse(certificado.emitido_em))) {
     erros.push("emissor ou data do certificado inválidos");
