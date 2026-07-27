@@ -116,7 +116,14 @@ export class ProvedorClaudeCli implements ProvedorModelo {
 
   private executar(args: string[], stdin: string, timeoutMs: number): Promise<{ code: number; out: string; err: string }> {
     return new Promise((resolve) => {
-      const p = spawn(this.bin, args, { cwd: this.cwd, shell: false, env: { ...process.env, PYTHONUTF8: "1" } });
+      // CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: sem ela o CLI dispara chamadas
+      // internas (haiku, ex.: título de sessão) que aparecem no modelUsage e
+      // reprovariam exigirModeloExecutado (exatamente 1 modelo = o pin).
+      const p = spawn(this.bin, args, {
+        cwd: this.cwd,
+        shell: false,
+        env: { ...process.env, PYTHONUTF8: "1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
+      });
       let out = "";
       let err = "";
       p.stdout.setEncoding("utf8");
