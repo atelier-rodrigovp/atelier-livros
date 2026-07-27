@@ -92,8 +92,12 @@ export function validarSpec(spec: SceneSpec, contrato: SkillContract): Resultado
     const v = spec[campo];
     if (typeof v !== "string" || !v.trim()) erros.push(`campo obrigatório vazio: ${campo}`);
   }
-  if (!spec.gancho || !spec.gancho.tipo?.trim() || !spec.gancho.descricao?.trim()) {
-    erros.push("gancho ausente ou incompleto");
+  if (
+    !spec.gancho ||
+    typeof spec.gancho.tipo !== "string" || !spec.gancho.tipo.trim() ||
+    typeof spec.gancho.descricao !== "string" || !spec.gancho.descricao.trim()
+  ) {
+    erros.push("gancho ausente ou incompleto (tipo e descricao devem ser texto)");
   } else if (!contrato.tipos_gancho.includes(spec.gancho.tipo)) {
     erros.push(`gancho.tipo "${spec.gancho.tipo}" fora do vocabulário da skill (${contrato.tipos_gancho.join(", ")})`);
   }
@@ -106,7 +110,11 @@ export function validarSpec(spec: SceneSpec, contrato: SkillContract): Resultado
   const exigidos = contrato.estruturas_exigidas?.campos_spec ?? [];
   for (const nome of exigidos) {
     const v = spec.campos_skill?.[nome];
-    if (!v || !v.trim()) erros.push(`campo exigido pela skill ausente: ${nome}`);
+    // Guarda de tipo: o modelo pode devolver objeto/lista aqui — sem ela, v.trim()
+    // estoura TypeError e o retry recebe erro inacionável (caso real, hoover cap 2).
+    if (typeof v !== "string" || !v.trim()) {
+      erros.push(`campo exigido pela skill ausente ou não-texto (deve ser string): ${nome}`);
+    }
   }
 
   // Exceção editorial precisa referenciar regra existente e ter justificativa.
@@ -115,7 +123,9 @@ export function validarSpec(spec: SceneSpec, contrato: SkillContract): Resultado
     if (!ids.has(spec.excecao_editorial.regra_id)) {
       erros.push(`excecao_editorial referencia regra inexistente: ${spec.excecao_editorial.regra_id}`);
     }
-    if (!spec.excecao_editorial.justificativa?.trim()) erros.push("excecao_editorial sem justificativa");
+    if (typeof spec.excecao_editorial.justificativa !== "string" || !spec.excecao_editorial.justificativa.trim()) {
+      erros.push("excecao_editorial sem justificativa");
+    }
   }
 
   // Anti-ghostwriting: todos os campos textuais + campos_skill + listas.

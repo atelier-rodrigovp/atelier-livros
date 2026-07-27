@@ -149,3 +149,34 @@ describe("validarSpec — anti-ghostwriting", () => {
     expect(r.avisos.join()).toContain("personificação");
   });
 });
+
+describe("validarSpec — campos não-string não estouram TypeError (hoover cap 2, 2026-07-27)", () => {
+  it("campos_skill com objeto no lugar de texto vira erro acionável", async () => {
+    const { validarSpec } = await import("./spec.js");
+    const { carregarContrato } = await import("./contrato.js");
+    const contrato = carregarContrato("hoover-mcfadden").contrato;
+    const exigido = contrato.estruturas_exigidas?.campos_spec?.[0];
+    if (!exigido) return; // contrato sem campos exigidos: nada a testar
+    const spec = {
+      schema: "scene-spec/v1",
+      capitulo: 2,
+      pov: "narradora",
+      local: "hospital",
+      tempo: "Dia 1, 02h40",
+      objetivo: "x",
+      obstaculo: "x",
+      acao_fisica: "x",
+      informacao_nova: "x",
+      virada: "x",
+      mudanca_estado: "x",
+      gancho: { tipo: contrato.tipos_gancho[0], descricao: "x" },
+      fatos_obrigatorios: [],
+      conhecimentos_proibidos: [],
+      fios_avancados: [],
+      fios_ausentes: [],
+      campos_skill: { [exigido]: { objeto: "em vez de texto" } },
+    } as never;
+    const r = validarSpec(spec, contrato);
+    expect(r.erros.some((e: string) => e.includes(exigido) && e.includes("não-texto"))).toBe(true);
+  });
+});
