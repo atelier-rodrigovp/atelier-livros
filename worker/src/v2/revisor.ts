@@ -183,6 +183,10 @@ function problemasDeCitacao(parecer: Parecer, sinaisMedidos: SinalMedido[]): str
     }
     if (ehSinalEscalar(medido.sinal) || typeof medido.valor !== "number") continue;
 
+    // Sinal medido SEM exemplos (ex.: fragColados — o detector conta pares mas não
+    // os lista, para não invalidar os rótulos do corpus de calibração): não há como
+    // vincular; as citações do revisor são aceitas sem cross-check.
+    if (medido.exemplos.length === 0) continue;
     // MULTISET com prefixo: o mesmo trecho pode ocorrer N vezes ("Raspagem." ×3)
     // e o revisor cita cada uma; o exemplo do detector é truncado (110 chars),
     // então citação e exemplo casam também por prefixo longo (≥60 chars) — ainda

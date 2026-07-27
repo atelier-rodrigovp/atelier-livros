@@ -373,14 +373,14 @@ export function diagnosticarCadencia(texto: string, orc: OrcamentoCadencia = ORC
   const frag = fr.filter((f, i) => narr[i] && ehFragmentoEnfase(f, lens[i], orc.enfase));
   const fragDialogo = fr.filter((f, i) => !narr[i] && ehFragmentoEnfase(f, lens[i], orc.enfase)).length;
   let fragColados = 0;
-  // Exemplos dos pares colados: sem eles a violação era inauditável por construção
-  // (o revisor V2 precisa citar cada ocorrência medida — canário dan-brown 2026-07-27).
-  const fragColadosEx: string[] = [];
+  // NÃO emitir exemplos aqui: o corpus de calibração v1 foi rotulado com este
+  // detector SEM exemplos — emiti-los invalida os rótulos hash-bound (regressão
+  // real de 2026-07-27). O caso "citação sem exemplo medido" é acomodado no
+  // protocolo do revisor V2 (problemasDeCitacao: sinal sem exemplos não exige
+  // vínculo). Emitir exemplos aqui exige re-rotular o corpus junto.
   for (let i = 1; i < fr.length; i++)
-    if (narr[i - 1] && narr[i] && ehFragmentoEnfase(fr[i - 1], lens[i - 1], orc.enfase) && ehFragmentoEnfase(fr[i], lens[i], orc.enfase)) {
+    if (narr[i - 1] && narr[i] && ehFragmentoEnfase(fr[i - 1], lens[i - 1], orc.enfase) && ehFragmentoEnfase(fr[i], lens[i], orc.enfase))
       fragColados++;
-      fragColadosEx.push(`${fr[i - 1]} / ${fr[i]}`);
-    }
   const italicos = [...t.matchAll(RE_ITALICO)].map((m) => m[2]);
   const retoricas = fr.filter((f, i) => narr[i] && /[?]["'”’)\]]*$/.test(f));
 
@@ -394,7 +394,7 @@ export function diagnosticarCadencia(texto: string, orc: OrcamentoCadencia = ORC
     mk("anáfora (frases coladas, mesmo início)", "anafora", anafora, orc.anafora, anaforaEx),
     mk("epigrama antitético", "epigrama", epi.length, orc.epigrama, epi),
     mk("fragmento de ênfase (Regra 4 ≤1–2)", "fragEnfase", frag.length, orc.fragEnfase, frag),
-    mk("fragmentos de ênfase COLADOS (Regra 4: nunca dois)", "fragColados", fragColados, orc.fragColados, fragColadosEx),
+    mk("fragmentos de ênfase COLADOS (Regra 4: nunca dois)", "fragColados", fragColados, orc.fragColados, []),
     mk("pensamento em itálico (Regra 4 ≤2–3)", "italico", italicos.length, orc.italico, italicos),
     mk("pergunta retórica (Regra 4 ≤1–2)", "retorica", retoricas.length, orc.retorica, retoricas),
   ];

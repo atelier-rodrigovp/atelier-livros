@@ -313,6 +313,23 @@ describe("exigirDisposicaoCompleta — sinal fora da cota omitido aciona retry d
     expect(resultado.problemas.filter((x) => /não corresponde/.test(x))).toHaveLength(0);
   });
 
+  it("sinal medido SEM exemplos (fragColados) aceita citações sem vínculo — violação não fica inauditável", () => {
+    const p = validarParecer(base([{
+      sinal: "cadencia.fragmentos de ênfase COLADOS (Regra 4: nunca dois)",
+      valor: 2,
+      disposicao: "violacao_confirmada",
+      evidencia: "e",
+      ocorrencias_citadas: [{ trecho: "Raspagem. O 18." }, { trecho: "O 31. Raspagem." }],
+    }])) as Parecer;
+    const resultado = conferirParecer(p, [{
+      sinal: "cadencia.fragmentos de ênfase COLADOS (Regra 4: nunca dois)",
+      valor: 2,
+      fora_da_cota: true,
+      exemplos: [], // o detector conta os pares mas não os lista (contrato do corpus v1)
+    }]);
+    expect(resultado.problemas.filter((x) => /não corresponde|duplicidade/.test(x))).toHaveLength(0);
+  });
+
   it("citação FABRICADA (texto que o detector não mediu) continua reprovada", () => {
     const p = validarParecer(base([{
       sinal: "gnomico",
