@@ -261,6 +261,40 @@ describe("exigirDisposicaoCompleta — sinal fora da cota omitido aciona retry d
     expect(resultado.problemas.filter((x) => /citação não corresponde/.test(x))).toHaveLength(0);
   });
 
+  it("ocorrências IDÊNTICAS medidas N vezes podem ser citadas N vezes (multiset — 'Raspagem.' ×3)", () => {
+    const p = validarParecer(base([{
+      sinal: "cadencia.fragmento de ênfase (Regra 4 ≤1–2)",
+      valor: 3,
+      disposicao: "violacao_confirmada",
+      evidencia: "e",
+      ocorrencias_citadas: [{ trecho: "Raspagem." }, { trecho: "Raspagem." }, { trecho: "Raspagem." }],
+    }])) as Parecer;
+    const resultado = conferirParecer(p, [{
+      sinal: "cadencia.fragmento de ênfase (Regra 4 ≤1–2)",
+      valor: 3,
+      fora_da_cota: true,
+      exemplos: ["Raspagem.", "Raspagem.", "Raspagem."],
+    }]);
+    expect(resultado.problemas.filter((x) => /duplicidade|não corresponde/.test(x))).toHaveLength(0);
+  });
+
+  it("par colado citado SEM a barra separadora casa com o exemplo 'A / B' do detector", () => {
+    const p = validarParecer(base([{
+      sinal: "cadencia.anáfora (frases coladas, mesmo início)",
+      valor: 1,
+      disposicao: "violacao_confirmada",
+      evidencia: "e",
+      ocorrencias_citadas: [{ trecho: "Nenhuma gaveta aberta. Nenhuma caixa no chão." }],
+    }])) as Parecer;
+    const resultado = conferirParecer(p, [{
+      sinal: "cadencia.anáfora (frases coladas, mesmo início)",
+      valor: 1,
+      fora_da_cota: true,
+      exemplos: ["Nenhuma gaveta aberta. / Nenhuma caixa no chão."],
+    }]);
+    expect(resultado.problemas.filter((x) => /não corresponde/.test(x))).toHaveLength(0);
+  });
+
   it("citação FABRICADA (texto que o detector não mediu) continua reprovada", () => {
     const p = validarParecer(base([{
       sinal: "gnomico",

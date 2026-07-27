@@ -157,6 +157,7 @@ function normalizarTrechoLiteral(s: string): string {
   // ocorrência MEDIDA — só não reprovamos por tipografia de aspas.
   return s
     .replace(/["'“”‘’«»`´]/g, "")
+    .replace(/[/|]/g, " ") // separador de par ("A / B") vira espaço: citar sem a barra é a mesma ocorrência
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -182,19 +183,28 @@ function problemasDeCitacao(parecer: Parecer, sinaisMedidos: SinalMedido[]): str
     }
     if (ehSinalEscalar(medido.sinal) || typeof medido.valor !== "number") continue;
 
-    const permitidas = new Set(medido.exemplos.map(normalizarTrechoLiteral));
-    const vistas = new Set<string>();
+    // MULTISET: o mesmo trecho pode ocorrer N vezes no texto ("Raspagem." ×3) e o
+    // revisor precisa citar cada uma — repetição é legítima ATÉ a multiplicidade
+    // medida; acima disso (ou trecho nunca medido) continua reprovado.
+    const saldo = new Map<string, number>();
+    for (const exemplo of medido.exemplos) {
+      const chave = normalizarTrechoLiteral(exemplo);
+      saldo.set(chave, (saldo.get(chave) ?? 0) + 1);
+    }
     for (const ocorrencia of disposto.ocorrencias_citadas ?? []) {
       const trecho = normalizarTrechoLiteral(ocorrencia.trecho);
-      if (vistas.has(trecho)) {
-        problemas.push(`sinal "${disposto.sinal}": ocorrência citada em duplicidade: ${JSON.stringify(ocorrencia.trecho)}`);
-      }
-      vistas.add(trecho);
-      if (!permitidas.has(trecho)) {
+      if (!saldo.has(trecho)) {
         problemas.push(
           `sinal "${disposto.sinal}": citação não corresponde a nenhuma ocorrência medida: ${JSON.stringify(ocorrencia.trecho)}`
         );
+        continue;
       }
+      const resta = saldo.get(trecho)!;
+      if (resta <= 0) {
+        problemas.push(`sinal "${disposto.sinal}": ocorrência citada em duplicidade além do medido: ${JSON.stringify(ocorrencia.trecho)}`);
+        continue;
+      }
+      saldo.set(trecho, resta - 1);
     }
   }
   return problemas;
