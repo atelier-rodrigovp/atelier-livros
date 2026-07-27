@@ -23,14 +23,27 @@ export class LimiteMaxError extends Error {
 const LIMITE_RE =
   /(hit your (session|usage) limit|(session|usage) limit reached|usage limit|limit reached|limite de uso do plano max|plano max atingido)/i;
 
+// Forma ESTRUTURADA do mesmo limite (incidente 2026-07-21/22, 1.299 falhas):
+// o CLI devolve rc=1 com envelope JSON `"api_error_status":429` — a frase pode
+// vir truncada ou ausente, mas o status estruturado é inequívoco. Cobre também
+// rate_limit_error e "HTTP 429"/"429 Too Many Requests" de camadas intermediárias.
+const LIMITE_ESTRUTURADO_RE =
+  /("?api_error_status"?\s*:\s*429|\brate[_\s-]?limit(?:_error|ed|\s+(?:error|exceeded|reached|hit))?\b|\bhttp\s*\/?\s*429\b|\bstatus(?:_code)?"?\s*[:=]\s*429\b|\btoo many requests\b)/i;
+
+function indicaLimite(texto: string): boolean {
+  return LIMITE_RE.test(texto) || LIMITE_ESTRUTURADO_RE.test(texto);
+}
+
 // Extrai o horário do reset do texto ("resets at 1:40am", "reseta 1:40am",
 // "reset at 13:40") e devolve o PRÓXIMO instante futuro como ISO (+90s de folga).
 export function parseHoraReset(texto: string, agora: Date = new Date()): string | null {
   let h: number | null = null;
   let min = 0;
   // 1) formato 12h com am/pm
+  // "m" opcional: o CLI emite "resets 6:10p" (sem o m). O \b impede casar o "a"
+  // de uma palavra seguinte ("resets at 40 apparently" não vira 40h).
   const ampm = texto.match(/reset[s]?|reseta/i)
-    ? texto.match(/(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?/i)
+    ? texto.match(/(\d{1,2})(?::(\d{2}))?\s*([ap])(?:\.?\s*m\.?|\b)/i)
     : null;
   if (ampm) {
     h = parseInt(ampm[1], 10);
@@ -61,7 +74,7 @@ export function limiteMaxRetryAt(
   agora: Date = new Date(),
   backoffMs = 35 * 60_000
 ): string | null {
-  if (!texto || !LIMITE_RE.test(texto)) return null;
+  if (!texto || !indicaLimite(texto)) return null;
   const iso = parseHoraReset(texto, agora);
   // Janela do Max é ≤5h: um reset parseado a >6h é mis-parse (am/pm trocado ou
   // log antigo) → usa backoff em vez de esperar ~24h por engano.
@@ -72,7 +85,7 @@ export function limiteMaxRetryAt(
 // Só classifica: o texto indica limite do Max? (sem calcular retry). Usado para
 // recuperar jobs que morreram como 'error' por limite (classificação antiga).
 export function pareceLimiteMax(texto: string): boolean {
-  return !!texto && LIMITE_RE.test(texto);
+  return !!texto && indicaLimite(texto);
 }
 
 // Job morto que MERECE recuperação (re-enfileirar): limite do Max OU o erro

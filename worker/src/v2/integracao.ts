@@ -236,7 +236,7 @@ export async function executarEscritaV2(job: Job): Promise<void> {
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const skillId = MAPA_SKILL_V1_V2[skillV1] ?? skillV1;
   const contrato = carregarContrato(skillId); // skill desconhecida/contrato inválido = falha clara AQUI, antes do escritor
-  const release = exigirReleaseAtual(contrato.contrato.id);
+  const release = exigirReleaseAtual(contrato.contrato.id, projectId);
 
   const dirProjeto = projDir(projectId);
   const { persistencia, migracaoPendente } = await criarPersistencia({ dirProjeto });
@@ -651,7 +651,7 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
   }
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const contrato = carregarContrato(MAPA_SKILL_V1_V2[skillV1] ?? skillV1);
-  const release = exigirReleaseAtual(contrato.contrato.id);
+  const release = exigirReleaseAtual(contrato.contrato.id, projectId);
   const dirProjeto = projDir(projectId);
   const { persistencia } = await criarPersistencia({ dirProjeto });
   const gravador = new Gravador({ persistencia, projectId });

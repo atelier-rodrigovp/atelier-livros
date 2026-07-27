@@ -51,6 +51,39 @@ describe("limiteMaxRetryAt", () => {
     expect(limiteMaxRetryAt("escrita não avançou em 3/32 (rc=1)", AGORA)).toBeNull();
   });
 
+  // Envelope REAL extraído do Supabase (engine_runs, incidente 2026-07-21/22,
+  // 1.299 falhas do arquiteto_cena): rc=1 com "api_error_status":429 no JSON.
+  const ENVELOPE_REAL_429 =
+    'claude CLI: claude CLI rc=1: {"type":"result","subtype":"success","is_error":true,' +
+    '"api_error_status":429,"duration_ms":1346,"duration_api_ms":0,"num_turns":1,' +
+    '"result":"You\'ve hit your session limit · resets 1:10p"}';
+
+  it("envelope real do incidente (api_error_status 429) → limite, com reset 1:10p = 13:10", () => {
+    const agora = new Date("2026-07-22T11:00:00");
+    const iso = limiteMaxRetryAt(ENVELOPE_REAL_429, agora);
+    expect(iso).not.toBeNull();
+    expect(new Date(iso!).getHours()).toBe(13); // "1:10p" é 13h10, não 01h10
+  });
+
+  it("forma estruturada SEM a frase (envelope truncado antes do result) → limite via 429", () => {
+    const truncado =
+      'claude CLI rc=1: {"type":"result","subtype":"success","is_error":true,' +
+      '"api_error_status":429,"duration_ms":2092,"duration_api_ms":0';
+    const iso = limiteMaxRetryAt(truncado, AGORA, 35 * 60_000);
+    expect(iso).not.toBeNull(); // sem horário parseável → backoff padrão
+    expect(new Date(iso!).getTime()).toBeCloseTo(AGORA.getTime() + 35 * 60_000, -3);
+  });
+
+  it("rate_limit_error e HTTP 429 também são limite", () => {
+    expect(limiteMaxRetryAt('{"type":"error","error":{"type":"rate_limit_error"}}', AGORA)).not.toBeNull();
+    expect(limiteMaxRetryAt("request failed: HTTP 429 Too Many Requests", AGORA)).not.toBeNull();
+  });
+
+  it("429 estruturado NÃO confunde erro real com número solto", () => {
+    expect(limiteMaxRetryAt("capitulo-04.md gravado (429 palavras)", AGORA)).toBeNull();
+    expect(limiteMaxRetryAt("ENOENT: no such file or directory, open 'capitulo-429.md'", AGORA)).toBeNull();
+  });
+
   it("PROGRESSO + limite no fim do output → classifica como limite (não erro)", () => {
     // run que ESCREVEU capítulos e DEPOIS bateu o limite (o caso do bug)
     const out =

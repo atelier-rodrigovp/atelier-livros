@@ -12,15 +12,28 @@ export const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
 export const PY_BIN = process.env.PY_BIN || "python";
 export const RUNNER_PATH = process.env.RUNNER_PATH || "";
 
+// Aliases legados de .env antigos (MODEL=opus etc.): apontam para o MESMO pin,
+// então não são deriva de modelo — aceitos com aviso. Qualquer outro valor
+// continua sendo troca de modelo e derruba o boot (fail-fast).
+const ALIAS_LEGADO_MODELO: Record<string, string> = {
+  opus: "claude-opus-5",
+  sonnet: "claude-sonnet-5",
+  haiku: "claude-haiku-4-5-20251001",
+};
+
 function modeloFixo(nomeVariavel: string, fixo: string): string {
   const configurado = process.env[nomeVariavel]?.trim();
-  if (configurado && configurado !== fixo) {
-    throw new Error(
-      `${nomeVariavel}=${configurado} diverge do pin ${fixo}; ` +
-      "troca de modelo exige novo código, canários e certificação"
+  if (!configurado || configurado === fixo) return fixo;
+  if (ALIAS_LEGADO_MODELO[configurado.toLowerCase()] === fixo) {
+    console.warn(
+      `[worker] ${nomeVariavel}=${configurado} é alias legado do pin ${fixo}; usando o pin. Atualize o .env.`
     );
+    return fixo;
   }
-  return fixo;
+  throw new Error(
+    `${nomeVariavel}=${configurado} diverge do pin ${fixo}; ` +
+    "troca de modelo exige novo código, canários e certificação"
+  );
 }
 
 export const MODEL = modeloFixo("MODEL", "claude-opus-5"); // PESADO: escritor, REVIEW/REESCRITA inline

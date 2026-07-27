@@ -35,6 +35,30 @@ export interface ResultadoPapel<T> {
   tentativas: number;
 }
 
+// Teto duro de falhas de infra por (execução, papel) — incidente 2026-07-21/22:
+// 1.299 runs 'falha' do arquiteto_cena em cima de um 429 não classificado.
+// Limite do Max (LimiteMaxError) NÃO conta aqui: quota pausa, não é falha.
+export const TETO_FALHAS_INFRA = 5;
+const falhasInfraPorExecucao = new Map<string, number>();
+
+/** Zera o contador (testes; opcionalmente por escopo de job). */
+export function zerarFalhasInfra(escopo?: string): void {
+  if (!escopo) {
+    falhasInfraPorExecucao.clear();
+    return;
+  }
+  for (const chave of [...falhasInfraPorExecucao.keys()]) {
+    if (chave.startsWith(`${escopo}:`)) falhasInfraPorExecucao.delete(chave);
+  }
+}
+
+function registrarFalhaInfra(escopo: string, papel: Papel): number {
+  const chave = `${escopo}:${papel}`;
+  const n = (falhasInfraPorExecucao.get(chave) ?? 0) + 1;
+  falhasInfraPorExecucao.set(chave, n);
+  return n;
+}
+
 export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPapel<T>> {
   const { capacidade, modelo } = resolverModelo(e.papel, e.mapa);
   const max = e.maxTentativas ?? 2;
@@ -81,6 +105,18 @@ export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPa
           classe: "configuracao",
           mensagem: msg,
           detalhe: err.detalhe,
+        });
+      }
+      // Teto duro por (execução, papel): mais de TETO_FALHAS_INFRA falhas de infra
+      // seguidas é padrão de tempestade (provedor fora do ar ou limite não
+      // classificado) — abortar com classe 'quota' em vez de continuar queimando.
+      const falhasInfra = registrarFalhaInfra(e.jobId ?? "sem-job", e.papel);
+      if (falhasInfra > TETO_FALHAS_INFRA) {
+        throw new ErroEngine({
+          codigo: "TETO_FALHAS_INFRA",
+          classe: "quota",
+          mensagem: `papel ${e.papel}: ${falhasInfra} falhas de infra na mesma execução (teto ${TETO_FALHAS_INFRA}) — abortando para proteger a cota`,
+          detalhe: { falhas: falhasInfra, teto: TETO_FALHAS_INFRA, ultimo_erro: msg.slice(0, 300) },
         });
       }
       if (tentativa === max) {

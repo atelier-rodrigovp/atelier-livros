@@ -1,0 +1,2 @@
+# Corpus de calibração V2 é hash-bound (sha256 no manifesto): nunca converter EOL.
+worker/calibration/** -text

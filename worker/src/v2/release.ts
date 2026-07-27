@@ -580,8 +580,52 @@ export function verificarReleaseAtual(skillId?: string, overrides: {
   return { ok: erros.length === 0, erros, certificado, estado };
 }
 
-export function exigirReleaseAtual(skillId: string): CertificadoReleaseV2 {
-  const verificacao = verificarReleaseAtual(skillId);
+/**
+ * Allowlist de CANÁRIO — os únicos projetos autorizados a rodar fundação/escrita
+ * V2 SEM certificado de release, porque são eles que PRODUZEM a evidência que o
+ * certificado exige (ovo-e-galinha do fail-closed). Explícita e auditável em
+ * código: UUID exato, um por skill. Qualquer outro projeto continua fail-closed.
+ * NÃO incluir obra real aqui (decisão do autor: 53abdade-… fica fora).
+ */
+export const PROJETOS_CANARIO_V2: ReadonlySet<string> = Object.freeze(new Set([
+  "8b11072c-097d-4964-8f89-abecb96eb16c", // Canário V2 — O Cofre de Alcobaça (dan-brown)
+  "aa8af83f-b2a1-41e0-ac0b-e46e620ee5c7", // Canário V2 — Tudo o que não te contei (hoover-mcfadden)
+  "5f59a08b-5947-46ab-9547-76bd31e74e5f", // Canário V2 — A Corte do Sal (romantasy)
+]));
+
+/** Liberação de canário: substitui o certificado APENAS para os projetos da allowlist. */
+export interface LiberacaoCanarioV2 {
+  schema: "engine-v2-liberacao-canario/v1";
+  modo: "canario";
+  codigo_commit: string; // rótulo auditável no progresso (não é commit certificado)
+  project_id: string;
+  skill: string;
+}
+
+export function exigirReleaseAtual(skillId: string, projectId?: string | null): CertificadoReleaseV2 | LiberacaoCanarioV2 {
+  if (projectId && PROJETOS_CANARIO_V2.has(projectId)) {
+    return {
+      schema: "engine-v2-liberacao-canario/v1",
+      modo: "canario",
+      codigo_commit: "canario-sem-certificado",
+      project_id: projectId,
+      skill: skillId,
+    };
+  }
+  let verificacao: ReturnType<typeof verificarReleaseAtual>;
+  try {
+    verificacao = verificarReleaseAtual(skillId);
+  } catch (erro) {
+    // A verificação em si falhou (ex.: corpus ilegível ou com hash divergente por
+    // CRLF do checkout). Continua FAIL-CLOSED, mas com a mensagem do gate — nunca
+    // um erro cru que esconda que a escrita V2 está bloqueada por certificação.
+    throw new ErroEngine({
+      codigo: "RELEASE_V2_NAO_CERTIFICADA",
+      classe: "configuracao",
+      mensagem: `Engine V2 bloqueada para fundação/escrita: verificação do release falhou: ${erro instanceof Error ? erro.message : String(erro)}`,
+      detalhe: { skill: skillId },
+    });
+  }
   if (!verificacao.ok || !verificacao.certificado) {
     throw new ErroEngine({
       codigo: "RELEASE_V2_NAO_CERTIFICADA",
