@@ -241,4 +241,40 @@ describe("exigirDisposicaoCompleta — sinal fora da cota omitido aciona retry d
     }]);
     expect(resultado.verdictEfetivo).toBe("necessita_decisao_humana");
   });
+
+  it("citação com glifo de aspas trocado casa com a ocorrência medida (canário dan-brown 2026-07-27)", () => {
+    // O prompt lista via JSON.stringify (aspas duplas); o modelo re-serializa e
+    // troca o glifo (" → '). Não é fabricação: mesma ocorrência, tipografia diferente.
+    const p = validarParecer(base([{
+      sinal: "cadencia.fragmento de ênfase (Regra 4 ≤1–2)",
+      valor: 1,
+      disposicao: "violacao_confirmada",
+      evidencia: "e",
+      ocorrencias_citadas: [{ trecho: "Raspagem. (após 'Verificou o fólio 7')" }],
+    }])) as Parecer;
+    const resultado = conferirParecer(p, [{
+      sinal: "cadencia.fragmento de ênfase (Regra 4 ≤1–2)",
+      valor: 1,
+      fora_da_cota: true,
+      exemplos: ['Raspagem. (após "Verificou o fólio 7")'],
+    }]);
+    expect(resultado.problemas.filter((x) => /citação não corresponde/.test(x))).toHaveLength(0);
+  });
+
+  it("citação FABRICADA (texto que o detector não mediu) continua reprovada", () => {
+    const p = validarParecer(base([{
+      sinal: "gnomico",
+      valor: 1,
+      disposicao: "violacao_confirmada",
+      evidencia: "e",
+      ocorrencias_citadas: [{ trecho: "frase inventada pelo revisor" }],
+    }])) as Parecer;
+    const resultado = conferirParecer(p, [{
+      sinal: "gnomico",
+      valor: 1,
+      fora_da_cota: true,
+      exemplos: ["a máxima real medida pelo detector"],
+    }]);
+    expect(resultado.problemas.some((x) => /citação não corresponde/.test(x))).toBe(true);
+  });
 });

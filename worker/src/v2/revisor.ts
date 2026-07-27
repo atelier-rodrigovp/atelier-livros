@@ -151,7 +151,14 @@ export function acharSinalMedido(sinalParecer: string, sinais: SinalMedido[]): S
 }
 
 function normalizarTrechoLiteral(s: string): string {
-  return s.replace(/\s+/g, " ").trim();
+  // Glifos de aspas são dobrados: o prompt lista as ocorrências via JSON.stringify
+  // (aspas duplas internas) e o modelo, ao re-serializar o próprio JSON, troca o
+  // glifo (" → ' ou ” → "). A citação continua tendo que corresponder a uma
+  // ocorrência MEDIDA — só não reprovamos por tipografia de aspas.
+  return s
+    .replace(/["'“”‘’«»`´]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
