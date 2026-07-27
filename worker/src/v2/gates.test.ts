@@ -110,6 +110,25 @@ describe("gates universais", () => {
     expect(gateConhecimentoProibido("O Prior a esperava na porta.", ficha).passou).toBe(false);
   });
 
+  it("conhecimento proibido: capitalização de início de frase não é nome próprio (regressão canário 2026-07-27)", () => {
+    const ficha = {
+      schema: "scene-spec/v1",
+      capitulo: 2,
+      conhecimentos_proibidos: ["Nome completo ou histórico pessoal da perita além do que consta no registro"],
+      fatos_obrigatorios: [],
+      fios_avancados: [],
+      fios_ausentes: [],
+    } as unknown as SceneSpec;
+    // "Nome" só é maiúscula por abrir a frase — não pode bloquear o texto que usa "Nome" em início de frase.
+    expect(gateConhecimentoProibido("Nome nenhum constava na etiqueta. Ela seguiu em frente.", ficha).passou).toBe(true);
+    // Nome próprio em posição não-inicial continua bloqueando.
+    const ficha2 = {
+      ...ficha,
+      conhecimentos_proibidos: ["A identidade do mandante é Heitor Valem"],
+    } as unknown as SceneSpec;
+    expect(gateConhecimentoProibido("A assinatura dizia Heitor, sem sobrenome.", ficha2).passou).toBe(false);
+  });
+
   it("validarSaidaJson: JSON válido passa, inválido vira gate fora_do_schema", () => {
     const ok = validarSaidaJson('```json\n{"a":1}\n```', (o) => o as { a: number });
     expect(ok.ok).toBe(true);

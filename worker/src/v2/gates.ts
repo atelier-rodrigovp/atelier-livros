@@ -85,7 +85,19 @@ export function gateConhecimentoProibido(texto: string, ficha: SceneSpec): Resul
   const hits: string[] = [];
   for (const proibido of ficha.conhecimentos_proibidos) {
     // Só nomes próprios distintivos (capitalizados); nunca anos/números puros.
-    const termos = (proibido.match(/\b[A-ZÁÉÍÓÚÂÊÔ][\wáéíóúâêôãõç-]{3,}\b/g) ?? [])
+    // Palavra capitalizada por INÍCIO DE FRASE não é nome próprio ("Nome completo
+    // ou histórico…" bloqueava a palavra "Nome" — canário dan-brown 2026-07-27);
+    // ela só conta se reaparecer capitalizada em posição não-inicial. O caso
+    // semântico continua com o auditor factual.
+    const naoIniciais = new Set<string>();
+    const reTermo = /\b[A-ZÁÉÍÓÚÂÊÔ][\wáéíóúâêôãõç-]{3,}\b/g;
+    let m: RegExpExecArray | null;
+    while ((m = reTermo.exec(proibido)) !== null) {
+      const antes = proibido.slice(0, m.index);
+      const inicioDeFrase = /^\s*$/.test(antes) || /[.!?…:;]["'“”‘’«»)\]]*\s*$/.test(antes);
+      if (!inicioDeFrase) naoIniciais.add(m[0]);
+    }
+    const termos = [...naoIniciais]
       .filter((termo) => !/^(Marina|Ela|Ele|Não|Nada|Ninguém|Quem|Quando|Onde|Motivo|Porque)$/.test(termo));
     for (const termo of termos) {
       const re = new RegExp(`\\b${termo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g");
