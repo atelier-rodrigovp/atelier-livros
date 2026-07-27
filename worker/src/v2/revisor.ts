@@ -183,28 +183,30 @@ function problemasDeCitacao(parecer: Parecer, sinaisMedidos: SinalMedido[]): str
     }
     if (ehSinalEscalar(medido.sinal) || typeof medido.valor !== "number") continue;
 
-    // MULTISET: o mesmo trecho pode ocorrer N vezes no texto ("Raspagem." ×3) e o
-    // revisor precisa citar cada uma — repetição é legítima ATÉ a multiplicidade
-    // medida; acima disso (ou trecho nunca medido) continua reprovado.
-    const saldo = new Map<string, number>();
-    for (const exemplo of medido.exemplos) {
-      const chave = normalizarTrechoLiteral(exemplo);
-      saldo.set(chave, (saldo.get(chave) ?? 0) + 1);
-    }
+    // MULTISET com prefixo: o mesmo trecho pode ocorrer N vezes ("Raspagem." ×3)
+    // e o revisor cita cada uma; o exemplo do detector é truncado (110 chars),
+    // então citação e exemplo casam também por prefixo longo (≥60 chars) — ainda
+    // vinculado à medição, impossível de fabricar por acidente. Acima da
+    // multiplicidade medida (ou trecho nunca medido) continua reprovado.
+    const disponiveis = medido.exemplos.map(normalizarTrechoLiteral);
+    const usadas = disponiveis.map(() => false);
+    const casa = (cit: string, exm: string) =>
+      cit === exm ||
+      (exm.length >= 60 && cit.startsWith(exm)) ||
+      (cit.length >= 60 && exm.startsWith(cit));
     for (const ocorrencia of disposto.ocorrencias_citadas ?? []) {
-      const trecho = normalizarTrechoLiteral(ocorrencia.trecho);
-      if (!saldo.has(trecho)) {
-        problemas.push(
-          `sinal "${disposto.sinal}": citação não corresponde a nenhuma ocorrência medida: ${JSON.stringify(ocorrencia.trecho)}`
-        );
+      const cit = normalizarTrechoLiteral(ocorrencia.trecho);
+      const idx = disponiveis.findIndex((exm, i) => !usadas[i] && casa(cit, exm));
+      if (idx >= 0) {
+        usadas[idx] = true;
         continue;
       }
-      const resta = saldo.get(trecho)!;
-      if (resta <= 0) {
-        problemas.push(`sinal "${disposto.sinal}": ocorrência citada em duplicidade além do medido: ${JSON.stringify(ocorrencia.trecho)}`);
-        continue;
-      }
-      saldo.set(trecho, resta - 1);
+      const jaConsumida = disponiveis.some((exm) => casa(cit, exm));
+      problemas.push(
+        jaConsumida
+          ? `sinal "${disposto.sinal}": ocorrência citada em duplicidade além do medido: ${JSON.stringify(ocorrencia.trecho)}`
+          : `sinal "${disposto.sinal}": citação não corresponde a nenhuma ocorrência medida: ${JSON.stringify(ocorrencia.trecho)}`
+      );
     }
   }
   return problemas;

@@ -295,6 +295,24 @@ describe("exigirDisposicaoCompleta — sinal fora da cota omitido aciona retry d
     expect(resultado.problemas.filter((x) => /não corresponde/.test(x))).toHaveLength(0);
   });
 
+  it("citação completa casa com exemplo TRUNCADO do detector (prefixo ≥60 chars)", () => {
+    const inicio = "Ou ela tinha levado as folhas. / Ou alguém as tinha levado depois dela, e depressa, porque quem corta rente";
+    const p = validarParecer(base([{
+      sinal: "cadencia.anáfora (frases coladas, mesmo início)",
+      valor: 1,
+      disposicao: "violacao_confirmada",
+      evidencia: "e",
+      ocorrencias_citadas: [{ trecho: "Ou ela tinha levado as folhas. Ou alguém as tinha levado depois dela, e depressa, porque quem corta rente à dobra sabe o que quer e sabe onde está." }],
+    }])) as Parecer;
+    const resultado = conferirParecer(p, [{
+      sinal: "cadencia.anáfora (frases coladas, mesmo início)",
+      valor: 1,
+      fora_da_cota: true,
+      exemplos: [inicio.slice(0, 110)], // o detector trunca em 110 chars
+    }]);
+    expect(resultado.problemas.filter((x) => /não corresponde/.test(x))).toHaveLength(0);
+  });
+
   it("citação FABRICADA (texto que o detector não mediu) continua reprovada", () => {
     const p = validarParecer(base([{
       sinal: "gnomico",
