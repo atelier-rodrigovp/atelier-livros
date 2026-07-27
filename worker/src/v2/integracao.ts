@@ -19,6 +19,15 @@ import { executarPapel } from "./papeis.js";
 import { tarefaCanarioVoz, tarefaEditorEstrutural, tarefaRevisorCanario } from "./tarefas.js";
 import { gerarFundacaoV2, materializarFundacao } from "./fundacao.js";
 import {
+  briefingParaFundacao,
+  decisoesAvulsas,
+  instrucoesDoBriefing,
+  preferenciasDoBriefing,
+  resolverIdioma,
+  type BriefingAutor,
+} from "./briefing.js";
+import { garantirEdicaoOrigem, marcarEdicaoEmRevisao, sincronizarCapitulosAprovados } from "./capitulos-db.js";
+import {
   aplicarEdicaoEstrutural,
   fundirTextosCapitulos,
   planejarEdicaoEstrutural,
@@ -42,7 +51,7 @@ import {
 } from "./tipos.js";
 
 /** Tipos de job que a V2 sabe executar (os demais permanecem na V1 mesmo em modo v2). */
-export const TIPOS_V2 = new Set(["escrever_livro", "criar_fundacao", "laboratorio_v2"]);
+export const TIPOS_V2 = new Set(["escrever_livro", "criar_fundacao", "laboratorio_v2", "revisar", "refinar_fundacao"]);
 
 export async function engineModeDoProjeto(projectId: string): Promise<string> {
   const { sb, OWNER } = await import("../supabase.js");
@@ -81,7 +90,14 @@ export async function executarJobRoteado(
   if (job.project_id && TIPOS_V2.has(job.tipo)) {
     const modo = await engineModeDoProjeto(job.project_id);
     if (modo === "v2") {
-      return job.tipo === "criar_fundacao" ? executarFundacaoV2Job(job) : executarEscritaV2(job);
+      if (job.tipo === "criar_fundacao") return executarFundacaoV2Job(job);
+      if (job.tipo === "refinar_fundacao") return executarRefinarFundacaoV2(job);
+      if (job.tipo === "revisar") {
+        // Revisão V2 opera na edição de ORIGEM; tradução segue o pipeline V1.
+        if (await edicaoEhTraducao(job.edition_id)) return executarV1(job, hb);
+        return executarRevisarV2(job);
+      }
+      return executarEscritaV2(job);
     }
   }
   return executarV1(job, hb);
@@ -218,14 +234,30 @@ export async function prepararEdicaoEstrutural(opts: {
   return { fichasOriginais, fichasFinais, fusoes, conteudosFusao };
 }
 
-/** Executa escrever_livro no pipeline V2, capítulo a capítulo, retomável. */
-export async function executarEscritaV2(job: Job): Promise<void> {
+/**
+ * Contexto compartilhado dos jobs V2 que operam num projeto COM fundação
+ * (escrever_livro, revisar): projeto, contrato, release, persistência, perfil,
+ * briefing (camadas 3/7), fundação e edição de origem — caminho ÚNICO.
+ */
+async function prepararProjetoV2(job: Job): Promise<{
+  proj: Record<string, unknown>;
+  contrato: ReturnType<typeof carregarContrato>;
+  release: ReturnType<typeof exigirReleaseAtual>;
+  dirProjeto: string;
+  persistencia: PersistenciaV2;
+  migracaoPendente: boolean;
+  gravador: Gravador;
+  estado: EstadoCanonico;
+  deps: DepsPipeline;
+  docsFactuais: { titulo: string; texto: string; fonte: string }[];
+  editionId: string;
+}> {
   const { sb, OWNER } = await import("../supabase.js");
   const { projDir, CLAUDE_BIN } = await import("../lib.js");
   const projectId = job.project_id!;
   const { data: proj, error } = await sb
     .from("projects")
-    .select("id,titulo,skill_escrita,total_capitulos,piso_palavras,briefing")
+    .select("id,titulo,skill_escrita,total_capitulos,piso_palavras,meta_nota,idioma_origem,briefing")
     .eq("owner", OWNER)
     .eq("id", projectId)
     .single();
@@ -258,16 +290,6 @@ export async function executarEscritaV2(job: Job): Promise<void> {
   }
 
   const estado = await gravador.carregarEstado();
-  const resolucaoTotal = resolverTotalCapitulos({
-    projeto: (proj as { total_capitulos?: number }).total_capitulos,
-    canonico: estado.doc.total_capitulos,
-    payload: Number((job.payload as { total?: number })?.total ?? 0),
-    migrado: estado.doc.migracao?.origem === "v1",
-  });
-  if (!resolucaoTotal) {
-    throw new ErroEngine({ codigo: "TOTAL_CAPITULOS_INDEFINIDO", classe: "configuracao", mensagem: "total de capítulos não definido no projeto nem no payload" });
-  }
-  const total = resolucaoTotal.total;
 
   // Docs factuais do contrato (ex.: dossie-factual.md do dan-brown, matriz-de-relogios
   // do hoover): quando existem no projeto, entram VERBATIM no pacote do revisor e do
@@ -287,17 +309,42 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     }
   }
 
-  // Decisões explícitas do autor (wizard) = camada 3 do compilador (decisao_autor).
-  const briefing = ((proj as { briefing?: Record<string, unknown> }).briefing ?? {}) as {
-    decisoes_autor?: { texto?: string; em?: string }[];
+  // Briefing do autor: decisões da entrevista + decisões avulsas = camada 3;
+  // preferências = camada 7; idioma resolvido pela precedência da spec.
+  const briefing = ((proj as { briefing?: BriefingAutor }).briefing ?? {}) as BriefingAutor;
+  const instrucoesAutor = [...instrucoesDoBriefing(briefing), ...decisoesAvulsas(briefing)];
+  const preferencias = preferenciasDoBriefing(briefing);
+  const idioma = resolverIdioma(proj as { idioma_origem?: string | null; briefing?: BriefingAutor });
+
+  // Fundação da obra (bíblia/mapa/estrutura) para as seções camada 6 do pipeline.
+  const lerPrimeiro = async (...caminhos: string[]): Promise<string> => {
+    for (const c of caminhos) {
+      try {
+        const t = await fs.readFile(c, "utf8");
+        if (t.trim()) return t;
+      } catch { /* tenta o próximo layout */ }
+    }
+    return "";
   };
-  const instrucoesAutor = (briefing.decisoes_autor ?? [])
-    .filter((d) => typeof d?.texto === "string" && d.texto.trim())
-    .map((d) => ({
-      texto: d.texto!.trim(),
-      camada: "decisao_autor" as const,
-      fonte: `autor:${d.em ?? "briefing"}`,
-    }));
+  const biblia = await lerPrimeiro(
+    path.join(dirProjeto, "fundacao", "biblia-da-obra.md"),
+    path.join(dirProjeto, "biblia-da-obra.md")
+  );
+  const mapaPersonagens = await lerPrimeiro(
+    path.join(dirProjeto, "fundacao", "mapa-personagens.json"),
+    path.join(dirProjeto, "mapa-personagens.json")
+  );
+  let estruturaFundacao: { capitulo: number; fio: string; resumo_estrutural: string }[] | undefined;
+  try {
+    const cru = JSON.parse(await lerPrimeiro(path.join(dirProjeto, "estrutura.json")) || "null") as
+      | { estrutura?: { capitulo: number; fio: string; resumo_estrutural: string }[] }
+      | null;
+    if (Array.isArray(cru?.estrutura)) estruturaFundacao = cru.estrutura;
+  } catch { /* estrutura ausente/ilegível: seções ficam vazias (fundação antiga) */ }
+
+  // Edição de ORIGEM: o livro V2 existe para a plataforma (Leitor/tradução/
+  // capa/EPUB/venda) — Quebra 3 da auditoria. Sem edição não há chapters.
+  const editionId = job.edition_id ?? (await garantirEdicaoOrigem(projectId, idioma));
 
   const deps: DepsPipeline = {
     gravador,
@@ -308,11 +355,34 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     perfil: { texto: perfilTexto, skillId: contrato.contrato.id, hash: hashJsonCanonico(perfilTexto), validado: true },
     dirManuscrito: path.join(dirProjeto, "manuscrito"),
     projectId,
-    editionId: job.edition_id ?? null,
+    editionId,
     jobId: job.id,
     docsFactuais,
     instrucoesAutor,
+    preferencias,
+    idioma,
+    fundacao: { biblia, mapaPersonagens, estrutura: estruturaFundacao },
   };
+
+  return { proj: proj as Record<string, unknown>, contrato, release, dirProjeto, persistencia, migracaoPendente, gravador, estado, deps, docsFactuais, editionId };
+}
+
+/** Executa escrever_livro no pipeline V2, capítulo a capítulo, retomável. */
+export async function executarEscritaV2(job: Job): Promise<void> {
+  const { proj, contrato, release, dirProjeto, persistencia, migracaoPendente, gravador, estado, deps, docsFactuais, editionId } =
+    await prepararProjetoV2(job);
+  const projectId = job.project_id!;
+
+  const resolucaoTotal = resolverTotalCapitulos({
+    projeto: (proj as { total_capitulos?: number }).total_capitulos,
+    canonico: estado.doc.total_capitulos,
+    payload: Number((job.payload as { total?: number })?.total ?? 0),
+    migrado: estado.doc.migracao?.origem === "v1",
+  });
+  if (!resolucaoTotal) {
+    throw new ErroEngine({ codigo: "TOTAL_CAPITULOS_INDEFINIDO", classe: "configuracao", mensagem: "total de capítulos não definido no projeto nem no payload" });
+  }
+  const total = resolucaoTotal.total;
 
   await atualizarProgresso(job.id, {
     engine: "v2",
@@ -331,6 +401,10 @@ export async function executarEscritaV2(job: Job): Promise<void> {
         }
       : {}),
   });
+
+  // Retomada: capítulos já aprovados em execuções anteriores ficam duráveis
+  // ANTES de escrever o próximo (idempotente; hash-bound).
+  await sincronizarCapitulosAprovados({ projectId, editionId, dirManuscrito: deps.dirManuscrito, estado });
 
   // Escrita incremental controlada (ex.: prova de 1 capítulo num livro migrado):
   // payload.max_novos_caps limita quantos capítulos NOVOS esta execução escreve.
@@ -386,6 +460,15 @@ export async function executarEscritaV2(job: Job): Promise<void> {
         mensagem: `capítulo ${n} terminou em ${r.status} (${r.problemas[0] ?? r.gatesFalhos[0]?.gate ?? "sem detalhe"})`,
       });
     }
+
+    // Capítulo aprovado vira durável AGORA (chapters + Storage): a reprovação
+    // do N+1 nunca oculta o N aprovado (mesma lição do contrato de progresso V1).
+    await sincronizarCapitulosAprovados({
+      projectId,
+      editionId,
+      dirManuscrito: deps.dirManuscrito,
+      estado: await gravador.carregarEstado(),
+    });
   }
 
   // Livro migrado com capítulos legado pulados: o manuscrito NÃO está todo
@@ -421,6 +504,7 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     await atualizarProgresso(job.id, { fase: "EDICAO_ESTRUTURAL", etapa: "já aplicada (retomada)" });
     return executarMeta9Integrada(job, {
       gravador, persistencia, deps, contrato, dirProjeto, projectId, docsFactuais,
+      metaProjeto: (proj as { meta_nota?: number | null }).meta_nota,
     });
   }
   const secoesCaps: SecaoContexto[] = [];
@@ -587,11 +671,23 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     total_final: relatorioEd.totalFinal,
     fusoes: relatorioEd.fusoes,
   });
+  // Renumeração/fusão aplicada: a plataforma reflete o manuscrito vigente
+  // (ressincroniza hashes novos e remove capítulos além do total final).
+  await sincronizarCapitulosAprovados({
+    projectId,
+    editionId,
+    dirManuscrito: deps.dirManuscrito,
+    estado: await gravador.carregarEstado(),
+    totalFinal: relatorioEd.totalFinal,
+  });
 
   // ---------------------------------------------------------------------------
   // PARTE B — Meta-nota (bestseller): consolida, avalia e reescreve até a meta.
   // ---------------------------------------------------------------------------
-  await executarMeta9Integrada(job, { gravador, persistencia, deps, contrato, dirProjeto, projectId, docsFactuais });
+  await executarMeta9Integrada(job, {
+    gravador, persistencia, deps, contrato, dirProjeto, projectId, docsFactuais,
+    metaProjeto: (proj as { meta_nota?: number | null }).meta_nota,
+  });
 }
 
 /** Chamada da meta-nota compartilhada entre o fluxo normal e a retomada. */
@@ -605,6 +701,7 @@ async function executarMeta9Integrada(
     dirProjeto: string;
     projectId: string;
     docsFactuais: { titulo: string; texto: string; fonte: string }[];
+    metaProjeto?: number | null;
   }
 ): Promise<void> {
   await executarMeta9({
@@ -620,7 +717,12 @@ async function executarMeta9Integrada(
     editionId: job.edition_id ?? null,
     jobId: job.id,
     docsFactuais: ctx.docsFactuais,
-    meta: (job.payload as { meta_nota?: number })?.meta_nota ?? 9,
+    instrucoesAutor: ctx.deps.instrucoesAutor,
+    preferencias: ctx.deps.preferencias,
+    idioma: ctx.deps.idioma,
+    fundacao: ctx.deps.fundacao,
+    // Meta do projeto (coluna meta_nota) é a fonte; payload permanece como override explícito.
+    meta: (job.payload as { meta_nota?: number })?.meta_nota ?? (ctx.metaProjeto ?? 9),
     maxIteracoes: (job.payload as { max_iteracoes?: number })?.max_iteracoes ?? 3,
     reportarEtapa: async (etapa, dados) => {
       if (etapa === "CONSOLIDACAO") await atualizarProgresso(job.id, { fase: "CONSOLIDACAO" });
@@ -628,6 +730,18 @@ async function executarMeta9Integrada(
       else if (etapa === "CONCLUIDO") await atualizarProgresso(job.id, { fase: "CONCLUIDO", ...(dados ?? {}) });
     },
   });
+  // A meta-nota pode ter reescrito capítulos: os hashes finais aprovados viram
+  // a versão durável, e a edição de origem entra em revisão quando conclui.
+  if (ctx.deps.editionId) {
+    const estadoFinal = await ctx.gravador.carregarEstado();
+    await sincronizarCapitulosAprovados({
+      projectId: ctx.projectId,
+      editionId: ctx.deps.editionId,
+      dirManuscrito: ctx.deps.dirManuscrito,
+      estado: estadoFinal,
+    });
+    if (estadoFinal.doc.fase === "concluido") await marcarEdicaoEmRevisao(ctx.deps.editionId);
+  }
 }
 
 /**
@@ -642,7 +756,7 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
   const projectId = job.project_id!;
   const { data: proj, error } = await sb
     .from("projects")
-    .select("id,titulo,skill_escrita,total_capitulos,briefing")
+    .select("id,titulo,skill_escrita,total_capitulos,idioma_origem,briefing")
     .eq("owner", OWNER)
     .eq("id", projectId)
     .single();
@@ -672,9 +786,9 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
     return;
   }
 
-  const briefing = ((proj as { briefing?: Record<string, unknown> }).briefing ?? {}) as { ideia_central?: string };
-  const premissa = (briefing.ideia_central ?? "").trim();
-  if (!premissa) {
+  // Briefing COMPLETO da entrevista chega ao arquiteto (não só a ideia central).
+  const briefingFundacao = briefingParaFundacao(proj as Parameters<typeof briefingParaFundacao>[0]);
+  if (!briefingFundacao.premissa) {
     throw new ErroEngine({ codigo: "BRIEFING_AUSENTE", classe: "configuracao", mensagem: "criar_fundacao V2 exige briefing.ideia_central" });
   }
 
@@ -694,13 +808,133 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
     skill_versao: contrato.contrato.versao,
     release_commit: release.codigo_commit,
   });
-  const { fundacao, runId } = await gerarFundacaoV2(depsF, {
-    titulo: (proj as { titulo?: string }).titulo ?? "Sem título",
-    premissa,
-    totalCapitulos: totalCaps,
-  });
+  const { fundacao, runId } = await gerarFundacaoV2(depsF, { ...briefingFundacao, totalCapitulos: totalCaps });
   await materializarFundacao(depsF, fundacao, totalCaps);
   await atualizarProgresso(job.id, { fase: "FUNDACAO", etapa: "fundação materializada", fios: fundacao.fios, fundacao_run: runId });
+}
+
+/** Edição de tradução (existe e não é origem)? Traduções seguem o pipeline V1. */
+async function edicaoEhTraducao(editionId?: string | null): Promise<boolean> {
+  if (!editionId) return false;
+  const { sb, OWNER } = await import("../supabase.js");
+  const { data } = await sb.from("editions").select("is_origem").eq("owner", OWNER).eq("id", editionId).maybeSingle();
+  return data != null && (data as { is_origem?: boolean }).is_origem === false;
+}
+
+/**
+ * Registra uma decisão do autor no briefing (camada 3 do compilador) — usada
+ * pelos jobs revisar/refinar_fundacao para que a instrução sobreviva ao job e
+ * alcance TODO pacote futuro do projeto.
+ */
+export async function registrarDecisaoAutor(projectId: string, texto: string, origem: string): Promise<void> {
+  const { sb, OWNER } = await import("../supabase.js");
+  const { data, error } = await sb.from("projects").select("briefing").eq("owner", OWNER).eq("id", projectId).single();
+  if (error) throw new ErroEngine({ codigo: "PROJETO_AUSENTE", classe: "configuracao", mensagem: `registrarDecisaoAutor: ${error.message}` });
+  const briefing = ((data as { briefing?: Record<string, unknown> } | null)?.briefing ?? {}) as Record<string, unknown>;
+  const decisoes = Array.isArray(briefing.decisoes_autor) ? briefing.decisoes_autor : [];
+  const nova = { texto: texto.trim(), em: new Date().toISOString(), origem };
+  const { error: erroUpdate } = await sb
+    .from("projects")
+    .update({ briefing: { ...briefing, decisoes_autor: [...decisoes, nova] } })
+    .eq("owner", OWNER)
+    .eq("id", projectId);
+  if (erroUpdate) throw new ErroEngine({ codigo: "DECISAO_NAO_REGISTRADA", classe: "infra", mensagem: erroUpdate.message });
+}
+
+/**
+ * refinar_fundacao no pipeline V2: a instrução do autor vira decisão camada 3
+ * persistida E a fundação é regenerada com o briefing completo + instrução
+ * (sempre re-roda: refino é pedido explícito, não idempotência).
+ */
+export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
+  const { sb, OWNER } = await import("../supabase.js");
+  const { projDir, CLAUDE_BIN } = await import("../lib.js");
+  const projectId = job.project_id!;
+  const instrucoes = String((job.payload as { instrucoes?: string })?.instrucoes ?? "").trim();
+  if (!instrucoes) {
+    throw new ErroEngine({ codigo: "INSTRUCOES_AUSENTES", classe: "configuracao", mensagem: "refinar_fundacao V2 exige payload.instrucoes" });
+  }
+  await registrarDecisaoAutor(projectId, instrucoes, "refinar_fundacao");
+
+  const { data: proj, error } = await sb
+    .from("projects")
+    .select("id,titulo,skill_escrita,total_capitulos,idioma_origem,briefing")
+    .eq("owner", OWNER)
+    .eq("id", projectId)
+    .single();
+  if (error || !proj) {
+    throw new ErroEngine({ codigo: "PROJETO_AUSENTE", classe: "configuracao", mensagem: `projeto ${projectId} não encontrado: ${error?.message ?? ""}` });
+  }
+  const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
+  const contrato = carregarContrato(MAPA_SKILL_V1_V2[skillV1] ?? skillV1);
+  const release = exigirReleaseAtual(contrato.contrato.id, projectId);
+  const totalCaps = (proj as { total_capitulos?: number }).total_capitulos ?? 0;
+  if (!totalCaps || totalCaps < 1) {
+    throw new ErroEngine({ codigo: "TOTAL_CAPITULOS_INDEFINIDO", classe: "configuracao", mensagem: "refinar_fundacao V2 exige total_capitulos definido no projeto" });
+  }
+  const dirProjeto = projDir(projectId);
+  const { persistencia } = await criarPersistencia({ dirProjeto });
+  const gravador = new Gravador({ persistencia, projectId });
+  const briefingFundacao = briefingParaFundacao(proj as Parameters<typeof briefingParaFundacao>[0]);
+  const detalhes = [briefingFundacao.detalhes, `- Instruções de refino do autor: ${instrucoes}`].filter(Boolean).join("\n");
+
+  const depsF = {
+    gravador,
+    persistencia,
+    provedor: new ProvedorClaudeCli(CLAUDE_BIN, dirProjeto),
+    mapa: mapaModelosDoAmbiente(),
+    contrato,
+    dirProjeto,
+    jobId: job.id,
+  };
+  await atualizarProgresso(job.id, {
+    engine: "v2",
+    fase: "REFINAR_FUNDACAO",
+    skill: contrato.contrato.id,
+    release_commit: release.codigo_commit,
+  });
+  const { fundacao, runId } = await gerarFundacaoV2(depsF, { ...briefingFundacao, detalhes, totalCapitulos: totalCaps });
+  await materializarFundacao(depsF, fundacao, totalCaps);
+  await atualizarProgresso(job.id, { fase: "REFINAR_FUNDACAO", etapa: "fundação refinada e materializada", fundacao_run: runId });
+}
+
+/**
+ * revisar no pipeline V2 (edição de origem): a instrução do autor vira decisão
+ * camada 3 persistida e a meta-nota re-roda sobre o manuscrito aprovado —
+ * avaliação, reescrita dirigida e ressincronização de chapters, caminho único.
+ */
+export async function executarRevisarV2(job: Job): Promise<void> {
+  const projectId = job.project_id!;
+  const instrucoes = String((job.payload as { instrucoes?: string })?.instrucoes ?? "").trim();
+  if (instrucoes) await registrarDecisaoAutor(projectId, instrucoes, "revisar");
+
+  const { proj, contrato, release, dirProjeto, persistencia, gravador, estado, deps, docsFactuais } =
+    await prepararProjetoV2(job);
+  if (instrucoes) {
+    // O registro acima é lido nas PRÓXIMAS execuções; nesta, injeta em memória.
+    deps.instrucoesAutor = [
+      ...(deps.instrucoesAutor ?? []),
+      { texto: instrucoes, camada: "decisao_autor" as const, fonte: "autor:revisar" },
+    ];
+  }
+  const fase = estado.doc.fase;
+  if (!["revisao_final", "consolidacao", "avaliacao", "concluido"].includes(fase)) {
+    throw new ErroEngine({
+      codigo: "REVISAO_SEM_LIVRO",
+      classe: "configuracao",
+      mensagem: `revisar V2 exige livro com capítulos aprovados (fase atual: ${fase}) — conclua a escrita antes`,
+    });
+  }
+  await atualizarProgresso(job.id, {
+    engine: "v2",
+    fase: "REVISAO",
+    skill: contrato.contrato.id,
+    release_commit: release.codigo_commit,
+  });
+  await executarMeta9Integrada(job, {
+    gravador, persistencia, deps, contrato, dirProjeto, projectId, docsFactuais,
+    metaProjeto: (proj as { meta_nota?: number | null }).meta_nota,
+  });
 }
 
 /**
@@ -766,7 +1000,7 @@ export async function executarCanarioVoz(job: Job): Promise<void> {
   }
   const { data: proj, error } = await sb
     .from("projects")
-    .select("id,titulo,skill_escrita,briefing")
+    .select("id,titulo,skill_escrita,idioma_origem,briefing")
     .eq("owner", OWNER)
     .eq("id", projectId)
     .single();
@@ -775,6 +1009,7 @@ export async function executarCanarioVoz(job: Job): Promise<void> {
   }
 
   const payloadCanario = job.payload as { skill_escrita?: string; ajuste_autor?: string };
+  const idiomaCanario = resolverIdioma(proj as { idioma_origem?: string | null; briefing?: BriefingAutor });
   const skillV1 = payloadCanario?.skill_escrita
     ?? (proj as { skill_escrita?: string }).skill_escrita
     ?? "";
@@ -818,7 +1053,7 @@ export async function executarCanarioVoz(job: Job): Promise<void> {
     papel: "escritor",
     alvo: "canario-voz",
     pacote: comp.pacote!,
-    tarefa: tarefaCanarioVoz(ideia, contrato.contrato, payloadCanario.ajuste_autor),
+    tarefa: tarefaCanarioVoz(ideia, contrato.contrato, payloadCanario.ajuste_autor, idiomaCanario),
     parse: (t) => {
       const limpo = t.trim();
       if (!limpo) throw new Error("cena vazia");

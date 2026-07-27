@@ -31,7 +31,7 @@ const TRANSICOES_VALIDAS: Record<Fase, Fase[]> = {
   revisao_final: ["consolidacao", "concluido", "escrita", "bloqueado"],
   consolidacao: ["avaliacao", "bloqueado"],
   avaliacao: ["concluido", "escrita", "bloqueado"],
-  concluido: ["bloqueado"],
+  concluido: ["avaliacao", "bloqueado"], // avaliacao: revisão pós-conclusão pedida pelo autor (job revisar)
   bloqueado: ["fundacao", "estrutura", "escrita", "revisao_final", "consolidacao", "avaliacao", "concluido"],
 };
 

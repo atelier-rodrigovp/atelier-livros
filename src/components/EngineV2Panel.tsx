@@ -2,6 +2,7 @@
 // pareceres estruturados (engine_reviews) e execuções (engine_runs).
 // Honestidade: migração pendente mostra banner âmbar; nunca inventa dados.
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { AlertTriangle, History, Loader2, RotateCw, ShieldCheck } from "lucide-react";
 import {
   avaliacaoMetaComprovada,
@@ -17,6 +18,7 @@ import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -133,6 +135,102 @@ function runStatusBadge(status: string): { label: string; variant: BadgeVariant 
   if (status === "falha") return { label: "falha", variant: "destructive" };
   if (status === "running") return { label: "executando", variant: "secondary" };
   return { label: status, variant: "outline" };
+}
+
+/**
+ * Direção do autor a qualquer momento: observações viram decisões (camada 3 do
+ * compilador — vencem o perfil) e preferências viram camada 7 (a mais fraca).
+ * Gravadas em projects.briefing; o worker as injeta no pacote do próximo capítulo.
+ */
+function DirecaoAutorCard({ projectId }: { projectId: string }) {
+  const [texto, setTexto] = useState("");
+  const [tipo, setTipo] = useState<"decisao" | "preferencia">("decisao");
+  const [salvando, setSalvando] = useState(false);
+  const [registros, setRegistros] = useState<{ texto: string; em?: string; tipo: string }[]>([]);
+
+  const carregarRegistros = useCallback(async () => {
+    const { data } = await supabase.from("projects").select("briefing").eq("id", projectId).single();
+    const b = (data?.briefing ?? {}) as { decisoes_autor?: { texto?: string; em?: string }[]; preferencias?: { texto?: string; em?: string }[] };
+    setRegistros([
+      ...(b.decisoes_autor ?? []).map((d) => ({ texto: d.texto ?? "", em: d.em, tipo: "decisão" })),
+      ...(b.preferencias ?? []).map((p) => ({ texto: p.texto ?? "", em: p.em, tipo: "preferência" })),
+    ].filter((r) => r.texto).sort((a, b2) => (b2.em ?? "").localeCompare(a.em ?? "")));
+  }, [projectId]);
+
+  useEffect(() => { carregarRegistros(); }, [carregarRegistros]);
+
+  async function salvar() {
+    const t = texto.trim();
+    if (!t) return;
+    setSalvando(true);
+    try {
+      const { data, error } = await supabase.from("projects").select("briefing").eq("id", projectId).single();
+      if (error) throw error;
+      const b = (data?.briefing ?? {}) as Record<string, unknown>;
+      const chave = tipo === "decisao" ? "decisoes_autor" : "preferencias";
+      const lista = Array.isArray(b[chave]) ? (b[chave] as unknown[]) : [];
+      const { error: e2 } = await supabase
+        .from("projects")
+        .update({ briefing: { ...b, [chave]: [...lista, { texto: t, em: new Date().toISOString(), origem: "painel" }] } })
+        .eq("id", projectId);
+      if (e2) throw e2;
+      setTexto("");
+      await carregarRegistros();
+      toast.success(tipo === "decisao"
+        ? "Decisão registrada — entra como instrução (camada 3) no próximo capítulo."
+        : "Preferência registrada — entra como camada 7 no próximo capítulo.");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-xl">Direção do autor</CardTitle>
+        <CardDescription>
+          Observações chegam à engine no próximo capítulo: decisões vencem o perfil da obra (camada 3);
+          preferências são orientações não obrigatórias (camada 7).
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex gap-2">
+          <Button size="sm" variant={tipo === "decisao" ? "default" : "outline"} onClick={() => setTipo("decisao")}>
+            Decisão (obrigatória)
+          </Button>
+          <Button size="sm" variant={tipo === "preferencia" ? "default" : "outline"} onClick={() => setTipo("preferencia")}>
+            Preferência
+          </Button>
+        </div>
+        <Textarea
+          rows={3}
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          placeholder={tipo === "decisao"
+            ? "Ex.: O irmão da protagonista está vivo — nunca sugerir o contrário."
+            : "Ex.: Prefiro capítulos que abrem em movimento."}
+        />
+        <div className="flex justify-end">
+          <Button size="sm" disabled={salvando || !texto.trim()} onClick={salvar}>
+            {salvando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} Registrar
+          </Button>
+        </div>
+        {!!registros.length && (
+          <ul className="space-y-1.5">
+            {registros.slice(0, 8).map((r, i) => (
+              <li key={`${r.em}-${i}`} className="rounded-md border p-2 text-xs">
+                <Badge variant={r.tipo === "decisão" ? "default" : "outline"}>{r.tipo}</Badge>
+                <span className="ml-2">{r.texto}</span>
+                {r.em && <span className="ml-2 text-muted-foreground">({fmtData(r.em)})</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function ParecerCapitulo({ review }: { review: ReviewV2 }) {
@@ -540,6 +638,8 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
           </details>
         </CardContent>
       </Card>
+
+      <DirecaoAutorCard projectId={projectId} />
 
       {!!doc.reversoes_meta?.length && (
         <Card className="border-emerald-600/30">

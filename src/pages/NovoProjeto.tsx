@@ -52,6 +52,16 @@ const RELACAO_SIMPLES: Record<string, string> = {
 };
 
 // Skill do contrato V2 → skill_escrita da V1 (é essa que o worker resolve em ~/.claude/skills/).
+// Idiomas de escrita suportados (projects.idioma_origem — a engine escreve neste idioma).
+const IDIOMAS_LIVRO = [
+  { codigo: "pt-BR", rotulo: "Português (Brasil)" },
+  { codigo: "en", rotulo: "Inglês" },
+  { codigo: "es-ES", rotulo: "Espanhol (Espanha)" },
+  { codigo: "it-IT", rotulo: "Italiano" },
+  { codigo: "de-DE", rotulo: "Alemão" },
+  { codigo: "fr-FR", rotulo: "Francês (França)" },
+];
+
 const SKILL_V1_MAP: Record<string, string> = {
   "dan-brown": "skill-dan-brown",
   "hoover-mcfadden": "hoover-mcfadden",
@@ -401,6 +411,7 @@ export default function NovoProjeto() {
 
   // Engine V2: escolha de engine/skill/capítulos/decisões, feita na fase "ideia".
   const [engineEscolhida, setEngineEscolhida] = useState<"v2" | "v1">("v2");
+  const [idiomaLivro, setIdiomaLivro] = useState("pt-BR");
   const [skillEscolhida, setSkillEscolhida] = useState<string | null>(null);
   const [totalCapitulos, setTotalCapitulos] = useState(40);
   const [decisoesAutor, setDecisoesAutor] = useState<string[]>([]);
@@ -749,6 +760,15 @@ export default function NovoProjeto() {
               ...(Array.isArray(b.canario_voz_historico) ? b.canario_voz_historico : []),
               registro,
             ],
+            // O ajuste pedido é decisão autoral de verdade (camada 3) — como a tela promete.
+            ...(decisao === "ajustar" && ajusteCanario.trim()
+              ? {
+                  decisoes_autor: [
+                    ...(Array.isArray(b.decisoes_autor) ? b.decisoes_autor : []),
+                    { texto: ajusteCanario.trim(), em: new Date().toISOString(), origem: "canario_voz" },
+                  ],
+                }
+              : {}),
           },
         })
         .eq("id", projectId);
@@ -799,18 +819,19 @@ export default function NovoProjeto() {
     const insertPayload: Record<string, unknown> = {
       titulo: tituloFinal,
       status: "rascunho",
+      // Idioma é dado de primeira classe: a engine lê projects.idioma_origem.
+      idioma_origem: idiomaLivro,
       briefing:
         engineEscolhida === "v2"
           ? {
               ideia_central: ideia.trim(),
-              idea: ideia.trim(),
               qa: [],
               decisoes_autor: decisoesAutor.map((texto) => ({
                 texto,
                 em: new Date().toISOString(),
               })),
             }
-          : { ideia_central: ideia.trim(), idea: ideia.trim(), qa: [] },
+          : { ideia_central: ideia.trim(), qa: [] },
     };
     if (engineEscolhida === "v2" && contratoSel) {
       insertPayload.engine_mode = "v2";
@@ -930,6 +951,23 @@ export default function NovoProjeto() {
                   autoFocus
                   placeholder="Ex.: Numa vila costeira, a faroleira descobre que a luz do farol esconde um código que prevê naufrágios — e alguém quer apagá-la."
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="idioma">Idioma do livro</Label>
+                <select
+                  id="idioma"
+                  className="flex h-10 w-full max-w-[16rem] rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  value={idiomaLivro}
+                  onChange={(e) => setIdiomaLivro(e.target.value)}
+                >
+                  {IDIOMAS_LIVRO.map((i) => (
+                    <option key={i.codigo} value={i.codigo}>{i.rotulo}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  A amostra de voz, a fundação e todos os capítulos saem neste idioma.
+                </p>
               </div>
 
               <div className="space-y-2">

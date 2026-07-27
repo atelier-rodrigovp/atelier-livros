@@ -469,6 +469,12 @@ export default function Projeto() {
           <p className="mt-1 text-muted-foreground">
             {proj.genero ?? "—"} · {proj.idioma_origem}
             {proj.serie ? ` · ${proj.serie}${proj.volume ? ` (vol. ${proj.volume})` : ""}` : ""}
+            {" · "}
+            <span title={proj.engine_mode === "v2"
+              ? "Engine V2: papéis fixos, fichas de cena, gates e estado canônico auditável."
+              : "Engine V1: livro_runner.py orquestra escritor/revisor/editor."}>
+              {proj.engine_mode === "v2" ? "Engine V2" : "Engine V1"}
+            </span>
           </p>
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm">
             <span className="text-muted-foreground">Autor:</span>
@@ -868,19 +874,21 @@ export default function Projeto() {
                         <Switch checked={(proj.briefing as any)?.producao_pausada !== true} onCheckedChange={(on) => atualizarBriefing({ producao_pausada: !on })} aria-label="Produção deste projeto" />
                       </div>
                     </div>
-                    <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed p-2.5">
-                      <div className="space-y-0.5 pr-3">
-                        <p className="text-xs font-medium">
-                          Time por capítulo {semRevisao ? "(desligado)" : "— escritor → revisor → editor"}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {semRevisao
-                            ? "Mais barato (só escritor). O revisor/editor por capítulo está desligado para este livro."
-                            : "Padrão: cada capítulo é revisado e editado antes de ser aceito (corta muleta/maneirismo, checa continuidade e voz). Mais caro no Max — desligue para baratear."}
-                        </p>
+                    {proj.engine_mode !== "v2" && (
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed p-2.5">
+                        <div className="space-y-0.5 pr-3">
+                          <p className="text-xs font-medium">
+                            Time por capítulo {semRevisao ? "(desligado)" : "— escritor → revisor → editor"}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {semRevisao
+                              ? "Mais barato (só escritor). O revisor/editor por capítulo está desligado para este livro."
+                              : "Padrão: cada capítulo é revisado e editado antes de ser aceito (corta muleta/maneirismo, checa continuidade e voz). Mais caro no Max — desligue para baratear."}
+                          </p>
+                        </div>
+                        <Switch checked={!semRevisao} onCheckedChange={(on) => alternarRevisaoCap(!on)} aria-label="Time por capítulo" />
                       </div>
-                      <Switch checked={!semRevisao} onCheckedChange={(on) => alternarRevisaoCap(!on)} aria-label="Time por capítulo" />
-                    </div>
+                    )}
                     {completo && (
                       <p className="text-xs">
                         <span className="text-muted-foreground">Meta {meta}</span>
@@ -892,9 +900,11 @@ export default function Projeto() {
                       </p>
                     )}
                     <p className="text-xs text-muted-foreground">
-                      {feitos > 0
-                        ? "Continua de onde parou: lê os capítulos já escritos no disco e segue do próximo — não descarta nem reescreve o que já existe. Roda o Opus capítulo a capítulo até a meta de nota."
-                        : "Roda o livro_runner.py (Opus) capítulo a capítulo até a meta de nota, com verdade do disco."}
+                      {proj.engine_mode === "v2"
+                        ? "Roda a Engine V2: ficha de cena → escritor → revisor → auditor por capítulo, com gates, estado canônico auditável e retomada — capítulo aprovado nunca é reescrito sem decisão sua."
+                        : feitos > 0
+                          ? "Continua de onde parou: lê os capítulos já escritos no disco e segue do próximo — não descarta nem reescreve o que já existe. Roda o Opus capítulo a capítulo até a meta de nota."
+                          : "Roda o livro_runner.py (Opus) capítulo a capítulo até a meta de nota, com verdade do disco."}
                     </p>
                   </div>
                 );
@@ -1292,10 +1302,13 @@ export default function Projeto() {
               <Label>Autor</Label>
               <Input value={ed.autor ?? ""} onChange={(e) => setEd((s) => ({ ...s, autor: e.target.value }))} />
             </div>
-            <div className="space-y-2">
-              <Label>Gênero</Label>
-              <Input value={ed.genero ?? ""} onChange={(e) => setEd((s) => ({ ...s, genero: e.target.value }))} />
-            </div>
+            {/* Campos sem leitor na V2 ficam fora da tela em projetos V2 (família/faixa vêm do contrato da skill). */}
+            {proj.engine_mode !== "v2" && (
+              <div className="space-y-2">
+                <Label>Gênero</Label>
+                <Input value={ed.genero ?? ""} onChange={(e) => setEd((s) => ({ ...s, genero: e.target.value }))} />
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Série (vazio = livro único)</Label>
               <Input value={ed.serie ?? ""} onChange={(e) => setEd((s) => ({ ...s, serie: e.target.value }))} />
@@ -1324,14 +1337,18 @@ export default function Projeto() {
               <Label>Capítulos</Label>
               <Input type="number" value={ed.total_capitulos ?? ""} onChange={(e) => setEd((s) => ({ ...s, total_capitulos: e.target.value }))} />
             </div>
-            <div className="space-y-2">
-              <Label>Páginas-alvo</Label>
-              <Input type="number" value={ed.paginas_alvo ?? ""} onChange={(e) => setEd((s) => ({ ...s, paginas_alvo: e.target.value }))} />
-            </div>
-            <div className="space-y-2">
-              <Label>Piso de palavras/cap.</Label>
-              <Input type="number" value={ed.piso_palavras ?? ""} onChange={(e) => setEd((s) => ({ ...s, piso_palavras: e.target.value }))} />
-            </div>
+            {proj.engine_mode !== "v2" && (
+              <div className="space-y-2">
+                <Label>Páginas-alvo</Label>
+                <Input type="number" value={ed.paginas_alvo ?? ""} onChange={(e) => setEd((s) => ({ ...s, paginas_alvo: e.target.value }))} />
+              </div>
+            )}
+            {proj.engine_mode !== "v2" && (
+              <div className="space-y-2">
+                <Label>Piso de palavras/cap.</Label>
+                <Input type="number" value={ed.piso_palavras ?? ""} onChange={(e) => setEd((s) => ({ ...s, piso_palavras: e.target.value }))} />
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Meta de nota</Label>
               <Input type="number" step="0.1" value={ed.meta_nota ?? ""} onChange={(e) => setEd((s) => ({ ...s, meta_nota: e.target.value }))} />

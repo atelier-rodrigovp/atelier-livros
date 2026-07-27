@@ -37,6 +37,11 @@ export interface DepsMeta9 {
   meta?: number;
   maxIteracoes?: number;
   docsFactuais?: SecaoContexto[];
+  /** Contexto do autor/obra repassado às reescritas (mesmas camadas do pipeline). */
+  instrucoesAutor?: DepsPipeline["instrucoesAutor"];
+  preferencias?: DepsPipeline["preferencias"];
+  idioma?: string;
+  fundacao?: DepsPipeline["fundacao"];
   /** Callback opcional para o worker refletir a etapa no progresso do job (não usado nos testes). */
   reportarEtapa?: (etapa: string, dados?: Record<string, unknown>) => Promise<void>;
 }
@@ -527,6 +532,10 @@ function depsPipelineDe(deps: DepsMeta9): DepsPipeline {
     editionId: deps.editionId ?? null,
     jobId: deps.jobId ?? null,
     docsFactuais: deps.docsFactuais,
+    instrucoesAutor: deps.instrucoesAutor,
+    preferencias: deps.preferencias,
+    idioma: deps.idioma,
+    fundacao: deps.fundacao,
   };
 }
 

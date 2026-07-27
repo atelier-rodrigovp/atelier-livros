@@ -2,6 +2,7 @@
 // Genéricos por PAPEL, nunca por skill: tudo que é específico da skill chega pelo
 // pacote compilado (contrato → instruções; perfil/ficha/fatos → seções).
 
+import { nomeIdioma, type BriefingFundacao } from "./briefing.js";
 import type { SceneSpec, SkillContract } from "./tipos.js";
 
 /** Arquiteto de cena: produz a ficha estruturada (scene-spec/v1) — SEM prosa. */
@@ -30,10 +31,10 @@ export function tarefaContextualizador(capitulo: number): string {
 }
 
 /** Escritor: o ÚNICO papel autorizado a produzir prosa. */
-export function tarefaEscritor(ficha: SceneSpec, contrato: SkillContract): string {
+export function tarefaEscritor(ficha: SceneSpec, contrato: SkillContract, idioma = "pt-BR"): string {
   const faixa = contrato.faixa_palavras;
   return [
-    `Escreva o capítulo ${ficha.capitulo} em prosa final, em português brasileiro, seguindo a FICHA DA CENA e as instruções do pacote.`,
+    `Escreva o capítulo ${ficha.capitulo} em prosa final, em ${nomeIdioma(idioma)}, seguindo a FICHA DA CENA e as instruções do pacote.`,
     `Extensão: ${faixa.min ?? "?"}–${faixa.max ?? "?"} palavras${faixa.alvo ? ` (alvo ${faixa.alvo})` : ""}.`,
     `A cena deve cumprir: objetivo, obstáculo, ação física principal, informação nova, virada, mudança de estado e gancho final do tipo "${ficha.gancho.tipo}".`,
     `Não mencione a ficha, o pacote ou o processo. Não use títulos além de "## Capítulo ${ficha.capitulo}" na primeira linha.`,
@@ -75,9 +76,9 @@ export function tarefaEscritorCorrecao(
 }
 
 /** Canário de voz (wizard): UMA cena curta de amostra da voz do contrato, pré-fundação. */
-export function tarefaCanarioVoz(ideia: string, contrato: SkillContract, ajusteAutor?: string): string {
+export function tarefaCanarioVoz(ideia: string, contrato: SkillContract, ajusteAutor?: string, idioma = "pt-BR"): string {
   return [
-    `Escreva UMA cena curta de amostra (300–500 palavras), em português brasileiro, demonstrando a VOZ desta skill para a ideia do autor.`,
+    `Escreva UMA cena curta de amostra (300–500 palavras), em ${nomeIdioma(idioma)}, demonstrando a VOZ desta skill para a ideia do autor.`,
     `Ideia do autor: ${ideia}`,
     ajusteAutor?.trim() ? `Ajuste solicitado pelo autor após ler a amostra anterior: ${ajusteAutor.trim()}` : "",
     `A cena deve ter: um objetivo concreto, um obstáculo, uma virada e um gancho final (tipo permitido: ${contrato.tipos_gancho.join(", ")}).`,
@@ -150,16 +151,19 @@ export function tarefaSinteseArco(totalBlocos: number): string {
   ].join("\n");
 }
 
-/** Arquiteto de enredo: fundação mínima (perfil de voz + estrutura), sem semear ornamento. */
-export function tarefaArquitetoEnredo(briefing: { titulo: string; premissa: string; totalCapitulos: number }, contrato: SkillContract): string {
+/** Arquiteto de enredo: fundação (bíblia + mapa de personagens + perfil + estrutura), sem semear ornamento. */
+export function tarefaArquitetoEnredo(briefing: BriefingFundacao, contrato: SkillContract): string {
   return [
-    `Monte a fundação mínima do livro "${briefing.titulo}" (${briefing.totalCapitulos} capítulos) para a skill do pacote.`,
+    `Monte a fundação do livro "${briefing.titulo}" (${briefing.totalCapitulos} capítulos, escrito em ${nomeIdioma(briefing.idioma)}) para a skill do pacote.`,
     `Premissa do autor: ${briefing.premissa}`,
-    `Responda APENAS JSON: { "perfil_voz": string, "estrutura": [{"capitulo": number, "fio": string, "resumo_estrutural": string}], "fios": [string], "promessa_editorial": string }.`,
+    briefing.detalhes ? `BRIEFING COMPLETO DO AUTOR (decisões vinculantes — a fundação as respeita, nunca as substitui):\n${briefing.detalhes}` : "",
+    `Responda APENAS JSON: { "perfil_voz": string, "biblia": string, "mapa_personagens": [{"nome": string, "papel": string, "ferida": string, "segredo": string, "desejo": string, "voz": string, "arco": string}], "estrutura": [{"capitulo": number, "fio": string, "resumo_estrutural": string}], "fios": [string], "promessa_editorial": string }.`,
     `- "perfil_voz": descrição de voz em markdown curto (≤300 palavras) coerente com o contrato (${contrato.familia_editorial}; ${contrato.acao_interioridade.relacao}). PROIBIDO incluir parágrafos-modelo, aforismos ou frases de exemplo — a fundação não semeia ornamento (o perfil descreve, não demonstra).`,
+    `- "biblia": bíblia da obra em markdown (≤1200 palavras): mundo/ambientação, cânone factual, linha do tempo, final planejado e proibições do autor. Fatos secos e decisões — sem prosa de cena, sem diálogo, sem parágrafo-modelo.`,
+    `- "mapa_personagens": um item por personagem relevante (protagonistas, antagonistas, apoio com função na trama); cada campo ≤25 palavras; "voz" descreve o registro de fala, nunca cita falas prontas.`,
     `- "estrutura": um item por capítulo; "resumo_estrutural" aponta objetivo/virada em ≤25 palavras, sem prosa.`,
     `- "fios": nomes dos fios narrativos${contrato.pov.rotacao ? ` (entre ${contrato.pov.rotacao.fios_min} e ${contrato.pov.rotacao.fios_max})` : ""}.`,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 /** Editor estrutural: PROPÕE corte/fusão/reordenação — nunca escreve prosa. */

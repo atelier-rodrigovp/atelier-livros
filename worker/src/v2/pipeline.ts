@@ -49,9 +49,19 @@ export interface DepsPipeline {
   jobId?: string | null;
   fundacaoEsperada?: Record<string, string>;
   instrucoesAutor?: Instrucao[];
+  /** Preferências não obrigatórias do autor — camada 7 do compilador. */
+  preferencias?: Instrucao[];
+  /** Idioma da obra (projects.idioma_origem); a prosa sai neste idioma. */
+  idioma?: string;
   maxCorrecoes?: number; // default 2 — tentativas de correção dirigida por capítulo
   /** Docs factuais do projeto (ex.: dossie-factual.md) — entram no pacote do revisor e do auditor. */
   docsFactuais?: SecaoContexto[];
+  /** Fundação da obra (bíblia/mapa/estrutura) — seções camada 6 por papel. */
+  fundacao?: {
+    biblia?: string;
+    mapaPersonagens?: string;
+    estrutura?: { capitulo: number; fio: string; resumo_estrutural: string }[];
+  };
 }
 
 export interface ResultadoCapitulo {
@@ -232,9 +242,38 @@ export async function escreverCapitulo(
       contrato: deps.contrato,
       perfil: deps.perfil,
       instrucoesAutor: deps.instrucoesAutor,
+      preferencias: deps.preferencias,
       fundacaoEsperada: deps.fundacaoEsperada,
       ...extras,
     });
+
+  // Seções da fundação (camada 6) por papel: bíblia+mapa+estrutura orientam quem
+  // planeja e quem julga; o escritor recebe o mapa e SÓ o item estrutural do
+  // capítulo (a bíblia chega a ele destilada pelo contextualizador — anti-inchaço).
+  const fundacao = deps.fundacao;
+  const secBiblia: SecaoContexto[] = fundacao?.biblia?.trim()
+    ? [{ titulo: "BÍBLIA DA OBRA", texto: fundacao.biblia, fonte: "fundacao/biblia-da-obra.md" }]
+    : [];
+  const secMapa: SecaoContexto[] = fundacao?.mapaPersonagens?.trim()
+    ? [{ titulo: "MAPA DE PERSONAGENS", texto: fundacao.mapaPersonagens, fonte: "fundacao/mapa-personagens.json" }]
+    : [];
+  const secEstruturaLivro: SecaoContexto[] = fundacao?.estrutura?.length
+    ? [{
+        titulo: "ESTRUTURA DO LIVRO (resumos estruturais)",
+        texto: fundacao.estrutura.map((e) => `- Cap ${e.capitulo} [${e.fio}]: ${e.resumo_estrutural}`).join("\n"),
+        fonte: "estrutura.json",
+      }]
+    : [];
+  const itemEstrutural = fundacao?.estrutura?.find((e) => e.capitulo === capitulo);
+  const secEstruturaCap: SecaoContexto[] = itemEstrutural
+    ? [{
+        titulo: `ESTRUTURA DO CAPÍTULO ${capitulo}`,
+        texto: `Fio: ${itemEstrutural.fio}. ${itemEstrutural.resumo_estrutural}`,
+        fonte: "estrutura.json",
+      }]
+    : [];
+  const secoesPlanejamento = [...secBiblia, ...secMapa, ...secEstruturaLivro];
+  const secoesJulgamento = [...secBiblia, ...secMapa];
 
   /** Compilação bloqueada em qualquer etapa → bloqueio registrado + status "bloqueado". */
   const bloquearPorCompilacao = async (
@@ -266,7 +305,7 @@ export async function escreverCapitulo(
     ficha = opts.fichaExistente;
   } else {
     specVersao = versaoConhecida + 1;
-    const comp = compilar("arquiteto_cena", `spec:${capitulo}`);
+    const comp = compilar("arquiteto_cena", `spec:${capitulo}`, { fatos: secoesPlanejamento });
     if (!comp.ok) return bloquearPorCompilacao(comp.bloqueios);
     const r = await executarPapel<SceneSpec>({
       ...base,
@@ -307,7 +346,7 @@ export async function escreverCapitulo(
   // -------------------------------------------------------------------------
   // 2. CONTEXTO (contextualizador) — fatos e continuidade, nunca prosa
   // -------------------------------------------------------------------------
-  const compCtx = compilar("contextualizador", alvoCap, { ficha });
+  const compCtx = compilar("contextualizador", alvoCap, { ficha, fatos: secoesPlanejamento });
   if (!compCtx.ok) return bloquearPorCompilacao(compCtx.bloqueios);
   const rCtx = await executarPapel<SaidaContextualizador>({
     ...base,
@@ -342,7 +381,7 @@ export async function escreverCapitulo(
   // -------------------------------------------------------------------------
   const compEsc = compilar("escritor", alvoCap, {
     ficha,
-    fatos,
+    fatos: [...secMapa, ...secEstruturaCap, ...fatos],
     trechosAnteriores: opts?.trechosAnteriores,
     repeticoesRecentes,
   });
@@ -360,7 +399,7 @@ export async function escreverCapitulo(
       papel: "escritor",
       alvo: alvoCap,
       pacote: pacoteEscritor,
-      tarefa: tarefaEscritor(ficha, deps.contrato.contrato),
+      tarefa: tarefaEscritor(ficha, deps.contrato.contrato, deps.idioma),
       parse: parseProsa,
     });
     runs.push(rEsc.runId);
@@ -452,7 +491,7 @@ export async function escreverCapitulo(
 
     const compRev = compilar("revisor_literario", alvoCap, {
       ficha,
-      fatos: [...docsFactuais, ...fatos, secaoTexto],
+      fatos: [...secoesJulgamento, ...docsFactuais, ...fatos, secaoTexto],
       repeticoesRecentes,
     });
     if (!compRev.ok) return bloquearPorCompilacao(compRev.bloqueios);
@@ -473,7 +512,7 @@ export async function escreverCapitulo(
     let verdictEfetivo = conferencia.verdictEfetivo;
 
     // 6. Auditoria factual — contradição comprovada é GATE universal
-    const compAud = compilar("auditor_factual", alvoCap, { ficha, fatos: [...docsFactuais, ...fatos, secaoTexto] });
+    const compAud = compilar("auditor_factual", alvoCap, { ficha, fatos: [...secoesJulgamento, ...docsFactuais, ...fatos, secaoTexto] });
     if (!compAud.ok) return bloquearPorCompilacao(compAud.bloqueios);
     const rAud = await executarPapel<SaidaAuditor>({
       ...base,
