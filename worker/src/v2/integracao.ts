@@ -43,7 +43,7 @@ import { fundirFichas, PersistenciaEstadoIsolado } from "./estrutural-staging.js
 import { executarMeta9 } from "./meta9.js";
 import { resolverTotalCapitulos } from "./total-capitulos.js";
 import { medirSinais, resumoSinais } from "./sinais.js";
-import { exigirReleaseAtual } from "./release.js";
+import { exigirReleaseAtual, lerAutorizacaoProjeto } from "./release.js";
 import { conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
 import {
   ErroEngine,
@@ -294,7 +294,7 @@ async function prepararProjetoV2(job: Job): Promise<{
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const skillId = MAPA_SKILL_V1_V2[skillV1] ?? skillV1;
   const contrato = carregarContrato(skillId); // skill desconhecida/contrato inválido = falha clara AQUI, antes do escritor
-  const release = exigirReleaseAtual(contrato.contrato.id, projectId);
+  const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId));
 
   const dirProjeto = projDir(projectId);
   const { persistencia, migracaoPendente } = await criarPersistencia({ dirProjeto });
@@ -935,7 +935,7 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
   }
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const contrato = carregarContrato(MAPA_SKILL_V1_V2[skillV1] ?? skillV1);
-  const release = exigirReleaseAtual(contrato.contrato.id, projectId);
+  const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId));
   const dirProjeto = projDir(projectId);
   await fs.mkdir(dirProjeto, { recursive: true }); // cwd do CLI precisa existir antes do provedor
   const { persistencia } = await criarPersistencia({ dirProjeto });
@@ -1047,7 +1047,7 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
   }
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const contrato = carregarContrato(MAPA_SKILL_V1_V2[skillV1] ?? skillV1);
-  const release = exigirReleaseAtual(contrato.contrato.id, projectId);
+  const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId));
   const totalCaps = (proj as { total_capitulos?: number }).total_capitulos ?? 0;
   if (!totalCaps || totalCaps < 1) {
     throw new ErroEngine({ codigo: "TOTAL_CAPITULOS_INDEFINIDO", classe: "configuracao", mensagem: "refinar_fundacao V2 exige total_capitulos definido no projeto" });

@@ -1,37 +1,71 @@
-// Allowlist de canário: destrava exigirReleaseAtual() APENAS para os três
-// projetos canário. Qualquer outro projeto (inclusive obra real com
-// engine_mode='v2') continua fail-closed sem certificado em worker/release/.
+// Fatia M — certificado e autorização são garantias SEPARADAS.
+//
+// Antes: a lista de projetos liberados era um Set de UUIDs hardcoded em
+// release.ts — o autor não conseguia rodar um livro seu sem editar o fonte.
+// Agora a autorização é dado (engine_autorizacoes_v2) e entra aqui já lida, o
+// que mantém a decisão pura e testável.
 import { describe, expect, it } from "vitest";
-import { exigirReleaseAtual, PROJETOS_CANARIO_V2 } from "./release.js";
+import { exigirReleaseAtual, type AutorizacaoProjetoV2 } from "./release.js";
 
-const CANARIO_DAN_BROWN = "8b11072c-097d-4964-8f89-abecb96eb16c";
-const CANARIO_HOOVER = "aa8af83f-b2a1-41e0-ac0b-e46e620ee5c7";
-const CANARIO_ROMANTASY = "5f59a08b-5947-46ab-9547-76bd31e74e5f";
-// Canário da prova ponta-a-ponta interface→Leitor (2026-07-27).
-const CANARIO_PROVA_INTERFACE = "5ac9d614-1d1c-4fbd-8376-a731d1945ac6";
-// Obra REAL fora de escopo por decisão do autor — nunca pode entrar na allowlist.
+const PROJETO = "8b11072c-097d-4964-8f89-abecb96eb16c";
+// Obra REAL fora de escopo por decisão do autor — nunca autorizada aqui.
 const OBRA_REAL_FORA_DE_ESCOPO = "53abdade-554d-47e2-bd14-955de3ffc41e";
 
-describe("allowlist de canário V2", () => {
-  it("contém exatamente os quatro canários e NÃO contém a obra real", () => {
-    expect([...PROJETOS_CANARIO_V2].sort()).toEqual(
-      [CANARIO_DAN_BROWN, CANARIO_HOOVER, CANARIO_ROMANTASY, CANARIO_PROVA_INTERFACE].sort()
-    );
-    expect(PROJETOS_CANARIO_V2.has(OBRA_REAL_FORA_DE_ESCOPO)).toBe(false);
+const autorizacao = (modo: "producao" | "canario", projectId = PROJETO): AutorizacaoProjetoV2 => ({
+  project_id: projectId,
+  modo,
+  autorizado_por: "rodrigo",
+  motivo: "prova",
+});
+
+describe("autorização de projeto (V2)", () => {
+  it("SEM certificado e SEM autorização: não executa", () => {
+    expect(() => exigirReleaseAtual("dan-brown", PROJETO, null)).toThrowError(/não tem autorização ativa/);
   });
 
-  it("projeto canário recebe liberação de canário (sem certificado)", () => {
-    const release = exigirReleaseAtual("dan-brown", CANARIO_DAN_BROWN);
-    expect(release).toMatchObject({ modo: "canario", codigo_commit: "canario-sem-certificado" });
-  });
-
-  it("projeto FORA da allowlist continua fail-closed (RELEASE_V2_NAO_CERTIFICADA)", () => {
-    expect(() => exigirReleaseAtual("dan-brown", OBRA_REAL_FORA_DE_ESCOPO)).toThrowError(
+  it("autorização de PRODUÇÃO não substitui o certificado", () => {
+    // Não há certificado válido no checkout: mesmo autorizado, o projeto para.
+    expect(() => exigirReleaseAtual("dan-brown", PROJETO, autorizacao("producao"))).toThrowError(
       /Engine V2 bloqueada para fundação\/escrita/
     );
   });
 
-  it("sem project_id continua fail-closed", () => {
+  it("autorização de CANÁRIO dispensa o certificado — e só ela", () => {
+    const release = exigirReleaseAtual("dan-brown", PROJETO, autorizacao("canario"));
+    expect(release).toMatchObject({
+      modo: "canario",
+      codigo_commit: "canario-sem-certificado",
+      autorizado_por: "rodrigo",
+    });
+  });
+
+  it("a liberação de canário carrega QUEM autorizou e POR QUÊ (auditoria)", () => {
+    const release = exigirReleaseAtual("dan-brown", PROJETO, {
+      project_id: PROJETO,
+      modo: "canario",
+      autorizado_por: "rodrigo",
+      motivo: "Canário V2 — O Cofre de Alcobaça",
+    });
+    expect(release).toMatchObject({ autorizado_por: "rodrigo", motivo: "Canário V2 — O Cofre de Alcobaça" });
+  });
+
+  it("obra fora de escopo sem autorização continua fail-closed", () => {
+    expect(() => exigirReleaseAtual("dan-brown", OBRA_REAL_FORA_DE_ESCOPO, null)).toThrowError(
+      /não tem autorização ativa/
+    );
+  });
+
+  it("sem project_id continua fail-closed pelo certificado", () => {
     expect(() => exigirReleaseAtual("dan-brown")).toThrowError(/Engine V2 bloqueada/);
+  });
+
+  it("a mensagem diz ao autor o que fazer (autorizar), não só que falhou", () => {
+    try {
+      exigirReleaseAtual("dan-brown", PROJETO, null);
+      throw new Error("deveria ter lançado");
+    } catch (e) {
+      expect((e as Error).message).toContain("Autorize-o na tela do projeto");
+      expect((e as Error).message).toContain("Autorização não substitui certificado");
+    }
   });
 });

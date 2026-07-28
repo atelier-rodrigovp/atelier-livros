@@ -581,37 +581,71 @@ export function verificarReleaseAtual(skillId?: string, overrides: {
 }
 
 /**
- * Allowlist de CANÁRIO — os únicos projetos autorizados a rodar fundação/escrita
- * V2 SEM certificado de release, porque são eles que PRODUZEM a evidência que o
- * certificado exige (ovo-e-galinha do fail-closed). Explícita e auditável em
- * código: UUID exato, um por skill. Qualquer outro projeto continua fail-closed.
- * NÃO incluir obra real aqui (decisão do autor: 53abdade-… fica fora).
+ * Autorização de projeto — DADO, não código.
+ *
+ * Antes era `PROJETOS_CANARIO_V2`, um Set de UUIDs hardcoded: na prática, o autor
+ * não conseguia rodar um livro seu sem editar o fonte e reiniciar o worker. Agora
+ * vive em `engine_autorizacoes_v2` (ver supabase/engine_v2_autorizacoes.sql).
+ *
+ * Duas garantias SEPARADAS, e uma nunca cobre a outra:
+ * - CERTIFICADO: a versão do código está calibrada e provada;
+ * - AUTORIZAÇÃO: este projeto específico pode rodar.
  */
-export const PROJETOS_CANARIO_V2: ReadonlySet<string> = Object.freeze(new Set([
-  "8b11072c-097d-4964-8f89-abecb96eb16c", // Canário V2 — O Cofre de Alcobaça (dan-brown)
-  "aa8af83f-b2a1-41e0-ac0b-e46e620ee5c7", // Canário V2 — Tudo o que não te contei (hoover-mcfadden)
-  "5f59a08b-5947-46ab-9547-76bd31e74e5f", // Canário V2 — A Corte do Sal (romantasy)
-  "5ac9d614-1d1c-4fbd-8376-a731d1945ac6", // Canário V2 — Prova V2 O Farol Cego (dan-brown; prova ponta-a-ponta interface→Leitor, 2026-07-27)
-]));
+export interface AutorizacaoProjetoV2 {
+  project_id: string;
+  modo: "producao" | "canario";
+  autorizado_por: string;
+  motivo: string;
+}
 
-/** Liberação de canário: substitui o certificado APENAS para os projetos da allowlist. */
+/** Liberação de canário: substitui o certificado APENAS no modo canário. */
 export interface LiberacaoCanarioV2 {
   schema: "engine-v2-liberacao-canario/v1";
   modo: "canario";
   codigo_commit: string; // rótulo auditável no progresso (não é commit certificado)
   project_id: string;
   skill: string;
+  autorizado_por: string;
+  motivo: string;
 }
 
-export function exigirReleaseAtual(skillId: string, projectId?: string | null): CertificadoReleaseV2 | LiberacaoCanarioV2 {
-  if (projectId && PROJETOS_CANARIO_V2.has(projectId)) {
-    return {
-      schema: "engine-v2-liberacao-canario/v1",
-      modo: "canario",
-      codigo_commit: "canario-sem-certificado",
-      project_id: projectId,
-      skill: skillId,
-    };
+/**
+ * Decide se este projeto pode executar. Função PURA: recebe a autorização já
+ * lida do banco, para permanecer testável sem Supabase.
+ *
+ * Ordem das recusas (importa para a mensagem que o autor lê):
+ * 1. sem autorização → PROJETO_V2_NAO_AUTORIZADO, mesmo com certificado válido;
+ * 2. autorização de produção → exige certificado válido;
+ * 3. autorização de canário → dispensa o certificado, e SÓ ela dispensa.
+ */
+export function exigirReleaseAtual(
+  skillId: string,
+  projectId?: string | null,
+  autorizacao?: AutorizacaoProjetoV2 | null
+): CertificadoReleaseV2 | LiberacaoCanarioV2 {
+  if (projectId) {
+    if (!autorizacao) {
+      throw new ErroEngine({
+        codigo: "PROJETO_V2_NAO_AUTORIZADO",
+        classe: "configuracao",
+        mensagem:
+          `projeto ${projectId} não tem autorização ativa para a Engine V2. ` +
+          `Autorize-o na tela do projeto (ou insira uma linha em engine_autorizacoes_v2). ` +
+          `Autorização não substitui certificado: um projeto de produção também exige release certificado.`,
+        detalhe: { project_id: projectId, skill: skillId },
+      });
+    }
+    if (autorizacao.modo === "canario") {
+      return {
+        schema: "engine-v2-liberacao-canario/v1",
+        modo: "canario",
+        codigo_commit: "canario-sem-certificado",
+        project_id: projectId,
+        skill: skillId,
+        autorizado_por: autorizacao.autorizado_por,
+        motivo: autorizacao.motivo,
+      };
+    }
   }
   let verificacao: ReturnType<typeof verificarReleaseAtual>;
   try {
@@ -644,4 +678,49 @@ export function exigirReleaseAtual(skillId: string, projectId?: string | null): 
 
 export function hashEvidenciaJson(valor: unknown): string {
   return hashJsonCanonico(valor);
+}
+
+/**
+ * Lê a autorização ATIVA do projeto. Tabela ausente (migração não aplicada) =
+ * FAIL-CLOSED com mensagem que diz exatamente o que fazer — nunca um fallback
+ * silencioso para "autorizado", que era justamente o risco de tirar a lista do
+ * código sem colocá-la em lugar nenhum.
+ */
+export async function lerAutorizacaoProjeto(projectId: string): Promise<AutorizacaoProjetoV2 | null> {
+  const { sb, OWNER } = await import("../supabase.js");
+  const { data, error } = await sb
+    .from("engine_autorizacoes_v2")
+    .select("project_id,modo,autorizado_por,motivo")
+    .eq("owner", OWNER)
+    .eq("project_id", projectId)
+    .eq("ativo", true)
+    .maybeSingle();
+  if (error) {
+    const ausente =
+      error.code === "42P01" ||
+      error.code === "PGRST205" ||
+      (error.message ?? "").includes("Could not find the table");
+    if (ausente) {
+      throw new ErroEngine({
+        codigo: "AUTORIZACAO_V2_INDISPONIVEL",
+        classe: "configuracao",
+        mensagem:
+          "tabela engine_autorizacoes_v2 não existe: aplique supabase/engine_v2_autorizacoes.sql " +
+          "(migração aditiva) e autorize o projeto. A Engine V2 permanece bloqueada até lá.",
+      });
+    }
+    throw new ErroEngine({
+      codigo: "AUTORIZACAO_V2_INDISPONIVEL",
+      classe: "tecnica",
+      mensagem: `falha ao ler autorização do projeto: ${error.message}`,
+    });
+  }
+  if (!data) return null;
+  const linha = data as { project_id: string; modo: string; autorizado_por: string; motivo: string };
+  return {
+    project_id: linha.project_id,
+    modo: linha.modo === "canario" ? "canario" : "producao",
+    autorizado_por: linha.autorizado_por,
+    motivo: linha.motivo,
+  };
 }
