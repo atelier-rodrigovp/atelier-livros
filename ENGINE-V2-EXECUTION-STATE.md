@@ -68,25 +68,73 @@ de `dod-conferencia.test.ts` provam cada um desses modos de reprovação.
 A regressão completa continua rodando e não foi substituída: a conferência por ID
 é evidência **adicional**.
 
+### Matriz de fiação (auditoria da fase 2)
+
+| garantia | produtor | consumidor | decisão | persistência | interface | teste | estado |
+|---|---|---|---|---|---|---|---|
+| briefing sem default | wizard | `autorizarFundacao` | não gera fundação | `briefing_aprovado` + hash | lacunas na tela | E-01..03 | local ok |
+| fundação íntegra | `arquiteto_enredo` | `avaliarFundacaoV2` | bloqueia escrita | `engine_state` | banner próprio | F-01..03, D6-01 | local ok |
+| macro × micro | fundação 2 passadas | `portao-fundacao` | reprova fundação | `engine_state` | banner | D6-01 | local ok |
+| contrato da skill | `contrato.json` | `carregarContrato` (runtime) | cotas e pisos | hash no pacote | — | cotas-vivas | local ok |
+| POV violado | `auditor_factual` | `pipeline` etapa 6 | reprova capítulo | `engine_reviews` | blocker humano | B-01 | local ok |
+| conformidade ficha→prosa | `conformidade_ficha` | `conferirConformidade` | reprova capítulo | `engine_reviews` | evidência | G-01..02 | local ok |
+| idioma/variante | `julgamento_idioma` | `decidirIdioma` | reprova capítulo | `engine_reviews` | blocker | J-03 | local ok |
+| pisos do revisor | `revisor_literario` | `conferirParecer` | impede aprovação | `engine_reviews` | nota | J-01..02 | local ok |
+| promessa não paga | fichas + prosa | `avaliarFechamentoLivro` | bloqueia fechamento | `engine_state` | promessas abertas | B-02, H-01 | local ok |
+| revelação repetida | ledger | `gateRevelacaoRepetida` | reprova ficha | ledger | painel | I-02 | local ok |
+| repetição literal/maneirismo | detectores | gate/sinal | reprova ou sinaliza | `engine_state` | painel | I-01, I-03, I-04 | local ok |
+| memória da prosa | `extrator_memoria` | ledger | exige payoff | `memoria_prosa` | painel | H-01..02 | local ok |
+| revalidação transitiva | grafo de dependência | `revalidarVizinhanca` | reabre dependentes | `engine_state` | afetados | K-01..03 | local ok |
+| escada de correção | `correcao.ts` | worker | muda estratégia | `correcao-ledger.json` | tentativas | C-01..02, D2-01..02 | local ok |
+| histórico append-only | worker | triggers do banco | recusa update/delete | `engine_eventos_v2` | — | P-01..02 | local ok; **banco real não comprovado** |
+| RLS e owner | migration | Postgres | isola por dono | políticas | — | D4-01 | local ok; **banco real não comprovado** |
+| certificado × autorização | `release.ts` | todo ponto de entrada | fail-closed | `engine_autorizacoes_v2` | — | M-01..03, D3-01 | local ok |
+| documentos V2 (contrato) | `documentosDaFundacao` | índice + tela | caminho e hash | índice | lista de docs | D7-01 | local ok |
+| documentos V2 (real) | worker | Supabase Storage | upload e download | Storage | download | — | **D7-02 externo, não comprovado** |
+| desvio V1/V2 | `executarJobRoteado` | log | rota declarada | log | badge da engine | roteamento.test | local ok |
+
 DoD local executada em 2026-07-28 sobre `5dc4d13`:
 
 | verificação | resultado |
 |---|---|
-| testes da raiz (inclui interface) | 105 arquivos, 1305 passaram, 3 pulados |
-| testes do worker | 93 arquivos, 1187 passaram, 3 pulados |
-| typecheck (`tsc --noEmit`) | limpo |
+| testes da raiz (inclui interface) | 107 arquivos, 1348 passaram, **0 pulados** |
+| testes do worker | 95 arquivos, 1221 passaram, **0 pulados** |
+| typecheck raiz (`tsc -b`) | limpo |
+| typecheck worker (`tsc --noEmit`) | limpo |
 | build (`tsc -b && vite build`) | ok |
 | lint (`eslint .`) | 0 erros, 3 avisos pré-existentes de `react-refresh` |
-| SQL/RLS isolados | 74 passaram (historico, autorizacao-politica, reliability-sql, owner-scope, release-allowlist) |
-| meta-testes do D1 | 16 passaram (`dod-conferencia.test.ts`) |
-| ciclo com `ProvedorMock` | 4 passaram (integracao-mock) + 28 (pipeline, integracao-estrutural, lab) |
-| `npm run prontidao -- --ciclo` | 0 bloqueios, 3 não comprovados, 46/46 garantias aprovadas |
+| SQL/RLS isolados | 74 passaram |
+| testes da interface | 127 passaram |
+| ciclo com `ProvedorMock` | 4 + 28 passaram |
+| `npm run prontidao -- --ciclo` | 0 bloqueios, 8 não comprovados |
 
-Os 3 pulados são limites de recall conhecidos e documentados da heurística de
-transparência (`src/transparencia.test.ts`), não regressões.
+Garantias: **47 inventariadas · 46 locais · 46 encontradas · 46 executadas · 46
+aprovadas**. Zero duplicadas, zero órfãs, zero arquivos ausentes, zero falhas de
+coleta, zero testes DOD pulados. A única externa é `D7-02`.
 
-Pendências que NÃO são da implementação e dependem do autor:
-1. rotulagem humana de 14 amostras do corpus (única via para RELEASE_CERTIFICADO);
-2. aplicar `supabase/engine_v2_autorizacoes.sql` e `engine_v2_historico.sql`;
-3. autorizar o projeto em `engine_autorizacoes_v2`;
-4. autorizar o push.
+Os 3 `it.skip` de `transparencia.test.ts` deixaram de existir: dois escondiam
+comportamento que já funcionava; o terceiro virou `LIMITACOES_RECALL` (REC-03) e
+bloqueia formalmente a acurácia.
+
+## O que ainda depende de ação externa
+
+Estes cinco itens bloqueiam `RELEASE_PRODUCAO` e o relatório os lista TODOS de
+uma vez — reportar só o primeiro fazia o autor descobrir o seguinte na rodada
+seguinte.
+
+1. **CALIBRACAO_HUMANA** — rotular as 14 amostras já exportadas em
+   `calibracao-humana/rotulos-pendentes.csv`. Só o autor fecha. Também é o que
+   destrava REC-03.
+2. **MIGRACOES_REMOTAS** — aplicar `supabase/engine_v2_autorizacoes.sql` e
+   `supabase/engine_v2_historico.sql`. Ambas aditivas: todo `drop` é
+   `drop policy/trigger if exists` seguido de recriação; nenhum `drop table`,
+   nenhum `alter column`.
+3. **INTEGRACAO_REAL** — fluxo real interface → worker → Storage com download e
+   hash conferidos.
+4. **DOWNLOAD_AUTENTICADO** — sessão autenticada abrindo os documentos V2
+   (garantia `D7-02`).
+5. **PROVEDOR_REAL** — smoke do provedor, sem escrita literária.
+
+Cada um vira um documento em `evidencias-externas/` vinculado ao commit e aos
+hashes do que estava valendo. Ausente = NÃO COMPROVADO, que não é zero nem
+sucesso. Push continua dependendo de autorização.
