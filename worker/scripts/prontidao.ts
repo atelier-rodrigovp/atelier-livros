@@ -465,11 +465,35 @@ function regressao(suiteRaiz: ExecucaoJson): { itens: Item[]; ok: boolean; aviso
     evidencia: `${mock.passaram} passaram, ${mock.falharam} falharam`,
   });
 
-  const ui = recorte(suiteRaiz, ["src/lib/", "src/pages/", "src/components/"]);
+  // Chamar tudo em `src/lib` de "teste de interface" mascarava o que faltava:
+  // logica pura passava, e nenhum componente era renderizado em teste nenhum.
+  const logica = recorte(suiteRaiz, ["src/lib/"]);
   itens.push({
-    item: "testes da interface",
-    ok: ui.falharam === 0 && ui.passaram > 0,
-    evidencia: `${ui.passaram} passaram, ${ui.falharam} falharam`,
+    item: "interface — logica (src/lib)",
+    ok: logica.falharam === 0 && logica.passaram > 0,
+    evidencia: `${logica.passaram} passaram, ${logica.falharam} falharam`,
+  });
+
+  const componentes = recorte(suiteRaiz, ["src/components/"]);
+  itens.push({
+    item: "interface — componentes RENDERIZADOS (src/components)",
+    ok: componentes.falharam === 0 && componentes.passaram > 0,
+    evidencia: componentes.passaram
+      ? `${componentes.passaram} passaram, ${componentes.falharam} falharam`
+      : "nenhum componente renderizado em teste",
+  });
+
+  const paginas = recorte(suiteRaiz, ["src/pages/"]);
+  itens.push({
+    item: "interface — paginas/rotas (src/pages)",
+    ok: paginas.falharam === 0 && paginas.passaram > 0,
+    evidencia: paginas.passaram ? `${paginas.passaram} passaram, ${paginas.falharam} falharam` : "nenhum smoke de pagina",
+  });
+
+  itens.push({
+    item: "interface — smoke de NAVEGADOR (sessao autenticada real)",
+    ok: null,
+    evidencia: "nao existe nesta fase; exige sessao autenticada — cobre-se por evidencia externa ui_autenticada",
   });
 
   return { itens, ok: itens.every((i) => i.ok !== false), avisos };

@@ -467,10 +467,34 @@ function resolverInterno(input: ResolverInput): Omit<OperationalState, "classe_b
   if (job.status === "queued") {
     return { situacao: "na_fila", badge: "Na fila", tone: "neutral", mensagem_humana: "Na fila — aguardando o worker pegar o job.", ...base, blocker_humano: null, proxima_acao: null, botoes };
   }
-  // 9. concluído
+  // 9. concluído — SÓ quando o livro fechou de verdade.
+  //
+  // `job.status === "done"` sozinho não significa livro pronto: com execução
+  // encadeada (`max_novos_caps`), o job termina limpo depois de escrever UM
+  // capítulo de doze, e a tela dizia "Concluído · Escrita concluída". É a mentira
+  // mais cara da interface — o autor pára de acompanhar um livro pela metade.
   if (job.status === "done") {
-    add("ver_edicao", "Ver edição");
-    return { situacao: "concluido", badge: "Concluído", tone: "success", mensagem_humana: "Escrita concluída.", ...base, diagnostico_tecnico: null, blocker_humano: null, proxima_acao: null, botoes };
+    const totalAlvo = input.totalCapitulos;
+    const completo = totalAlvo > 0 && cont.aprovados >= totalAlvo;
+    if (completo) {
+      add("ver_edicao", "Ver edição");
+      return { situacao: "concluido", badge: "Concluído", tone: "success", mensagem_humana: "Escrita concluída.", ...base, diagnostico_tecnico: null, blocker_humano: null, proxima_acao: null, botoes };
+    }
+    add("continuar", "Continuar a escrita");
+    return {
+      situacao: "interrompido_retomavel",
+      badge: totalAlvo > 0 ? `Parcial — ${cont.aprovados}/${totalAlvo}` : "Parcial",
+      tone: "warning",
+      mensagem_humana:
+        totalAlvo > 0
+          ? `A execução terminou em checkpoint com ${cont.aprovados} de ${totalAlvo} capítulos aprovados. O livro ainda não fechou.`
+          : "A execução terminou, mas o total de capítulos do projeto não está definido — não dá para afirmar que o livro fechou.",
+      ...base,
+      diagnostico_tecnico: null,
+      blocker_humano: null,
+      proxima_acao: "Continuar a escrita de onde parou",
+      botoes,
+    };
   }
   // fallback (error/canceled/paused sem quality_status)
   return { situacao: "sem_escrita", badge: "Aguardando", tone: "neutral", mensagem_humana: job.erro ? "A escrita parou por um erro técnico (ver diagnóstico)." : "Aguardando.", ...base, blocker_humano: null, proxima_acao: null, botoes };

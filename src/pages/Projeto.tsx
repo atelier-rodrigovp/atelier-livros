@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { EstadoOperacional } from "@/components/EstadoOperacional";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -844,6 +845,18 @@ export default function Projeto() {
                         </span>
                       ) : null}
                     </div>
+                    {/* O contrato do resolvedor, renderizado: próxima ação e
+                        botões deixam de ser campos que só o teste lia. Só entram
+                        as ações com handler NESTA tela — controle sem handler
+                        seria botão que o autor clica e nada acontece. */}
+                    <EstadoOperacional
+                      estado={st}
+                      acoes={{
+                        ver_diagnostico: () => setTab("engine"),
+                        tentar_agora: () => enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {}),
+                        corrigir: () => enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {}),
+                      }}
+                    />
                     {st.situacao === "circuit_breaker" && (
                       <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
                         <p className="font-medium">
