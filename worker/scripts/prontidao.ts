@@ -20,6 +20,7 @@ import { analisarCalibracao } from "../src/v2/calibracao.js";
 import { CAMPOS_DECISORIOS, EXCECOES_NAO_DECISORIAS } from "../src/v2/campos-decisorios.js";
 import { conferirDod, resumoConferencia, type ConferenciaDod, type ResultadoTesteDod } from "../src/v2/dod-conferencia.js";
 import { validarEvidencia, type DependenciasEvidencia, type TipoEvidencia } from "../src/v2/evidencia-externa.js";
+import { LIMITACOES_RECALL, resumoLimitacoes } from "../src/limitacoes-conhecidas.js";
 import { fatiasDoInventario, INVENTARIO_DOD } from "../src/v2/inventario-dod.js";
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
@@ -321,7 +322,13 @@ function nivel2(): { itens: Item[]; calibrada: boolean } {
     for (const p of r.pendencias.filter((x) => !/rotul|humano|valida/i.test(x)).slice(0, 10)) {
       itens.push({ item: "pendência de calibração", ok: null, evidencia: p });
     }
-    return { itens, calibrada: r.pendencias.length === 0 };
+    // Limitação de recall conhecida é dívida de ACURÁCIA, não de implementação:
+    // o detector funciona, só não alcança uma construção. Antes disso viver num
+    // `it.skip`, invisível, convivendo calado com release "certificado".
+    for (const l of resumoLimitacoes()) {
+      itens.push({ item: "limitação de recall conhecida", ok: null, evidencia: l });
+    }
+    return { itens, calibrada: r.pendencias.length === 0 && LIMITACOES_RECALL.length === 0 };
   } catch (e) {
     itens.push({
       item: "corpus de calibração",
