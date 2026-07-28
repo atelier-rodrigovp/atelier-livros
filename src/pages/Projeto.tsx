@@ -29,6 +29,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EstadoOperacional } from "@/components/EstadoOperacional";
+import { interpretarAutorizacao, rotularAutorizacao, type AutorizacaoV2Row, type RotuloAutorizacao } from "@/lib/autorizacaoV2";
+import { lerProntidaoPublicada, type ProntidaoNaTela } from "@/lib/prontidaoPublicada";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -71,6 +73,10 @@ export default function Projeto() {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [pkgs, setPkgs] = useState<Pkg[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
+  // Autorizacao e prontidao publicada: sem elas a tela nao distingue "nao posso"
+  // de "esta quebrado", nem saude local de producao certificada.
+  const [autorizacao, setAutorizacao] = useState<RotuloAutorizacao | null>(null);
+  const [prontidao, setProntidao] = useState<ProntidaoNaTela | null>(null);
   const [idiomasSel, setIdiomasSel] = useState<string[]>([]);
   const [capaUrls, setCapaUrls] = useState<Record<string, string | null>>({});
   const [capaBrief, setCapaBrief] = useState("");
@@ -133,6 +139,20 @@ export default function Projeto() {
     setArtifacts((arts as Artifact[]) ?? []);
     setPkgs((pk as Pkg[]) ?? []);
     setJobs((js as Job[]) ?? []);
+
+    // Fail-closed: erro ou tabela ausente vira estado "indisponivel" explicito,
+    // nunca ausencia de aviso. `interpretarAutorizacao` decide; a tela so mostra.
+    const rAut = await supabase
+      .from("engine_autorizacoes_v2")
+      .select("project_id,modo,autorizado_por,motivo,ativo,revoked_at,created_at")
+      .eq("project_id", id);
+    setAutorizacao(
+      rotularAutorizacao(interpretarAutorizacao((rAut.data as AutorizacaoV2Row[] | null) ?? null, rAut.error))
+    );
+
+    // Mesma convencao da telemetria: linha em `jobs` com tipo dedicado.
+    const rPront = await supabase.from("jobs").select("payload").eq("tipo", "prontidao_v2").limit(1).maybeSingle();
+    setProntidao(lerProntidaoPublicada((rPront.data as { payload?: unknown } | null)?.payload ?? null));
     const counts: Record<string, number> = {};
     for (const c of (chs as { edition_id: string }[]) ?? []) counts[c.edition_id] = (counts[c.edition_id] ?? 0) + 1;
     setChapters(counts);
@@ -214,6 +234,12 @@ export default function Projeto() {
     if (error) { toast.error(error.message); return; }
     setProj((p) => (p ? { ...p, briefing: novo } : p));
   }
+  // Uma so porta para "escrever": os quatro ids do resolvedor que significam
+  // "toque a escrita" apontam para ca, em vez de repetir a chamada em cada um.
+  function escreverAgora() {
+    void enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {});
+  }
+
   async function produzirAgora() {
     const { data } = await supabase.from("projects").select("briefing").eq("owner", proj?.owner ?? "").neq("id", id ?? "");
     const maxOutros = Math.max(0, ...((data ?? []).map((p: any) => Number(p.briefing?.prioridade ?? 0) || 0)));
@@ -851,10 +877,18 @@ export default function Projeto() {
                         seria botão que o autor clica e nada acontece. */}
                     <EstadoOperacional
                       estado={st}
+                      autorizacao={autorizacao ?? undefined}
+                      prontidao={prontidao ?? undefined}
                       acoes={{
                         ver_diagnostico: () => setTab("engine"),
-                        tentar_agora: () => enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {}),
-                        corrigir: () => enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {}),
+                        ver_edicao: () => setTab("edicoes"),
+                        abrir_configuracoes: () => nav("/configuracoes"),
+                        // Quatro rótulos, uma ação: enfileirar a escrita. O que
+                        // muda entre eles é o momento, não o efeito.
+                        iniciar_escrita: escreverAgora,
+                        tentar_agora: escreverAgora,
+                        corrigir: escreverAgora,
+                        continuar: escreverAgora,
                       }}
                     />
                     {st.situacao === "circuit_breaker" && (

@@ -6,7 +6,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { EstadoOperacional } from "@/components/EstadoOperacional";
-import { buildResolverInput, resolveOperationalState } from "@/lib/resolveOperationalState";
+import { buildResolverInput, IDS_ACAO, resolveOperationalState } from "@/lib/resolveOperationalState";
+import type { AcoesOperacionais } from "@/components/EstadoOperacional";
+
+/** Record completo — o tipo nao aceita parcial, e e esse o ponto. */
+function todasAcoes(): AcoesOperacionais {
+  const acoes = {} as AcoesOperacionais;
+  for (const id of IDS_ACAO) acoes[id] = () => {};
+  return acoes;
+}
 import type { Job } from "@/lib/types";
 
 const job = (over: Record<string, unknown>): Job =>
@@ -28,7 +36,7 @@ function tela(jobs: Job[], chapters: { numero: number; quality_status?: string |
     html: renderToStaticMarkup(
       <EstadoOperacional
         estado={estado}
-        acoes={{ ver_diagnostico: () => {}, corrigir: () => {}, tentar_agora: () => {} }}
+        acoes={todasAcoes()}
         prontidao={{
           local: "IMPLEMENTACAO_LOCAL_APROVADA",
           producao: "RELEASE_PRODUCAO_BLOQUEADO",

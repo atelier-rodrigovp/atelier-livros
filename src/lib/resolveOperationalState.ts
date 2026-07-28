@@ -84,8 +84,34 @@ export type Situacao =
 
 export type Tone = "info" | "success" | "warning" | "danger" | "neutral";
 
+/**
+ * Vocabulário FECHADO de ações. Fechado de propósito: enquanto era `string`, o
+ * resolvedor podia anunciar um botão que nenhuma tela sabia executar — e foi
+ * exatamente o que aconteceu com `reconciliar`, `continuar` e `ver_edicao`.
+ * Como `AcoesOperacionais` exige a chave de cada id, id novo sem handler passa a
+ * ser erro de compilação, não descoberta em produção.
+ */
+export type IdAcao =
+  | "ver_diagnostico"
+  | "tentar_agora"
+  | "corrigir"
+  | "continuar"
+  | "ver_edicao"
+  | "iniciar_escrita"
+  | "abrir_configuracoes";
+
+export const IDS_ACAO: IdAcao[] = [
+  "ver_diagnostico",
+  "tentar_agora",
+  "corrigir",
+  "continuar",
+  "ver_edicao",
+  "iniciar_escrita",
+  "abrir_configuracoes",
+];
+
 export interface OperationalButton {
-  id: string;
+  id: IdAcao;
   label: string;
   habilitado: boolean;
   /**
@@ -293,7 +319,7 @@ function resolverInterno(input: ResolverInput): Omit<OperationalState, "classe_b
 
   // Botões contextuais (§7) montados ao fim conforme a situação.
   const botoes: OperationalButton[] = [];
-  const add = (id: string, label: string, habilitado = true, motivo: string | null = null) =>
+  const add = (id: IdAcao, label: string, habilitado = true, motivo: string | null = null) =>
     botoes.push({ id, label, habilitado, motivo_indisponivel: habilitado ? null : motivo });
 
   const base = {
@@ -307,6 +333,8 @@ function resolverInterno(input: ResolverInput): Omit<OperationalState, "classe_b
 
   // Sem job de escrita: estado neutro (projeto ainda não escreveu ou só histórico).
   if (!job) {
+    // "Iniciar escrita" era anunciado como próxima ação sem controle próprio.
+    if (cont.produzidos === 0) add("iniciar_escrita", "Iniciar escrita");
     return { situacao: "sem_escrita", badge: "Sem escrita", tone: "neutral", mensagem_humana: "Escrita ainda não iniciada.", ...base, diagnostico_tecnico: null, blocker_humano: null, proxima_acao: cont.produzidos > 0 ? null : "Iniciar escrita", botoes };
   }
 
@@ -430,7 +458,6 @@ function resolverInterno(input: ResolverInput): Omit<OperationalState, "classe_b
     const blocker = humanizarBlocker(pg.quality_blockers, capituloBloqueado);
     add("corrigir", `Corrigir capítulo ${capituloBloqueado ?? ""}`.trim());
     add("ver_diagnostico", "Ver diagnóstico");
-    if (cont.produzidos > cont.sincronizados) add("reconciliar", "Reconciliar aprovados");
     add(
       "continuar",
       `Continuar a partir do ${(capituloBloqueado ?? 0) + 1}`,
@@ -446,6 +473,9 @@ function resolverInterno(input: ResolverInput): Omit<OperationalState, "classe_b
   // 5a. produção GLOBAL desativada (worker_control): nada roda até religar — a
   // verdade da fila inteira; distinto da pausa por projeto e da correção.
   if (globalDesativada && (job.status === "queued" || job.status === "paused")) {
+    // A próxima ação declarada era "Religar a produção (Configurações)" e não
+    // vinha botão nenhum: instrução sem controle faz o autor caçar a tela.
+    add("abrir_configuracoes", "Abrir Configurações");
     return {
       situacao: "producao_desativada",
       badge: "Produção global desativada",

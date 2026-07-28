@@ -9,23 +9,30 @@
 // de virar um controle morto que o autor clica e nada acontece.
 
 import { Badge } from "@/components/ui/badge";
+import type { RotuloAutorizacao } from "@/lib/autorizacaoV2";
 import { Button } from "@/components/ui/button";
 import {
   ROTULO_CLASSE_BLOQUEIO,
   toneToVariant,
+  type IdAcao,
   type OperationalState,
 } from "@/lib/resolveOperationalState";
 
-export interface AcoesOperacionais {
-  [id: string]: (() => void) | undefined;
-}
+/**
+ * Handler para CADA id do vocabulário. Record completo, não parcial: é o
+ * compilador que passa a impedir botão anunciado sem quem o execute. Enquanto
+ * era índice livre, três ids ficaram sem handler sem ninguém notar.
+ */
+export type AcoesOperacionais = Record<IdAcao, () => void>;
 
 export interface EstadoOperacionalProps {
   estado: OperationalState;
-  /** Handlers disponíveis nesta tela, por id de botão do resolvedor. */
-  acoes?: AcoesOperacionais;
-  /** Rótulo da prontidão local; nunca confundir com produção certificada. */
-  prontidao?: { local: string; producao: string; bloqueios: string[] };
+  /** Handlers desta tela. Obrigatório e completo — ver `AcoesOperacionais`. */
+  acoes: AcoesOperacionais;
+  /** Rotulo da prontidao local; nunca confundir com producao certificada. */
+  prontidao?: { local: string; producao: string; bloqueios: string[]; indisponivel?: string | null };
+  /** Autorizacao do projeto em `engine_autorizacoes_v2`. */
+  autorizacao?: RotuloAutorizacao;
   /** Documento que a tela deveria oferecer e não conseguiu buscar. */
   falhaDownload?: { documento: string; motivo: string } | null;
   /** Marcado quando o ciclo exibido veio de provedor determinístico. */
@@ -34,11 +41,14 @@ export interface EstadoOperacionalProps {
 
 export function EstadoOperacional({
   estado,
-  acoes = {},
+  acoes,
+  autorizacao,
   prontidao,
   falhaDownload,
   origemMock,
 }: EstadoOperacionalProps) {
+  // O tipo já garante que todo id tem handler. O filtro fica como rede de
+  // segurança para estado vindo de fora do compilador (fixture, storage).
   const disponiveis = estado.botoes.filter((b) => typeof acoes[b.id] === "function");
 
   return (
@@ -122,6 +132,19 @@ export function EstadoOperacional({
         </div>
       ) : null}
 
+      {autorizacao ? (
+        <div
+          className={`rounded-md border px-2.5 py-1.5 text-xs ${autorizacao.autorizado ? "" : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"}`}
+          data-testid="autorizacao"
+        >
+          {/* Projeto sem autorizacao precisa dizer o que falta, nao so ficar
+              cinza: o motivo mais comum e migration nao aplicada, que ninguem
+              adivinha olhando um botao desabilitado. */}
+          <p className="font-medium">{autorizacao.titulo}</p>
+          <p>{autorizacao.detalhe}</p>
+        </div>
+      ) : null}
+
       {prontidao ? (
         <div className="border-t pt-2 text-[11px] text-muted-foreground" data-testid="prontidao">
           {/* Saúde local e produção certificada são coisas diferentes, e a tela
@@ -131,6 +154,9 @@ export function EstadoOperacional({
           </p>
           {prontidao.bloqueios.length ? (
             <p data-testid="bloqueios-producao">Falta para produção: {prontidao.bloqueios.join(", ")}</p>
+          ) : null}
+          {prontidao.indisponivel ? (
+            <p data-testid="prontidao-indisponivel">Sem prova publicada: {prontidao.indisponivel}</p>
           ) : null}
         </div>
       ) : null}

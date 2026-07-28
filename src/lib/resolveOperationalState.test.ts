@@ -41,12 +41,17 @@ describe("resolveOperationalState — caso 53abdade (cap 38 bloqueado, 37 sincro
     expect(st.engine_info).toEqual({ engine: "claude-code", provedor: "anthropic", modelo: "opus" });
   });
 
-  it("botões: Corrigir 38 + Ver diagnóstico + Reconciliar (produzidos>sincronizados); Continuar 39 DESABILITADO", () => {
+  it("botões: Corrigir 38 + Ver diagnóstico; Continuar 39 DESABILITADO com motivo", () => {
     const ids = st.botoes.map((b) => b.id);
     expect(ids).toContain("corrigir");
-    expect(ids).toContain("reconciliar"); // 38 produzidos > 37 sincronizados
+    expect(ids).toContain("ver_diagnostico");
+    // `reconciliar` saiu do vocabulário: não existia job, script nem rota que a
+    // executasse. Anunciar ação que o sistema não sabe fazer é pior que não
+    // anunciar — o autor clica e conclui que a tela travou.
+    expect(ids).not.toContain("reconciliar");
     const continuar = st.botoes.find((b) => b.id === "continuar");
     expect(continuar?.habilitado).toBe(false); // só após o 38 aprovado
+    expect(continuar?.motivo_indisponivel).toBeTruthy();
   });
 });
 
