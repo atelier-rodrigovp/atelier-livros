@@ -17,6 +17,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { analisarCalibracao } from "../src/v2/calibracao.js";
 import { CAMPOS_DECISORIOS, EXCECOES_NAO_DECISORIAS } from "../src/v2/campos-decisorios.js";
+import { fatiasDoInventario, INVENTARIO_DOD } from "../src/v2/inventario-dod.js";
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(AQUI, "..", "..");
@@ -32,7 +33,9 @@ type Estado =
   | "ACURACIA_CALIBRADA" | "ACURACIA_AGUARDANDO_ROTULAGEM_HUMANA"
   | "RELEASE_CERTIFICADO" | "RELEASE_BLOQUEADO"
   | "PROJETO_AUTORIZADO" | "PROJETO_NAO_AUTORIZADO"
-  | "PROVA_LITERARIA_APROVADA" | "PROVA_LITERARIA_REPROVADA" | "PROVA_LITERARIA_NAO_EXECUTADA";
+  | "PROVA_LITERARIA_APROVADA" | "PROVA_LITERARIA_REPROVADA" | "PROVA_LITERARIA_NAO_EXECUTADA"
+  | "INTEGRACAO_MOCK_APROVADA" | "INTEGRACAO_MOCK_REPROVADA" | "INTEGRACAO_MOCK_NAO_EXECUTADA"
+  | "BLOQUEADOS_AGUARDANDO_AUTOR";
 
 interface Item {
   item: string;
@@ -66,6 +69,17 @@ const SUITES_MUTACAO = [
   { arquivo: "src/v2/cotas-vivas.test.ts", prova: "cotas do contrato produzem sinal fora da cota" },
   { arquivo: "src/v2/ledger.test.ts", prova: "revelação repetida reprova a ficha" },
   { arquivo: "src/v2/gates.test.ts", prova: "gates universais bloqueiam o capítulo" },
+  { arquivo: "src/v2/autorizacao-politica.test.ts", prova: "RLS: dono do projeto, imutabilidade, revogação" },
+  { arquivo: "src/v2/documentos.test.ts", prova: "documentos: disco, Storage e índice da interface" },
+  { arquivo: "src/v2/briefing-aprovacao.test.ts", prova: "briefing aprovado com hash; sem default silencioso" },
+  { arquivo: "src/v2/conformidade.test.ts", prova: "ficha → prosa com evidência localizada" },
+  { arquivo: "src/v2/memoria-prosa.test.ts", prova: "memória derivada da prosa aprovada" },
+  { arquivo: "src/v2/repeticao.test.ts", prova: "repetição literal, semântica e maneirismo" },
+  { arquivo: "src/v2/idioma.test.ts", prova: "gate de idioma e variante" },
+  { arquivo: "src/v2/revalidacao.test.ts", prova: "revalidação transitiva e teto de cascata" },
+  { arquivo: "src/v2/canario-snapshot.test.ts", prova: "canário como snapshot e invalidação" },
+  { arquivo: "src/v2/historico.test.ts", prova: "histórico append-only" },
+  { arquivo: "src/v2/integracao-mock.test.ts", prova: "ciclo interface → worker → Storage → Leitor" },
 ];
 
 function rodarVitest(alvos: string[]): { ok: boolean; saida: string } {
@@ -103,7 +117,7 @@ function contarTestes(saida: string): { passaram: number; falharam: number; pula
 // Nível 1 — fiação e mutação
 // ---------------------------------------------------------------------------
 
-function nivel1(): { itens: Item[]; comando: string; ok: boolean } {
+function nivel1(): { itens: Item[]; comando: string; ok: boolean; garantiasFaltando: string[] } {
   const itens: Item[] = [];
   const alvos = SUITES_MUTACAO.map((s) => s.arquivo).filter((a) => existsSync(path.join(DIR_WORKER, a)));
   const ausentes = SUITES_MUTACAO.filter((s) => !existsSync(path.join(DIR_WORKER, s.arquivo)));
@@ -140,7 +154,24 @@ function nivel1(): { itens: Item[]; comando: string; ok: boolean } {
     evidencia: EXCECOES_NAO_DECISORIAS.map((e) => e.campo).join(", "),
   });
 
-  return { itens, comando, ok: itens.every((i) => i.ok !== false) };
+  // D1 — a DoD INTEIRA, garantia por garantia. Sem isto, uma garantia ainda não
+  // implementada simplesmente não aparecia no relatório e o estado saía verde
+  // por omissão. Garantia cujo teste não existe = implementação REPROVADA.
+  const faltando: string[] = [];
+  for (const g of INVENTARIO_DOD) {
+    const ausentes = g.testes.filter((t) => !existsSync(path.join(DIR_WORKER, t)));
+    if (ausentes.length) faltando.push(`[${g.fatia}] ${g.garantia} → falta ${ausentes.join(", ")}`);
+  }
+  itens.push({
+    item: `DoD: ${INVENTARIO_DOD.length} garantias obrigatórias`,
+    ok: faltando.length === 0,
+    evidencia:
+      faltando.length === 0
+        ? `todas com teste presente (fatias ${fatiasDoInventario().join(", ")})`
+        : `${faltando.length} sem prova: ${faltando.slice(0, 6).join(" · ")}${faltando.length > 6 ? ` · (+${faltando.length - 6})` : ""}`,
+  });
+
+  return { itens, comando, ok: itens.every((i) => i.ok !== false), garantiasFaltando: faltando };
 }
 
 // ---------------------------------------------------------------------------
@@ -188,13 +219,31 @@ function nivel2(): { itens: Item[]; calibrada: boolean } {
 // Nível 3 — ciclo real (opt-in; nunca inferido)
 // ---------------------------------------------------------------------------
 
-function nivel3(executar: boolean): { itens: Item[]; executado: boolean } {
+function nivel3(executar: boolean): { itens: Item[]; executado: boolean; mockOk: boolean } {
+  // O ciclo com MOCK é obrigatório: ele não gasta cota nem chama modelo de prosa,
+  // então não há razão para ficar atrás de uma flag. `--ciclo` acrescenta as
+  // suítes mais lentas de ponta a ponta.
+  const alvosMock = ["src/v2/integracao-mock.test.ts"].filter((a) => existsSync(path.join(DIR_WORKER, a)));
+  const rMock = alvosMock.length ? rodarVitest(alvosMock) : { ok: false, saida: "" };
+  const cMock = contarTestes(rMock.saida);
+  const mockOk = alvosMock.length > 0 && rMock.ok && cMock.falharam === 0 && cMock.passaram > 0;
+  const itensMock: Item[] = [
+    {
+      item: "ciclo interface → worker → gates → Storage → Leitor (mock)",
+      ok: alvosMock.length ? mockOk : false,
+      evidencia: alvosMock.length
+        ? `${cMock.passaram} passaram, ${cMock.falharam} falharam`
+        : "src/v2/integracao-mock.test.ts não existe",
+    },
+  ];
   if (!executar) {
     return {
       executado: false,
+      mockOk,
       itens: [
+        ...itensMock,
         {
-          item: "ciclo ponta a ponta com provedor determinístico",
+          item: "ciclo ponta a ponta completo com provedor determinístico",
           ok: null,
           evidencia: "não executado nesta invocação (use `npm run prontidao -- --ciclo`)",
         },
@@ -207,7 +256,9 @@ function nivel3(executar: boolean): { itens: Item[]; executado: boolean } {
   const c = contarTestes(r.saida);
   return {
     executado: true,
+    mockOk,
     itens: [
+      ...itensMock,
       {
         item: "ciclo ponta a ponta com provedor determinístico (ProvedorMock, zero cota)",
         ok: r.ok && c.falharam === 0,
@@ -276,11 +327,14 @@ for (const i of [...n1.itens, ...n2.itens, ...n3.itens, ...reg.itens]) {
   if (i.ok === null) naoComprovados.push(`${i.item}: ${i.evidencia}`);
 }
 
-const implementacao: Estado = n1.ok ? "IMPLEMENTACAO_APROVADA" : "IMPLEMENTACAO_REPROVADA";
+// D1 — a implementação só é aprovada com TODAS as garantias da DoD provadas.
+// Antes, uma garantia ainda não implementada não aparecia e o estado saía verde.
+const implementacao: Estado =
+  n1.ok && n1.garantiasFaltando.length === 0 ? "IMPLEMENTACAO_APROVADA" : "IMPLEMENTACAO_REPROVADA";
 const regressaoEstado: Estado = reg.ok ? "REGRESSAO_APROVADA" : "REGRESSAO_REPROVADA";
 const acuracia: Estado = n2.calibrada ? "ACURACIA_CALIBRADA" : "ACURACIA_AGUARDANDO_ROTULAGEM_HUMANA";
 // Certificado exige TUDO: implementação, regressão e calibração humana.
-const releaseOk = n1.ok && reg.ok && n2.calibrada;
+const releaseOk = n1.ok && n1.garantiasFaltando.length === 0 && reg.ok && n2.calibrada;
 const release = releaseOk ? "RELEASE_CERTIFICADO" : "RELEASE_BLOQUEADO";
 const motivoRelease = releaseOk
   ? ""
@@ -290,14 +344,20 @@ const motivoRelease = releaseOk
       ? "IMPLEMENTACAO"
       : "REGRESSAO";
 
+const integracaoMock: Estado = n3.mockOk ? "INTEGRACAO_MOCK_APROVADA" : "INTEGRACAO_MOCK_REPROVADA";
+
 const relatorio: Relatorio = {
   gerado_em: new Date().toISOString(),
   duracao_ms: Date.now() - t0,
   estados: {
     implementacao,
     regressao: regressaoEstado,
+    integracao_mock: integracaoMock,
     acuracia,
     release: motivoRelease ? `${release}: ${motivoRelease}` : release,
+    // Canário NOVO exige decisão do autor: a engine não gera canário sozinha, e
+    // sem canário novo não há evidência nova para certificar.
+    canarios_novos: "BLOQUEADOS_AGUARDANDO_AUTOR",
     // Autorização é por projeto e vive no banco: este comando não a infere.
     projeto: "PROJETO_NAO_AUTORIZADO (por projeto; consulte engine_autorizacoes_v2)",
     prova_literaria: "PROVA_LITERARIA_NAO_EXECUTADA",
