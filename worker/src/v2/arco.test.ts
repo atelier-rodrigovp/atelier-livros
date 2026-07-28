@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  gateFichaContraArco,
   gatePromessaNaoPaga,
   gateRotacaoPov,
   parsearArco,
@@ -347,5 +348,67 @@ describe("recorte do arco para o capítulo", () => {
 
   it("promessa já paga sai do recorte", () => {
     expect(renderizarArcoParaCapitulo(arcoOk, 12)).not.toContain("[P1]");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fatia N — a ficha declarava ato/tensao_alvo/marcos_arco e NADA conferia
+// ---------------------------------------------------------------------------
+
+describe("gateFichaContraArco", () => {
+  const arco: ArcoFundacao = {
+    atos: [
+      { numero: 1, cap_inicio: 1, cap_fim: 4, funcao: "instala", tensao_alvo: 2 },
+      { numero: 2, cap_inicio: 5, cap_fim: 9, funcao: "escala", tensao_alvo: 4 },
+      { numero: 3, cap_inicio: 10, cap_fim: 12, funcao: "paga", tensao_alvo: 5 },
+    ],
+    promessas: [{ id: "P1", enunciado: "o farol volta a funcionar", plantada_em: 2, reforcada_em: [6], paga_em: 11 }],
+    fios: [],
+    arcos: [{ personagem: "Marina", marcos: [{ capitulo: 3, estado: "decide agir" }] }],
+  };
+
+  it("fundação sem grade de arco = no-op", () => {
+    expect(gateFichaContraArco(6, ficha({ ato: 99, tensao_alvo: 1 }), undefined).passou).toBe(true);
+  });
+
+  it("ficha coerente com a grade passa", () => {
+    const f = ficha({
+      capitulo: 6, ato: 2, tensao_alvo: 4,
+      promessas_tocadas: [{ id: "P1", acao: "reforca" }],
+    });
+    expect(gateFichaContraArco(6, f, arco).passou).toBe(true);
+  });
+
+  it("ato errado reprova citando o ato da grade", () => {
+    const g = gateFichaContraArco(6, ficha({ capitulo: 6, ato: 1, tensao_alvo: 4 }), arco);
+    expect(g.passou).toBe(false);
+    expect(g.evidencia).toContain("ato 2");
+  });
+
+  it("tensão-alvo divergente do ato reprova", () => {
+    const g = gateFichaContraArco(6, ficha({ capitulo: 6, ato: 2, tensao_alvo: 2 }), arco);
+    expect(g.passou).toBe(false);
+    expect(g.evidencia).toContain("tensao_alvo");
+  });
+
+  it("promessa inexistente na grade reprova", () => {
+    const f = ficha({ capitulo: 6, ato: 2, tensao_alvo: 4, promessas_tocadas: [{ id: "P9", acao: "planta" }] });
+    const g = gateFichaContraArco(6, f, arco);
+    expect(g.passou).toBe(false);
+    expect(g.evidencia).toContain("P9");
+  });
+
+  it("pagar no capítulo errado reprova citando onde a grade prevê o pagamento", () => {
+    const f = ficha({ capitulo: 6, ato: 2, tensao_alvo: 4, promessas_tocadas: [{ id: "P1", acao: "paga" }] });
+    const g = gateFichaContraArco(6, f, arco);
+    expect(g.passou).toBe(false);
+    expect(g.evidencia).toContain("pagamento previsto no capítulo 11");
+  });
+
+  it("marco de arco fora do capítulo previsto reprova", () => {
+    const f = ficha({ capitulo: 6, ato: 2, tensao_alvo: 4, marcos_arco: [{ personagem: "Marina", marco: "decide agir" }] });
+    const g = gateFichaContraArco(6, f, arco);
+    expect(g.passou).toBe(false);
+    expect(g.evidencia).toContain("prevê marcos em [3]");
   });
 });

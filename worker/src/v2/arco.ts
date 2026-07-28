@@ -351,6 +351,76 @@ export function promessasNaoPagas(
   return out;
 }
 
+/**
+ * A ficha declara `ato`, `tensao_alvo`, `promessas_tocadas` e `marcos_arco` desde
+ * a fundação v3 — e NADA os conferia contra a grade. Eram campos pedidos ao
+ * modelo, persistidos, e sem um único leitor decisório (`ato`/`tensao_alvo`/
+ * `marcos_arco` não tinham nem isso).
+ *
+ * Este gate roda no PLANEJAMENTO, onde ainda dá para corrigir a ficha sem jogar
+ * prosa fora. Fundação sem grade de arco = no-op.
+ */
+export function gateFichaContraArco(
+  capitulo: number,
+  ficha: SceneSpec,
+  arco: ArcoFundacao | undefined
+): ResultadoGate {
+  if (!arco) return { gate: "ficha_fora_do_arco", passou: true };
+  const problemas: string[] = [];
+
+  const atoDoCapitulo = arco.atos.find((a) => capitulo >= a.cap_inicio && capitulo <= a.cap_fim);
+  if (atoDoCapitulo) {
+    if (ficha.ato != null && ficha.ato !== atoDoCapitulo.numero) {
+      problemas.push(`ficha declara ato ${ficha.ato}; a grade põe o capítulo ${capitulo} no ato ${atoDoCapitulo.numero}`);
+    }
+    if (ficha.tensao_alvo != null && ficha.tensao_alvo !== atoDoCapitulo.tensao_alvo) {
+      problemas.push(
+        `ficha declara tensao_alvo ${ficha.tensao_alvo}; o ato ${atoDoCapitulo.numero} tem alvo ${atoDoCapitulo.tensao_alvo}`
+      );
+    }
+  }
+
+  const porId = new Map(arco.promessas.map((p) => [p.id, p]));
+  for (const t of ficha.promessas_tocadas ?? []) {
+    const p = porId.get(t.id);
+    if (!p) {
+      problemas.push(`promessa "${t.id}" não existe na grade de arco`);
+      continue;
+    }
+    const previsto =
+      t.acao === "planta" ? p.plantada_em === capitulo
+      : t.acao === "paga" ? p.paga_em === capitulo
+      : p.reforcada_em.includes(capitulo);
+    if (!previsto) {
+      const onde =
+        t.acao === "planta" ? `plantio previsto no capítulo ${p.plantada_em}`
+        : t.acao === "paga" ? `pagamento previsto no capítulo ${p.paga_em}`
+        : `reforços previstos em [${p.reforcada_em.join(", ") || "nenhum"}]`;
+      problemas.push(`ficha marca "${t.id}" como ${t.acao} no capítulo ${capitulo}, mas a grade prevê ${onde}`);
+    }
+  }
+
+  const marcosPorPersonagem = new Map(arco.arcos.map((a) => [a.personagem.toLowerCase(), a]));
+  for (const m of ficha.marcos_arco ?? []) {
+    const a = marcosPorPersonagem.get(m.personagem.toLowerCase());
+    if (!a) {
+      problemas.push(`arco de "${m.personagem}" não existe na grade`);
+      continue;
+    }
+    if (!a.marcos.some((x) => x.capitulo === capitulo)) {
+      problemas.push(
+        `ficha marca um marco de "${m.personagem}" no capítulo ${capitulo}; a grade prevê marcos em [${a.marcos.map((x) => x.capitulo).join(", ")}]`
+      );
+    }
+  }
+
+  return {
+    gate: "ficha_fora_do_arco",
+    passou: problemas.length === 0,
+    evidencia: problemas.length ? problemas.join(" · ") : undefined,
+  };
+}
+
 export function gatePromessaNaoPaga(
   promessas: Promessa[],
   fichasAprovadas: { capitulo: number; ficha: SceneSpec }[]

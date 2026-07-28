@@ -491,6 +491,8 @@ export type GateUniversal =
   | "revelacao_repetida"
   | "rotacao_pov_violada"
   | "promessa_nao_paga"
+  /** Ficha contradiz a grade de arco (ato, tensão-alvo, promessa tocada, marco). */
+  | "ficha_fora_do_arco"
   | "fundacao_estrutura_incoerente"
   | "fundacao_arco_incompleto";
 

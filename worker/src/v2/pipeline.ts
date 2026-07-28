@@ -12,7 +12,7 @@ import { compilarPacote, type Instrucao, type SecaoContexto } from "./compilador
 import { rodarGatesCapitulo } from "./gates.js";
 import type { Gravador } from "./gravador.js";
 import { hashJsonCanonico } from "./hash.js";
-import { gateRotacaoPov, renderizarArcoParaCapitulo } from "./arco.js";
+import { gateFichaContraArco, gateRotacaoPov, renderizarArcoParaCapitulo } from "./arco.js";
 import { entradasDaFicha, gateRevelacaoRepetida, renderizarLedger } from "./ledger.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
@@ -450,6 +450,15 @@ export async function escreverCapitulo(
           throw new Error(
             `rotação de fios violada: ${gRot.evidencia}. ` +
               `Reveja "fios_avancados"/"fios_ausentes": alterne o fio ou retome o que está parado.`
+          );
+        }
+        // Ficha × grade de arco: `ato`, `tensao_alvo`, `promessas_tocadas` e
+        // `marcos_arco` eram pedidos ao modelo e nunca conferidos contra o plano.
+        const gArco = gateFichaContraArco(capitulo, spec, fundacao?.arco);
+        if (!gArco.passou) {
+          throw new Error(
+            `ficha contradiz a grade de arco: ${gArco.evidencia}. ` +
+              `Use a seção ARCO DO CAPÍTULO como fonte: ela diz a que ato o capítulo pertence, qual a tensão-alvo, que promessas ele toca e que marcos caem aqui.`
           );
         }
         return spec;

@@ -56,7 +56,14 @@ import {
 } from "./tipos.js";
 
 /** Tipos de job que a V2 sabe executar (os demais permanecem na V1 mesmo em modo v2). */
-export const TIPOS_V2 = new Set(["escrever_livro", "criar_fundacao", "laboratorio_v2", "revisar", "refinar_fundacao"]);
+export const TIPOS_V2 = new Set([
+  "escrever_livro",
+  "criar_fundacao",
+  "laboratorio_v2",
+  "revisar",
+  "refinar_fundacao",
+  "avaliar",
+]);
 
 export async function engineModeDoProjeto(projectId: string): Promise<string> {
   const { sb, OWNER } = await import("../supabase.js");
@@ -107,6 +114,7 @@ export async function executarJobRoteado(
     if (modo === "v2") {
       if (job.tipo === "criar_fundacao") return executarFundacaoV2Job(job);
       if (job.tipo === "refinar_fundacao") return executarRefinarFundacaoV2(job);
+      if (job.tipo === "avaliar") return executarAvaliarV2(job);
       if (job.tipo === "revisar") {
         // Revisão V2 opera na edição de ORIGEM; tradução segue o pipeline V1.
         if (await edicaoEhTraducao(job.edition_id)) return executarV1(job, hb);
@@ -272,7 +280,10 @@ async function prepararProjetoV2(job: Job): Promise<{
   const projectId = job.project_id!;
   const { data: proj, error } = await sb
     .from("projects")
-    .select("id,titulo,skill_escrita,total_capitulos,piso_palavras,meta_nota,idioma_origem,briefing")
+    // `piso_palavras` e `paginas_alvo` são colunas da V1 e NÃO entram aqui: na V2
+    // a faixa de palavras vem do contrato da skill (`faixa_palavras`), que é quem
+    // o medidor de sinais lê. Selecioná-las dava a impressão de que decidiam algo.
+    .select("id,titulo,skill_escrita,total_capitulos,meta_nota,idioma_origem,briefing")
     .eq("owner", OWNER)
     .eq("id", projectId)
     .single();
@@ -823,6 +834,8 @@ async function executarMeta9Integrada(
     projectId: string;
     docsFactuais: { titulo: string; texto: string; fonte: string }[];
     metaProjeto?: number | null;
+    /** 1 = avaliar e sair (diagnóstico da rota `avaliar`), sem reescrita. */
+    maxIteracoes?: number;
   }
 ): Promise<void> {
   await executarMeta9({
@@ -844,7 +857,7 @@ async function executarMeta9Integrada(
     fundacao: ctx.deps.fundacao,
     // Meta do projeto (coluna meta_nota) é a fonte; payload permanece como override explícito.
     meta: (job.payload as { meta_nota?: number })?.meta_nota ?? (ctx.metaProjeto ?? 9),
-    maxIteracoes: (job.payload as { max_iteracoes?: number })?.max_iteracoes ?? 3,
+    maxIteracoes: ctx.maxIteracoes ?? (job.payload as { max_iteracoes?: number })?.max_iteracoes ?? 3,
     reportarEtapa: async (etapa, dados) => {
       if (etapa === "CONSOLIDACAO") await atualizarProgresso(job.id, { fase: "CONSOLIDACAO" });
       else if (etapa === "AVALIACAO") await atualizarProgresso(job.id, { fase: "AVALIACAO", ...(dados ?? {}) });
@@ -863,6 +876,42 @@ async function executarMeta9Integrada(
     });
     if (estadoFinal.doc.fase === "concluido") await marcarEdicaoEmRevisao(ctx.deps.editionId);
   }
+}
+
+/**
+ * `avaliar` no V2 — o botão "Avaliar" caía no caminho V1 e não funcionava em
+ * livro V2. Aqui ele é DIAGNÓSTICO: consolida, avalia pelas dimensões da
+ * meta-nota e grava o relatório. NUNCA reescreve (maxIteracoes = 1: avalia e sai
+ * antes de qualquer rodada de reescrita) — quem reescreve é `escrever_livro`.
+ */
+export async function executarAvaliarV2(job: Job): Promise<void> {
+  const ctx = await prepararProjetoV2(job);
+  const estado = await ctx.gravador.carregarEstado();
+  const total = estado.doc.total_capitulos ?? 0;
+  const aprovados = Object.values(estado.doc.capitulos).filter(
+    (c) => c.status === "aprovado" || c.status === "aprovado_com_excecao"
+  ).length;
+  // Avaliar um livro pela metade daria uma nota sobre um manuscrito incompleto —
+  // e a meta-nota muda a FASE do livro, o que num livro em escrita seria regressão.
+  if (!total || aprovados < total) {
+    throw new ErroEngine({
+      codigo: "AVALIACAO_LIVRO_INCOMPLETO",
+      classe: "configuracao",
+      mensagem: `avaliação exige o livro inteiro aprovado: ${aprovados} de ${total || "?"} capítulo(s)`,
+    });
+  }
+  await atualizarProgresso(job.id, { engine: "v2", fase: "AVALIACAO", etapa: "diagnóstico (sem reescrita)" });
+  await executarMeta9Integrada(job, {
+    gravador: ctx.gravador,
+    persistencia: ctx.persistencia,
+    deps: ctx.deps,
+    contrato: ctx.contrato,
+    dirProjeto: ctx.dirProjeto,
+    projectId: job.project_id!,
+    docsFactuais: ctx.docsFactuais,
+    metaProjeto: (ctx.proj as { meta_nota?: number | null }).meta_nota,
+    maxIteracoes: 1,
+  });
 }
 
 /**
