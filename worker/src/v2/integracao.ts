@@ -19,6 +19,7 @@ import { executarPapel } from "./papeis.js";
 import { tarefaCanarioVoz, tarefaEditorEstrutural, tarefaRevisorCanario } from "./tarefas.js";
 import { gerarFundacaoV2, materializarFundacao } from "./fundacao.js";
 import { parsearArco } from "./arco.js";
+import { avaliarFechamentoLivro } from "./fechamento.js";
 import { reconstruirLedger } from "./ledger.js";
 import {
   briefingParaFundacao,
@@ -501,6 +502,37 @@ export async function executarEscritaV2(job: Job): Promise<void> {
       aviso_legado: `capítulos legado preservados (não reescritos): ${legadosPulados.join(", ")}`,
     });
     return;
+  }
+
+  // ---------------------------------------------------------------------------
+  // GATE DE FECHAMENTO — promessa plantada e nunca paga.
+  // Roda UMA vez, com o livro inteiro escrito, e é gate do LIVRO: o capítulo que
+  // apenas planta uma promessa válida (a pagar lá na frente) nunca é reprovado
+  // por ele durante a escrita. Fundação v2 (sem `arco`) = no-op com aviso.
+  // ---------------------------------------------------------------------------
+  const fechamento = await avaliarFechamentoLivro({
+    projectId,
+    total,
+    arco: deps.fundacao?.arco,
+    estado: await gravador.carregarEstado(),
+    persistencia,
+  });
+  if (!fechamento.passou) {
+    const falho = fechamento.gates.find((g) => !g.passou)!;
+    await atualizarProgresso(job.id, {
+      quality_status: "bloqueado",
+      quality_gate: falho.gate,
+      quality_blockers: [`${falho.gate}: ${falho.evidencia ?? "sem evidência"}`],
+    });
+    await gravador.registrarBloqueio(`GATE_${falho.gate}`, "livro", falho.evidencia ?? "");
+    throw new ErroEngine({
+      codigo: "LIVRO_FECHAMENTO_BLOQUEADO",
+      classe: "qualidade",
+      mensagem: `fechamento bloqueado por ${falho.gate}: ${falho.evidencia}`,
+    });
+  }
+  if (fechamento.naoAplicavel) {
+    await atualizarProgresso(job.id, { aviso_arco: fechamento.naoAplicavel });
   }
 
   // Retomabilidade: um job re-executado com a meta-nota já em curso NUNCA pode

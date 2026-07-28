@@ -162,6 +162,12 @@ function validarSaidaAuditor(obj: unknown): SaidaAuditor {
   if (!pov || typeof pov.ha !== "boolean" || typeof pov.detalhe !== "string") {
     throw new Error("pov_violado inválido (esperado {ha: boolean, detalhe: string})");
   }
+  // `pov_violado` REPROVA o capítulo (decisão, não anotação). Uma violação
+  // declarada sem detalhe é protocolo violado — vira retry técnico do auditor,
+  // nunca uma reprovação sem evidência localizável.
+  if (pov.ha === true && pov.detalhe.trim().length === 0) {
+    throw new Error("pov_violado.ha=true exige `detalhe` não vazio citando o trecho que viola o POV");
+  }
   return { contradicoes, conhecimento_indevido: conhecimento, pov_violado: { ha: pov.ha, detalhe: pov.detalhe } };
 }
 
@@ -609,13 +615,17 @@ export async function escreverCapitulo(
     runs.push(rAud.runId);
     const auditoria = rAud.valor;
     const contradicoesBloqueantes = auditoria.contradicoes.filter((c) => c.gravidade === "bloqueante");
-    if (contradicoesBloqueantes.length > 0 || auditoria.conhecimento_indevido.length > 0) {
+    const povViolado = auditoria.pov_violado.ha;
+    if (contradicoesBloqueantes.length > 0 || auditoria.conhecimento_indevido.length > 0 || povViolado) {
       verdictEfetivo = "reprovado";
       for (const c of contradicoesBloqueantes) {
         problemas.push(`contradição factual comprovada: ${c.fato_estabelecido} vs "${c.trecho_do_capitulo}"`);
       }
       for (const k of auditoria.conhecimento_indevido) {
         problemas.push(`conhecimento indevido: ${k.quem} sabe "${k.sabe_o_que_nao_deveria}" (${k.trecho})`);
+      }
+      if (povViolado) {
+        problemas.push(`POV violado: ${auditoria.pov_violado.detalhe}`);
       }
     }
 
@@ -665,7 +675,8 @@ export async function escreverCapitulo(
     const violacoes = parecer.sinais.filter(
       (s) => s.disposicao === "violacao_confirmada" || conferencia.rebaixados.includes(s.sinal)
     ).length;
-    const saldo = violacoes + 2 * contradicoesBloqueantes.length + auditoria.conhecimento_indevido.length;
+    const saldo =
+      violacoes + 2 * contradicoesBloqueantes.length + auditoria.conhecimento_indevido.length + (povViolado ? 2 : 0);
     if (saldoAnterior !== null && saldo >= saldoAnterior) rodadasSemMelhora++;
     else rodadasSemMelhora = 0;
     const semConvergencia = rodadasSemMelhora >= 2; // duas rodadas sem melhora líquida = parar
@@ -684,6 +695,15 @@ export async function escreverCapitulo(
         problema: `conhecimento indevido: ${k.quem} não pode saber "${k.sabe_o_que_nao_deveria}"`,
         instrucao: "reescreva o trecho para que a informação não seja revelada por quem não a tem",
       })),
+      ...(povViolado
+        ? [
+            {
+              local: "capítulo inteiro",
+              problema: `POV violado: ${auditoria.pov_violado.detalhe}`,
+              instrucao: `reescreva os trechos indicados para respeitar o POV do contrato (${deps.contrato.contrato.pov.pessoa}), sem acesso a percepções ou pensamentos fora do ponto de vista vigente`,
+            },
+          ]
+        : []),
     ];
 
     // Violação difusa (ex.: cadência/cota estourada no capítulo inteiro) não se
