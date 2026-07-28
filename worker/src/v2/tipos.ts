@@ -46,6 +46,13 @@ export interface PoliticaEscala {
   alvo?: number;
   min?: number;
   max?: number;
+  /**
+   * Isenção do PISO por condição verificável no texto. Vocabulário FECHADO — o
+   * núcleo implementa a condição genericamente, sem condicional por skill.
+   * Existe porque o piso de densidade do hoover diz "o fio-M é isento do piso", e
+   * o fio-M é definido pelo próprio contrato como o fio de memória em itálico.
+   */
+  isencao_piso?: { condicao: "capitulo_predominantemente_italico"; justificativa: string };
 }
 
 export interface RegraDeclarada {
@@ -54,6 +61,13 @@ export interface RegraDeclarada {
   tipo: "alvo_positivo" | "proibicao" | "cota";
   cota?: { max?: number; min?: number; por: "capitulo" | "cena" | "1000_palavras" };
   papeis: Papel[];                // quem precisa ver esta regra
+  /**
+   * Disposição FECHADA: "excecao_valida" não é resposta admissível para o sinal
+   * desta regra — fora da cota é violação, ponto. Existe porque o piso de
+   * densidade do romantasy diz, com todas as letras, "abaixo do piso é reprovação,
+   * não 'ou justificado'". Ausente/false = as quatro disposições continuam valendo.
+   */
+  sem_excecao?: boolean;
 }
 
 export interface ExcecaoCena {

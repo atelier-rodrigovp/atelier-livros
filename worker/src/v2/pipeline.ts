@@ -662,7 +662,9 @@ export async function escreverCapitulo(
     // Reprovado: correção dirigida se há instruções, orçamento e convergência.
     // O saldo pondera TODAS as fontes de reprovação (violações do revisor +
     // contradições bloqueantes e conhecimento indevido do auditor).
-    const violacoes = parecer.sinais.filter((s) => s.disposicao === "violacao_confirmada").length;
+    const violacoes = parecer.sinais.filter(
+      (s) => s.disposicao === "violacao_confirmada" || conferencia.rebaixados.includes(s.sinal)
+    ).length;
     const saldo = violacoes + 2 * contradicoesBloqueantes.length + auditoria.conhecimento_indevido.length;
     if (saldoAnterior !== null && saldo >= saldoAnterior) rodadasSemMelhora++;
     else rodadasSemMelhora = 0;
@@ -690,7 +692,7 @@ export async function escreverCapitulo(
     // flagrou — o escritor precisa saber QUAIS frases contam (achados do canário
     // hoover).
     const globais = parecer.sinais
-      .filter((s) => s.disposicao === "violacao_confirmada")
+      .filter((s) => s.disposicao === "violacao_confirmada" || conferencia.rebaixados.includes(s.sinal))
       .map((s) => {
         const medido = acharSinalMedido(s.sinal, sinais);
         const cota = medido?.cota;

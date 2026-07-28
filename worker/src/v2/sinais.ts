@@ -29,6 +29,10 @@ export interface SinalMedido {
   cota?: { min?: number; max?: number };  // presente só quando o CONTRATO declara
   fora_da_cota: boolean;                  // false quando não há cota (medição informativa)
   exemplos: string[];
+  /** Regra do contrato marcada `sem_excecao`: "excecao_valida" não é admissível. */
+  sem_excecao?: boolean;
+  /** Piso dispensado por isenção do contrato (com a justificativa declarada). */
+  isencao_aplicada?: string;
 }
 
 /**
@@ -38,15 +42,80 @@ export interface SinalMedido {
  * nenhum contrato usava, então nenhuma cota de contagem chegava aos sinais e
  * `fora_da_cota` era sempre false (defeito 11 da auditoria de fechamento).
  */
-function cotaDeclarada(c: SkillContract, sinal: string): { min?: number; max?: number } | undefined {
+function regraDeCota(c: SkillContract, sinal: string) {
   const chave = sinal.toLowerCase();
-  const r = c.regras.find((x) => x.tipo === "cota" && x.id.toLowerCase().includes(chave));
+  return c.regras.find((x) => x.tipo === "cota" && x.id.toLowerCase().includes(chave));
+}
+
+/**
+ * Regra por id, INDEPENDENTE do tipo. Necessária porque a semântica de uma regra
+ * (ex.: `sem_excecao` do piso-densidade) sobrevive quando o NÚMERO sai dela: o
+ * piso passou a ter fonte única em `faixa_palavras`, e a regra virou
+ * "alvo_positivo" — buscar só por tipo "cota" perdia a semântica junto com o número.
+ */
+function regraPorId(c: SkillContract, chave: string) {
+  const k = chave.toLowerCase();
+  return c.regras.find((x) => x.id.toLowerCase().includes(k));
+}
+
+function cotaDeclarada(c: SkillContract, sinal: string): { min?: number; max?: number } | undefined {
+  const r = regraDeCota(c, sinal);
   return r?.cota ? { min: r.cota.min, max: r.cota.max } : undefined;
 }
 
-function medir(sinal: string, valor: number, exemplos: string[], cota?: { min?: number; max?: number }): SinalMedido {
+function medir(
+  sinal: string,
+  valor: number,
+  exemplos: string[],
+  cota?: { min?: number; max?: number },
+  extra?: Partial<SinalMedido>
+): SinalMedido {
   const fora = cota ? (cota.max != null && valor > cota.max) || (cota.min != null && valor < cota.min) : false;
-  return { sinal, valor, cota, fora_da_cota: fora, exemplos };
+  return { sinal, valor, cota, fora_da_cota: fora, exemplos, ...extra };
+}
+
+/**
+ * Fração do capítulo em itálico, em nível de PARÁGRAFO. Deliberadamente separado
+ * de `RE_ITALICO` (maneirismo.ts), que limita spans a 80 caracteres porque mede
+ * PENSAMENTO em itálico e alimenta o corpus de calibração hash-bound — mexer nele
+ * invalidaria os rótulos. Aqui a pergunta é outra: o capítulo INTEIRO é itálico?
+ */
+export function fracaoItalico(texto: string): number {
+  const paragrafos = texto
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter((p) => p && !/^#{1,3}\s/.test(p));
+  if (!paragrafos.length) return 0;
+  const italicos = paragrafos.filter((p) => /^([*_])[^*_].*[^*_]\1$/s.test(p));
+  return italicos.length / paragrafos.length;
+}
+
+/**
+ * Ocorrências da muleta genérica ("coisa"/"coisas"/"algo") com contexto citável.
+ * `contarMuletas` (maneirismo.ts) devolve só contagem por termo, e o revisor
+ * precisa CITAR cada ocorrência para confirmar violação (adendo 2) — daí a
+ * extração local com janela de contexto.
+ */
+export function ocorrenciasMuletaGenerica(texto: string): string[] {
+  const out: string[] = [];
+  const re = /\b(coisas?|algo)\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(texto)) !== null) {
+    const ini = Math.max(0, m.index - 40);
+    const fim = Math.min(texto.length, m.index + m[0].length + 40);
+    out.push(texto.slice(ini, fim).replace(/\s+/g, " ").trim());
+  }
+  return out;
+}
+
+/** Isenção de piso declarada pelo contrato e satisfeita pelo texto. */
+function isencaoDePiso(contrato: SkillContract, texto: string): string | undefined {
+  const isen = contrato.faixa_palavras.isencao_piso;
+  if (!isen) return undefined;
+  if (isen.condicao === "capitulo_predominantemente_italico" && fracaoItalico(texto) > 0.5) {
+    return isen.justificativa;
+  }
+  return undefined;
 }
 
 /** Mede todos os sinais editoriais do texto, com cotas vindas SÓ do contrato. */
@@ -88,10 +157,36 @@ export function medirSinais(texto: string, contrato: SkillContract): SinalMedido
     out.push({ sinal: `cadencia.${t.nome}`, valor: t.n, cota: declarou ? { max: t.alvo } : undefined, fora_da_cota: declarou && t.acima, exemplos: t.todosExemplos ?? t.exemplos });
   }
 
+  // Muleta genérica: a regra `muleta-coisa` do romantasy declarava cota e NÃO
+  // casava com sinal nenhum — cota silenciosamente morta (o léxico existia em
+  // maneirismo.ts e `sinais.ts` nunca o importava). Mede EXATAMENTE os termos que
+  // a regra nomeia ("coisa"/"algo"), não o léxico inteiro de muletas.
+  // BLOQUEADO AGUARDANDO DECISÃO DO AUTOR (ver DIAGNOSTICO/relatório da fatia E).
+  // O detector está pronto (`ocorrenciasMuletaGenerica`) e a emissão é uma linha,
+  // mas ligá-la exige um bloco de rótulos `muleta_coisa` nas 4 amostras romantasy
+  // do corpus (13 ocorrências que pedem julgamento humano legítima × tique).
+  // `worker/calibration/` está fora do escopo desta tarefa, então a emissão fica
+  // segurada — cota declarada e não medida, registrada na tabela regra→sinal→cota.
+  // Emitir só quando o contrato declara a regra mantém dan-brown e hoover intactos.
+
   // Tamanho do capítulo (sinal, não gate — decisão da F6).
+  // O NÚMERO do piso vem de `faixa_palavras` (fonte única — a regra `piso-densidade`
+  // do contrato declara a SEMÂNTICA, não o número). A isenção e a disposição
+  // fechada vêm da regra, e são o que a semântica do contrato exige.
   const palavras = countWords(texto);
   const faixa = contrato.faixa_palavras;
-  out.push(medir("palavras", palavras, [], { min: faixa.min, max: faixa.max }));
+  const isencao = isencaoDePiso(contrato, texto);
+  const regraPiso = regraPorId(contrato, "densidade");
+  out.push(
+    medir(
+      "palavras",
+      palavras,
+      [],
+      // Piso isento: o capítulo continua sendo medido, mas não fica FORA por ser curto.
+      { min: isencao ? undefined : faixa.min, max: faixa.max },
+      { sem_excecao: regraPiso?.sem_excecao, ...(isencao ? { isencao_aplicada: isencao } : {}) }
+    )
+  );
 
   // Tipo de gancho final (informativo; o revisor confere contra a ficha).
   out.push({ sinal: "gancho_final", valor: classificarGanchoFinal(texto), fora_da_cota: false, exemplos: [] });
@@ -111,6 +206,15 @@ export function resumoSinais(sinais: SinalMedido[]): string {
       ? ` (cota${s.cota.min != null ? ` mín ${s.cota.min}` : ""}${s.cota.max != null ? ` máx ${s.cota.max}` : ""}${s.fora_da_cota ? " — FORA" : ""})`
       : "";
     linhas.push(`- ${s.sinal}: ${s.valor}${cota}`);
+    if (s.isencao_aplicada) {
+      linhas.push(`    ISENÇÃO DO PISO APLICADA pelo contrato: ${s.isencao_aplicada}`);
+    }
+    if (s.sem_excecao && s.fora_da_cota) {
+      linhas.push(
+        `    DISPOSIÇÃO FECHADA: o contrato NÃO admite "excecao_valida" para este sinal — fora da cota é violação. ` +
+          `Disponha "violacao_confirmada" ou, se o detector errou, "falso_positivo".`
+      );
+    }
     s.exemplos.forEach((e, i) => linhas.push(`    ${i + 1}. ${JSON.stringify(e)}`));
   }
   return linhas.join("\n");

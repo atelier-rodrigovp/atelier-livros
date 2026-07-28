@@ -246,6 +246,12 @@ export interface ConsistenciaParecer {
   problemas: string[];
   /** veredito EFETIVO após as regras (pode rebaixar o do revisor, nunca promover) */
   verdictEfetivo: Verdict;
+  /**
+   * Sinais cuja "excecao_valida" foi rebaixada a violação por disposição fechada
+   * do contrato. O pipeline os trata como violação ao montar as correções — senão
+   * o capítulo reprovaria sem instrução e só queimaria tentativa.
+   */
+  rebaixados: string[];
 }
 
 /**
@@ -280,6 +286,23 @@ export function conferirParecer(parecer: Parecer, sinaisMedidos: SinalMedido[]):
     }
   }
 
+  // Disposição FECHADA (contrato com `sem_excecao`): "excecao_valida" não é
+  // resposta admissível — o piso de densidade do romantasy diz, literalmente,
+  // "abaixo do piso é reprovação, não 'ou justificado'". Código só REBAIXA
+  // (regra 5): a exceção vira violação, nunca o contrário.
+  const rebaixados: string[] = [];
+  for (const s of parecer.sinais) {
+    if (s.disposicao !== "excecao_valida") continue;
+    const medido = acharSinalMedido(s.sinal, sinaisMedidos);
+    if (!medido?.sem_excecao || !medido.fora_da_cota) continue;
+    rebaixados.push(s.sinal);
+    problemas.push(
+      `sinal "${s.sinal}" (${String(medido.valor)}): o contrato não admite exceção para esta cota — ` +
+        `"excecao_valida" rebaixada a violação`
+    );
+    if (verdict !== "necessita_decisao_humana") verdict = "reprovado";
+  }
+
   const violacoes = parecer.sinais.filter((s) => s.disposicao === "violacao_confirmada");
   if (violacoes.length > 0) {
     if (parecer.correcoes.length === 0) {
@@ -301,5 +324,5 @@ export function conferirParecer(parecer: Parecer, sinaisMedidos: SinalMedido[]):
     }
   }
 
-  return { ok: problemas.length === 0, problemas, verdictEfetivo: verdict };
+  return { ok: problemas.length === 0, problemas, verdictEfetivo: verdict, rebaixados };
 }
