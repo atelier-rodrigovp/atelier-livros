@@ -68,18 +68,19 @@ de `dod-conferencia.test.ts` provam cada um desses modos de reprovação.
 A regressão completa continua rodando e não foi substituída: a conferência por ID
 é evidência **adicional**.
 
-DoD local executada em 2026-07-28 sobre `83ac05d`:
+DoD local executada em 2026-07-28 sobre `5dc4d13`:
 
 | verificação | resultado |
 |---|---|
-| testes da raiz (inclui interface) | 104 arquivos, 1289 passaram, 3 pulados |
-| testes do worker | 92 arquivos, 1171 passaram, 3 pulados |
+| testes da raiz (inclui interface) | 105 arquivos, 1305 passaram, 3 pulados |
+| testes do worker | 93 arquivos, 1187 passaram, 3 pulados |
 | typecheck (`tsc --noEmit`) | limpo |
 | build (`tsc -b && vite build`) | ok |
 | lint (`eslint .`) | 0 erros, 3 avisos pré-existentes de `react-refresh` |
-| SQL/RLS isolados | 48 passaram (historico, reliability-sql, owner-scope, release-allowlist) |
+| SQL/RLS isolados | 74 passaram (historico, autorizacao-politica, reliability-sql, owner-scope, release-allowlist) |
+| meta-testes do D1 | 16 passaram (`dod-conferencia.test.ts`) |
 | ciclo com `ProvedorMock` | 4 passaram (integracao-mock) + 28 (pipeline, integracao-estrutural, lab) |
-| `npm run prontidao -- --ciclo` | 0 bloqueios, 3 não comprovados |
+| `npm run prontidao -- --ciclo` | 0 bloqueios, 3 não comprovados, 46/46 garantias aprovadas |
 
 Os 3 pulados são limites de recall conhecidos e documentados da heurística de
 transparência (`src/transparencia.test.ts`), não regressões.
