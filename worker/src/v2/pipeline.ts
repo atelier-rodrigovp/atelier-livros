@@ -13,6 +13,13 @@ import { rodarGatesCapitulo } from "./gates.js";
 import type { Gravador } from "./gravador.js";
 import { hashJsonCanonico } from "./hash.js";
 import { gateFichaContraArco, gateRotacaoPov, renderizarArcoParaCapitulo } from "./arco.js";
+import {
+  conferirConformidade,
+  medirConformidade,
+  resumoConformidade,
+  validarParecerConformidade,
+  type ParecerConformidade,
+} from "./conformidade.js";
 import { entradasDaFicha, gateRevelacaoRepetida, renderizarLedger } from "./ledger.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
@@ -25,6 +32,7 @@ import {
   tarefaAuditorFactual,
   tarefaContextualizador,
   tarefaEscritor,
+  tarefaConformidade,
   tarefaEscritorCorrecao,
   tarefaRevisor,
   type ModoCorrecao,
@@ -685,6 +693,29 @@ export async function escreverCapitulo(
       }
     }
 
+    // 6b. CONFORMIDADE FICHA → PROSA (fatia G). A engine julgava se o capítulo
+    // estava BEM ESCRITO e se era coerente, nunca se ENTREGOU o que a ficha
+    // planejou. Um capítulo competente que não cumpre a virada passava.
+    const sinaisConf = medirConformidade(ficha, texto);
+    const compConf = compilar("conformidade_ficha", alvoCap, { ficha, fatos: [secaoTexto] });
+    if (!compConf.ok) return bloquearPorCompilacao(compConf.bloqueios);
+    const rConf = await executarPapel<ParecerConformidade>({
+      ...base,
+      papel: "conformidade_ficha",
+      alvo: alvoCap,
+      pacote: compConf.pacote!,
+      tarefa: tarefaConformidade(capitulo, ficha, resumoConformidade(sinaisConf)),
+      parse: (t) => validarParecerConformidade(extrairJson(t)),
+    });
+    runs.push(rConf.runId);
+    const conformidade = conferirConformidade(rConf.valor, ficha, texto);
+    if (!conformidade.conforme) {
+      verdictEfetivo = "reprovado";
+      for (const p of conformidade.problemas) {
+        problemas.push(`conformidade [${p.item}] ${p.motivo}: ${p.detalhe}`);
+      }
+    }
+
     // 7. Decisão
     const textHash = hashText(texto);
 
@@ -732,7 +763,7 @@ export async function escreverCapitulo(
       (s) => s.disposicao === "violacao_confirmada" || conferencia.rebaixados.includes(s.sinal)
     ).length;
     const saldo =
-      violacoes + 2 * contradicoesBloqueantes.length + auditoria.conhecimento_indevido.length + (povViolado ? 2 : 0);
+      violacoes + 2 * contradicoesBloqueantes.length + auditoria.conhecimento_indevido.length + (povViolado ? 2 : 0) + 2 * conformidade.problemas.length;
     if (saldoAnterior !== null && saldo >= saldoAnterior) rodadasSemMelhora++;
     else rodadasSemMelhora = 0;
     const semConvergencia = rodadasSemMelhora >= 2; // duas rodadas sem melhora líquida = parar

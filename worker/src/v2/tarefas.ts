@@ -287,3 +287,43 @@ export function tarefaAuditorFactual(capitulo: number): string {
     `Só aponte contradição COMPROVADA pelo material do pacote (cite o fato e o trecho). Não julgue estilo.`,
   ].join("\n");
 }
+
+/**
+ * Conformidade FICHA → PROSA (fatia G). O papel julga se o capítulo ENTREGOU o
+ * que a ficha planejou — e cada afirmação precisa citar um trecho que exista no
+ * texto. Sem trecho localizável, a afirmação não sustenta nada.
+ */
+export function tarefaConformidade(capitulo: number, ficha: SceneSpec, sinais: string): string {
+  const itens = [
+    `- "objetivo": o que ${ficha.pov} queria — ${ficha.objetivo}`,
+    `- "obstaculo": o que impediu — ${ficha.obstaculo}`,
+    `- "acao_decisiva": a ação concreta — ${ficha.acao_fisica}`,
+    `- "virada": ${ficha.virada}`,
+    `- "mudanca_estado": ${ficha.mudanca_estado}`,
+    `- "gancho": ${ficha.gancho?.descricao ?? ""}`,
+    `- "informacao_nova": ${ficha.informacao_nova}`,
+    ...((ficha.marcos_arco ?? []).length
+      ? [`- "marco_arco": ${(ficha.marcos_arco ?? []).map((m) => `${m.personagem}: ${m.marco}`).join("; ")}`]
+      : []),
+    ...((ficha.promessas_tocadas ?? []).length
+      ? [`- "promessa": ${(ficha.promessas_tocadas ?? []).map((p) => `${p.id} (${p.acao})`).join("; ")}`]
+      : []),
+  ];
+  return [
+    `Verifique se o CAPÍTULO ${capitulo} cumpre a FICHA que o planejou. Você NÃO julga qualidade de prosa — julga ENTREGA.`,
+    ``,
+    `Itens a verificar:`,
+    ...itens,
+    ``,
+    sinais,
+    ``,
+    `Responda APENAS JSON: { "afirmacoes": [{"item": string, "cumprido": boolean, "trecho": string, "justificativa": string}] }.`,
+    `REGRAS DURAS:`,
+    `- UMA afirmação por item listado acima, usando exatamente o nome do item.`,
+    `- "trecho": CITAÇÃO LITERAL do capítulo (≥12 caracteres), copiada do texto sem alterar uma vírgula. Um trecho que não exista no capítulo INVALIDA a afirmação.`,
+    `- "cumprido": true SOMENTE se o trecho citado de fato entrega o item. Um capítulo bem escrito que não cumpre a função dramática prevista NÃO é conforme.`,
+    `- "justificativa": por que aquele trecho entrega (ou por que o item não foi entregue). Nunca vazia.`,
+    `- Na dúvida entre "entregou de forma fraca" e "não entregou": se o evento previsto não acontece na página, é "cumprido": false.`,
+    `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
+  ].join("\n");
+}

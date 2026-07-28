@@ -210,7 +210,53 @@ export class ProvedorMock implements ProvedorModelo {
     this.chamadas.push(c);
     const lista = this.filas.get(c.papel);
     const r = lista?.shift();
-    if (!r) throw new ErroProvedor("PROVEDOR_FALHOU", `mock sem resposta enfileirada para papel ${c.papel}`);
-    return { ...r, modeloExecutado: r.modeloExecutado ?? c.modelo };
+    if (r) return { ...r, modeloExecutado: r.modeloExecutado ?? c.modelo };
+    // Papéis com resposta AUTOMÁTICA quando a suíte não os está exercitando.
+    // Só vale para julgamento estrutural cuja resposta "tudo conforme" é
+    // derivável do próprio prompt — e a fila SEMPRE tem prioridade, então um
+    // teste que quer exercitar o papel continua no controle.
+    const automatica = respostaAutomatica(c);
+    if (automatica) return { texto: automatica, modeloExecutado: c.modelo };
+    throw new ErroProvedor("PROVEDOR_FALHOU", `mock sem resposta enfileirada para papel ${c.papel}`);
   }
+}
+
+/**
+ * Resposta derivada do PRÓPRIO PROMPT, para o papel de conformidade ficha→prosa.
+ * Monta um parecer conforme citando um trecho que de fato existe no capítulo que
+ * o prompt carrega — nada é inventado, e um teste que precise reprovar a
+ * conformidade enfileira a sua resposta e essa aqui nem roda.
+ */
+function respostaAutomatica(c: ChamadaModelo): string | null {
+  if (c.papel !== "conformidade_ficha") return null;
+  const prompt = `${c.prompt ?? ""}`;
+  // Só a lista "Itens a verificar" — as REGRAS DURAS da tarefa também começam
+  // com `- "campo":` e entravam como se fossem itens ("trecho", "cumprido"…).
+  const bloco = /Itens a verificar:\n([\s\S]*?)\n\s*\n/.exec(prompt)?.[1] ?? "";
+  const itens = [...bloco.matchAll(/^- "([a-z_]+)":/gm)].map((m) => m[1]);
+  if (!itens.length) return null;
+  // Âncora na SEÇÃO do pacote: o compilador renderiza cada seção como
+  // "## TÍTULO", e o texto do capítulo vive em "## TEXTO A AVALIAR". Sem a
+  // âncora, a linha mais longa acabava sendo uma regra da própria tarefa — e um
+  // trecho inexistente invalidaria a afirmação (corretamente, mas inutilmente).
+  const depois = prompt.split(/^##\s+TEXTO A AVALIAR[^\n]*$/m)[1];
+  // Corta na próxima SEÇÃO do pacote — títulos de seção são maiúsculos. O texto
+  // do capítulo abre com "## Capítulo N", que NÃO é seção: cortar em qualquer
+  // "## " deixava o corpo vazio e o trecho vinha da tarefa.
+  const corpo = depois?.split(/^##\s+[A-ZÀ-Ú0-9][A-ZÀ-Ú0-9 ()\-—]{3,}$/m)[0];
+  if (!corpo?.trim()) return null;
+  const trecho = corpo
+    .split(/\n|(?<=[.!?])\s+/)
+    .map((f) => f.trim())
+    .filter((f) => f.length > 24 && !f.startsWith("#") && !f.startsWith("-"))
+    .sort((a, b) => b.length - a.length)[0];
+  if (!trecho) return null;
+  return JSON.stringify({
+    afirmacoes: itens.map((item) => ({
+      item,
+      cumprido: true,
+      trecho,
+      justificativa: `o capítulo entrega "${item}" no trecho citado`,
+    })),
+  });
 }

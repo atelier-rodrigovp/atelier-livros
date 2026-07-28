@@ -13,6 +13,8 @@ import { DiscoPersistencia } from "./persistencia.js";
 import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
 import { ProvedorMock } from "./provedor.js";
 import { avaliarFechamentoLivro } from "./fechamento.js";
+import { itensExigidos } from "./conformidade.js";
+import { conformidadeOk, conformidadeReprovando } from "./fixtures-teste.js";
 import type { ArcoFundacao, Parecer, SceneSpec, SkillContract } from "./tipos.js";
 
 // ---------------------------------------------------------------------------
@@ -301,5 +303,69 @@ describe("o gate de fechamento NÃO reprova o capítulo que apenas planta a prom
     });
     expect(fech.passou).toBe(false);
     expect(fech.gates[0].evidencia).toContain("capitulo_de_pagamento_nao_aprovado");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fatia G — a conformidade ficha→prosa decide no PIPELINE REAL
+// ---------------------------------------------------------------------------
+
+describe("mutação: conformidade ficha → prosa decide o veredito", () => {
+  function cicloBase() {
+    provedor.enfileirar("arquiteto_cena", JSON.stringify(ficha()));
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_OK);
+  }
+
+  it("CONTROLE: conformidade conforme + revisor aprovando → aprovado", async () => {
+    cicloBase();
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecerAprovado()));
+    provedor.enfileirar("auditor_factual", auditor({ ha: false, detalhe: "" }));
+    provedor.enfileirar("conformidade_ficha", conformidadeOk(ficha(), PROSA_OK));
+
+    const r = await escreverCapitulo(deps, 3);
+    expect(r.status).toBe("aprovado");
+  });
+
+  it("MUTAÇÃO: o MESMO capítulo, com o MESMO parecer aprovado, reprova quando a VIRADA não é cumprida", async () => {
+    cicloBase();
+    for (let i = 0; i < 3; i++) {
+      provedor.enfileirar("revisor_literario", JSON.stringify(parecerAprovado()));
+      provedor.enfileirar("auditor_factual", auditor({ ha: false, detalhe: "" }));
+      provedor.enfileirar(
+        "conformidade_ficha",
+        conformidadeReprovando(ficha(), PROSA_OK, "virada", "a página arrancada é mencionada, mas nada muda por causa dela")
+      );
+      if (i < 2) provedor.enfileirar("escritor", PROSA_OK);
+    }
+
+    const r = await escreverCapitulo(deps, 3);
+
+    expect(r.status).toBe("reprovado");
+    const problema = r.problemas.find((p) => p.startsWith("conformidade [virada]"));
+    expect(problema).toBeDefined();
+    expect(problema).toContain("nada muda por causa dela");
+  });
+
+  it("MUTAÇÃO: trecho citado que NÃO existe no capítulo não sustenta aprovação", async () => {
+    cicloBase();
+    const inventado = JSON.stringify({
+      afirmacoes: itensExigidos(ficha()).map((item) => ({
+        item,
+        cumprido: true,
+        trecho: "o arquivista sacou uma arma e apontou para Marina sem dizer nada",
+        justificativa: "entrega o item",
+      })),
+    });
+    for (let i = 0; i < 3; i++) {
+      provedor.enfileirar("revisor_literario", JSON.stringify(parecerAprovado()));
+      provedor.enfileirar("auditor_factual", auditor({ ha: false, detalhe: "" }));
+      provedor.enfileirar("conformidade_ficha", inventado);
+      if (i < 2) provedor.enfileirar("escritor", PROSA_OK);
+    }
+
+    const r = await escreverCapitulo(deps, 3);
+    expect(r.status).toBe("reprovado");
+    expect(r.problemas.some((p) => p.includes("trecho_ausente_no_texto"))).toBe(true);
   });
 });

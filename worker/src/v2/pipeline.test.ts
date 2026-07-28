@@ -190,7 +190,8 @@ describe("escreverCapitulo — caminho feliz", () => {
     expect(r.textHash).toBe(hashText(PROSA_OK));
     expect(r.gatesFalhos).toEqual([]);
     expect(r.problemas).toEqual([]);
-    expect(r.runs).toHaveLength(5);
+    // 6 papéis por ciclo: ficha, contexto, escritor, revisor, auditor, conformidade.
+    expect(r.runs).toHaveLength(6);
 
     // Arquivo no disco escrito pelo pipeline (não pelo modelo)
     const caminho = path.join(dir, "manuscrito", "capitulo-03.md");
@@ -224,7 +225,7 @@ describe("escreverCapitulo — caminho feliz", () => {
 
     // Runs no ledger, todos com input_bundle_hash preenchido
     const runs = await disco.lerRuns();
-    expect(runs.length).toBeGreaterThanOrEqual(5);
+    expect(runs.length).toBeGreaterThanOrEqual(6);
     for (const run of runs) expect(run.input_bundle_hash).toBeTruthy();
     expect(runs.every((run) => run.status === "ok")).toBe(true);
   });
@@ -269,7 +270,7 @@ describe("escreverCapitulo — correção de gate", () => {
 
     const r = await escreverCapitulo(deps, 3);
     expect(r.status).toBe("aprovado");
-    expect(r.runs).toHaveLength(6); // escritor rodou duas vezes
+    expect(r.runs).toHaveLength(7); // escritor rodou duas vezes (+ conformidade)
 
     // A correção dirigida citou o gate falho e o texto atual
     const chamadasEscritor = provedor.chamadas.filter((c) => c.papel === "escritor");
@@ -311,7 +312,7 @@ describe("escreverCapitulo — aprovação sem evidência rebaixa", () => {
     expect(r.status).toBe("reprovado");
     expect(r.problemas).toContain("aprovação sem evidência positiva");
     expect(r.textHash).toBe(hashText(PROSA_CORRIGIDA));
-    expect(r.runs).toHaveLength(7); // ctx + escritor + (rev+aud) + escritor + (rev+aud)
+    expect(r.runs).toHaveLength(9); // ctx + escritor + (rev+aud+conf) + escritor + (rev+aud+conf)
 
     // Review reprovada persistida + bloqueio registrado no estado
     const reviews = lerJsonl("reviews.jsonl");
