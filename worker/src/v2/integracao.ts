@@ -120,13 +120,28 @@ export async function executarJobRoteado(
       if (job.tipo === "avaliar") return executarAvaliarV2(job);
       if (job.tipo === "revisar") {
         // Revisão V2 opera na edição de ORIGEM; tradução segue o pipeline V1.
-        if (await edicaoEhTraducao(job.edition_id)) return executarV1(job, hb);
+        if (await edicaoEhTraducao(job.edition_id)) {
+          registrarDesvioV1(job, "revisão de tradução não tem pipeline V2");
+          return executarV1(job, hb);
+        }
         return executarRevisarV2(job);
       }
       return executarEscritaV2(job);
     }
   }
+  // Projeto V2 cujo TIPO de job não tem implementação V2 (gerar_epub, traduzir,
+  // gerar_capa…) cai aqui legitimamente — mas nunca em silêncio. Rota calada é
+  // como um livro V2 seria montado por código V1 sem ninguém notar.
+  if (job.project_id && !TIPOS_V2.has(job.tipo)) {
+    const modo = await engineModeDoProjeto(job.project_id).catch(() => "desconhecido");
+    if (modo === "v2") registrarDesvioV1(job, `tipo '${job.tipo}' não tem implementação V2`);
+  }
   return executarV1(job, hb);
+}
+
+/** Toda vez que um projeto V2 executa por código V1, isso vai para o log. */
+export function registrarDesvioV1(job: Pick<Job, "id" | "tipo">, motivo: string): void {
+  console.log(`[engine-v2] job ${job.id} (${job.tipo}) roteado para a V1 — ${motivo}`);
 }
 
 async function atualizarProgresso(jobId: string, progresso: Record<string, unknown>): Promise<void> {
