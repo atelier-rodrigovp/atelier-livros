@@ -262,7 +262,63 @@ export interface ConsistenciaParecer {
  * 4. qualquer necessita_decisao_humana ⇒ verdict necessita_decisao_humana.
  * 5. o veredito nunca é promovido por código — só rebaixado (quem aprova é o revisor).
  */
-export function conferirParecer(parecer: Parecer, sinaisMedidos: SinalMedido[]): ConsistenciaParecer {
+/**
+ * PISOS por eixo (fatia J). O parecer trazia notas de 0 a 5 e o veredito era do
+ * revisor: nada impedia "continuidade 1, progressão dramática 1, verdict:
+ * aprovado". Agora a regra numérica vence a declaração — código só REBAIXA.
+ *
+ * Continuidade e progressão dramática têm piso mais alto de propósito: são as
+ * duas coisas que um capítulo bonito e inútil costuma falhar.
+ */
+export const PISOS_POR_EIXO: Record<string, number> = {
+  dramatic_progression: 3,
+  continuity: 3,
+  skill_adherence: 2,
+  clarity: 2,
+  emotional_effect: 2,
+  hook_effectiveness: 2,
+};
+
+/** Eixos abaixo do piso, com a nota e o piso citados. */
+export function eixosAbaixoDoPiso(
+  parecer: Parecer,
+  pisos: Record<string, number> = PISOS_POR_EIXO
+): { eixo: string; nota: number; piso: number }[] {
+  const out: { eixo: string; nota: number; piso: number }[] = [];
+  for (const [eixo, piso] of Object.entries(pisos)) {
+    const valor = (parecer as unknown as Record<string, { nota?: number } | undefined>)[eixo];
+    const nota = Number(valor?.nota ?? NaN);
+    if (Number.isFinite(nota) && nota < piso) out.push({ eixo, nota, piso });
+  }
+  return out;
+}
+
+/** Evidência que não localiza nada não sustenta aprovação. */
+export function evidenciasNaoLocalizaveis(parecer: Parecer): string[] {
+  const problemas: string[] = [];
+  for (const [i, e] of parecer.evidencias.entries()) {
+    if (!e.trecho?.trim()) {
+      problemas.push(`evidencias[${i}]: trecho vazio`);
+      continue;
+    }
+    if (e.trecho.trim().length < 12) {
+      problemas.push(`evidencias[${i}]: trecho curto demais para localizar ("${e.trecho}")`);
+    }
+    if (!e.local?.trim()) {
+      problemas.push(`evidencias[${i}]: sem "local" — a evidência precisa dizer ONDE está`);
+    }
+    if (!e.observacao?.trim()) {
+      problemas.push(`evidencias[${i}]: sem observação — citar sem dizer o que prova não é evidência`);
+    }
+  }
+  return problemas;
+}
+
+export function conferirParecer(
+  parecer: Parecer,
+  sinaisMedidos: SinalMedido[],
+  pisos: Record<string, number> = PISOS_POR_EIXO
+): ConsistenciaParecer {
   const problemas: string[] = [];
   let verdict: Verdict = parecer.verdict;
 
@@ -270,6 +326,24 @@ export function conferirParecer(parecer: Parecer, sinaisMedidos: SinalMedido[]):
   if (aprovando && parecer.evidencias.length === 0) {
     problemas.push("aprovação sem evidência positiva");
     verdict = "reprovado";
+  }
+
+  // Piso por eixo: o parecer NÃO pode declarar aprovação contra a regra numérica.
+  const abaixo = eixosAbaixoDoPiso(parecer, pisos);
+  if (abaixo.length && aprovando) {
+    for (const a of abaixo) {
+      problemas.push(`eixo "${a.eixo}" com nota ${a.nota}, abaixo do piso ${a.piso} — aprovação impossível`);
+    }
+    verdict = "reprovado";
+  }
+
+  // Evidência precisa LOCALIZAR: trecho citável, onde está e o que prova.
+  if (aprovando) {
+    const naoLocalizaveis = evidenciasNaoLocalizaveis(parecer);
+    if (naoLocalizaveis.length) {
+      problemas.push(...naoLocalizaveis);
+      verdict = "reprovado";
+    }
   }
 
   const citacoesInvalidas = problemasDeCitacao(parecer, sinaisMedidos);

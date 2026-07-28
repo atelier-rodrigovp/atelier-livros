@@ -353,3 +353,20 @@ export function tarefaExtratorMemoria(capitulo: number, ficha: SceneSpec): strin
     `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
   ].join("\n");
 }
+
+/** Julgamento de IDIOMA e VARIANTE (fatia J). O detector aponta; este papel decide. */
+export function tarefaIdioma(capitulo: number, alvo: string, sinais: string): string {
+  return [
+    `O capítulo ${capitulo} deve estar em ${nomeIdioma(alvo)} (${alvo}). Julgue a VARIANTE.`,
+    ``,
+    sinais,
+    ``,
+    `Responda APENAS JSON: { "narracao_conforme": boolean, "intencionais": [{"trecho": string, "motivo": string}], "injustificadas": [{"trecho": string, "detalhe": string}] }.`,
+    `REGRAS DURAS:`,
+    `- Julgue a NARRAÇÃO por um critério e o DIÁLOGO por outro. A narração tem de estar em ${alvo}, sem exceção.`,
+    `- Fala de personagem de outra origem, citação de documento estrangeiro e epígrafe são INTENCIONAIS: liste em "intencionais" com o motivo.`,
+    `- "injustificadas": só divergência que não tem explicação no texto. Cite o trecho — acusação sem trecho não conta.`,
+    `- O detector pode errar: se o que ele apontou for legítimo no contexto, diga isso em "intencionais" em vez de repetir a acusação.`,
+    `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
+  ].join("\n");
+}

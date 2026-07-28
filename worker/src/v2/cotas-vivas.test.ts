@@ -17,7 +17,8 @@ function parecer(over: Partial<Parecer> = {}): Parecer {
     continuity: eixo,
     hook_effectiveness: eixo,
     verdict: "aprovado_com_excecao",
-    evidencias: [{ local: "L:1", trecho: "t", observacao: "o" }],
+    // Evidência REALISTA: o piso de localização (fatia J) rejeita trecho de um caractere.
+    evidencias: [{ local: "L:1", trecho: "a maré subiu antes da hora prevista", observacao: "gancho concreto e localizado" }],
     sinais: [],
     correcoes: [],
     ...over,

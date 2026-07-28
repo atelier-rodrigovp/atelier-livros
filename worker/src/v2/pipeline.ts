@@ -21,6 +21,7 @@ import {
   type ParecerConformidade,
 } from "./conformidade.js";
 import { entradasDaFicha, gateRevelacaoRepetida, renderizarLedger } from "./ledger.js";
+import { decidirIdioma, medirIdioma, resumoIdioma, validarParecerIdioma, type ParecerIdioma } from "./idioma.js";
 import { derivarMemoriaDaProsa, validarExtracaoProsa, type ExtracaoProsa } from "./memoria-prosa.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
@@ -34,6 +35,7 @@ import {
   tarefaContextualizador,
   tarefaEscritor,
   tarefaConformidade,
+  tarefaIdioma,
   tarefaExtratorMemoria,
   tarefaEscritorCorrecao,
   tarefaRevisor,
@@ -715,6 +717,29 @@ export async function escreverCapitulo(
       verdictEfetivo = "reprovado";
       for (const p of conformidade.problemas) {
         problemas.push(`conformidade [${p.item}] ${p.motivo}: ${p.detalhe}`);
+      }
+    }
+
+    // 6c. IDIOMA E VARIANTE (fatia J). O detector é sinal; este papel julga —
+    // ele separa narração de diálogo intencional, citação e personagem
+    // estrangeiro, que nenhum detector de marcadores sabe distinguir.
+    const sinalIdioma = medirIdioma(texto, deps.idioma ?? "pt-BR");
+    if (sinalIdioma.divergentesNarracao.length || sinalIdioma.divergentesDialogo.length) {
+      const compIdi = compilar("julgamento_idioma", alvoCap, { fatos: [secaoTexto] });
+      if (!compIdi.ok) return bloquearPorCompilacao(compIdi.bloqueios);
+      const rIdi = await executarPapel<ParecerIdioma>({
+        ...base,
+        papel: "julgamento_idioma",
+        alvo: alvoCap,
+        pacote: compIdi.pacote!,
+        tarefa: tarefaIdioma(capitulo, deps.idioma ?? "pt-BR", resumoIdioma(sinalIdioma)),
+        parse: (t) => validarParecerIdioma(extrairJson(t)),
+      });
+      runs.push(rIdi.runId);
+      const vIdioma = decidirIdioma(sinalIdioma, rIdi.valor);
+      if (!vIdioma.passou) {
+        verdictEfetivo = "reprovado";
+        problemas.push(`idioma: ${vIdioma.motivo} — ${vIdioma.evidencia}`);
       }
     }
 

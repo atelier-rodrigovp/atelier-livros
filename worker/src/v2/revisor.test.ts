@@ -347,3 +347,100 @@ describe("exigirDisposicaoCompleta — sinal fora da cota omitido aciona retry d
     expect(resultado.problemas.some((x) => /citação não corresponde/.test(x))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fatia J — pisos por eixo e evidência localizável
+// ---------------------------------------------------------------------------
+
+describe("pisos por eixo: a regra numérica vence a declaração", () => {
+  const comNotas = (notas: Partial<Record<string, number>>): Parecer => {
+    const eixo = (n: number) => ({ nota: n, evidencia: "a folha arrancada muda o objetivo da cena" });
+    return {
+      schema: "parecer/v1",
+      dramatic_progression: eixo(notas.dramatic_progression ?? 4),
+      skill_adherence: eixo(notas.skill_adherence ?? 4),
+      clarity: eixo(notas.clarity ?? 4),
+      emotional_effect: eixo(notas.emotional_effect ?? 4),
+      continuity: eixo(notas.continuity ?? 4),
+      hook_effectiveness: eixo(notas.hook_effectiveness ?? 4),
+      verdict: "aprovado",
+      evidencias: [{ local: "L:5", trecho: "a chave girou na fechadura devagar", observacao: "gancho concreto" }],
+      sinais: [],
+      correcoes: [],
+    };
+  };
+
+  it("CONTROLE: notas acima dos pisos, aprovação vale", () => {
+    expect(conferirParecer(comNotas({}), []).verdictEfetivo).toBe("aprovado");
+  });
+
+  it("CONTINUIDADE abaixo do piso torna a aprovação impossível", () => {
+    const c = conferirParecer(comNotas({ continuity: 1 }), []);
+    expect(c.verdictEfetivo).toBe("reprovado");
+    expect(c.problemas.join(" ")).toContain('eixo "continuity" com nota 1, abaixo do piso 3');
+  });
+
+  it("PROGRESSÃO DRAMÁTICA abaixo do piso torna a aprovação impossível", () => {
+    const c = conferirParecer(comNotas({ dramatic_progression: 2 }), []);
+    expect(c.verdictEfetivo).toBe("reprovado");
+    expect(c.problemas.join(" ")).toContain("dramatic_progression");
+  });
+
+  it("nota exatamente NO piso passa", () => {
+    expect(conferirParecer(comNotas({ continuity: 3 }), []).verdictEfetivo).toBe("aprovado");
+  });
+
+  it("o parecer NÃO pode declarar aprovação contra a regra numérica", () => {
+    const p = comNotas({ continuity: 0, dramatic_progression: 0 });
+    p.verdict = "aprovado";
+    expect(conferirParecer(p, []).verdictEfetivo).toBe("reprovado");
+  });
+
+  it("pisos são parametrizáveis pelo contrato", () => {
+    const p = comNotas({ clarity: 3 });
+    expect(conferirParecer(p, [], { clarity: 5 }).verdictEfetivo).toBe("reprovado");
+  });
+});
+
+describe("evidência precisa LOCALIZAR", () => {
+  const comEvidencia = (ev: { local: string; trecho: string; observacao: string }): Parecer => {
+    const eixo = { nota: 4, evidencia: "ok" };
+    return {
+      schema: "parecer/v1",
+      dramatic_progression: eixo, skill_adherence: eixo, clarity: eixo,
+      emotional_effect: eixo, continuity: eixo, hook_effectiveness: eixo,
+      verdict: "aprovado",
+      evidencias: [ev],
+      sinais: [], correcoes: [],
+    };
+  };
+
+  it("evidência completa sustenta a aprovação", () => {
+    const c = conferirParecer(comEvidencia({ local: "L:5", trecho: "a chave girou na fechadura", observacao: "gancho" }), []);
+    expect(c.verdictEfetivo).toBe("aprovado");
+  });
+
+  it("trecho vazio NÃO sustenta aprovação", () => {
+    const c = conferirParecer(comEvidencia({ local: "L:5", trecho: "  ", observacao: "gancho" }), []);
+    expect(c.verdictEfetivo).toBe("reprovado");
+    expect(c.problemas.join(" ")).toContain("trecho vazio");
+  });
+
+  it("trecho curto demais não localiza nada", () => {
+    const c = conferirParecer(comEvidencia({ local: "L:5", trecho: "a chave", observacao: "gancho" }), []);
+    expect(c.verdictEfetivo).toBe("reprovado");
+    expect(c.problemas.join(" ")).toContain("curto demais");
+  });
+
+  it("evidência sem LOCAL não diz onde está", () => {
+    const c = conferirParecer(comEvidencia({ local: "", trecho: "a chave girou na fechadura", observacao: "g" }), []);
+    expect(c.verdictEfetivo).toBe("reprovado");
+    expect(c.problemas.join(" ")).toContain('sem "local"');
+  });
+
+  it("citar sem dizer o que prova não é evidência", () => {
+    const c = conferirParecer(comEvidencia({ local: "L:5", trecho: "a chave girou na fechadura", observacao: "" }), []);
+    expect(c.verdictEfetivo).toBe("reprovado");
+    expect(c.problemas.join(" ")).toContain("sem observação");
+  });
+});

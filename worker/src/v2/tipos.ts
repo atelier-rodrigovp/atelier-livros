@@ -16,7 +16,8 @@ export type Papel =
   | "auditor_factual"       // nomes, datas, geografia, continuidade, conhecimento
   | "editor_estrutural"     // cortes, fusões, ordem, macro-ritmo (propõe; worker aplica)
   | "conformidade_ficha"     // a prosa cumpriu a ficha? (fatia G) — evidência localizada
-  | "extrator_memoria";      // o que a PROSA APROVADA estabeleceu (fatia H)
+  | "extrator_memoria"       // o que a PROSA APROVADA estabeleceu (fatia H)
+  | "julgamento_idioma";     // variante-alvo × narração e diálogo (fatia J)
 // O "gravador de estado" NÃO é um papel: é código determinístico (gravador.ts).
 
 export type ClasseCapacidade = "raciocinio" | "fatos" | "prosa" | "julgamento";
@@ -32,6 +33,7 @@ export const CLASSE_POR_PAPEL: Record<Papel, ClasseCapacidade> = {
   editor_estrutural: "raciocinio",
   conformidade_ficha: "julgamento",
   extrator_memoria: "fatos",
+  julgamento_idioma: "julgamento",
 };
 
 export interface MapaModelos {
