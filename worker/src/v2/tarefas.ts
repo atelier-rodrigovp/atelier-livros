@@ -210,6 +210,59 @@ export function tarefaArquitetoEnredo(briefing: BriefingFundacao, contrato: Skil
   ].filter(Boolean).join("\n");
 }
 
+/**
+ * PASSADA 1 (MACRO): a fundação de longo alcance, SEM a linha por capítulo.
+ * Separar as passadas evita o que a geração única forçava — pedir ao modelo o
+ * arco e 40 resumos na mesma resposta, o que o deixava raso justamente no arco.
+ */
+export function tarefaArquitetoEnredoMacro(briefing: BriefingFundacao, contrato: SkillContract): string {
+  const docsExigidos = contrato.estruturas_exigidas?.docs ?? [];
+  const completa = tarefaArquitetoEnredo(briefing, contrato);
+  // Reaproveita as regras da tarefa completa e substitui só o contrato de saída:
+  // a micro (estrutura capítulo a capítulo) fica para a passada 2.
+  const semEstrutura = completa
+    .split("\n")
+    .filter((l) => !l.startsWith(`- "estrutura":`))
+    .join("\n");
+  return [
+    `PASSADA 1 de 2 — MACRO. Nesta passada você NÃO escreve a linha de cada capítulo.`,
+    ``,
+    semEstrutura.replace(
+      /Responda APENAS JSON: \{[^\n]*\}\./,
+      `Responda APENAS JSON: { "perfil_voz": string, "biblia": string, "mapa_personagens": [{"nome": string, "papel": string, "ferida": string, "segredo": string, "desejo": string, "voz": string, "arco": string}], "fios": [string], "promessa_editorial": string, "arco": {"atos": [...], "promessas": [...], "fios": [...], "arcos": [...]}${docsExigidos.length ? `, "docs_exigidos": {${docsExigidos.map((d) => `"${d}": string`).join(", ")}}` : ""} }. NÃO inclua "estrutura" nesta passada.`
+    ),
+    ``,
+    `A macro é validada ANTES da micro: atos sem furo, promessa com pagamento, fio com escalada e fechamento, arco de personagem com marcos, tensão que escala entre os atos e antagonista estrutural. Nada disso é negociável na passada 2.`,
+  ].join("\n");
+}
+
+/**
+ * PASSADA 2 (MICRO): a linha de cada capítulo, DENTRO da macro já aprovada.
+ * A macro entra como contexto vinculante — a micro não pode contradizê-la.
+ */
+export function tarefaArquitetoEnredoMicro(
+  briefing: BriefingFundacao,
+  contrato: SkillContract,
+  macro: { fios: string[]; promessa_editorial: string; arcoResumo: string }
+): string {
+  return [
+    `PASSADA 2 de 2 — MICRO. A macro do livro "${briefing.titulo}" já foi APROVADA pelo portão e é VINCULANTE: você a detalha, nunca a altera.`,
+    ``,
+    `## MACRO APROVADA (não contradiga)`,
+    `Promessa editorial: ${macro.promessa_editorial}`,
+    `Fios declarados: ${macro.fios.join(", ")}`,
+    macro.arcoResumo,
+    ``,
+    `Escreva a estrutura capítulo a capítulo.`,
+    `Responda APENAS JSON: { "estrutura": [{"capitulo": number, "fio": string, "resumo_estrutural": string}] }.`,
+    `- EXATAMENTE ${briefing.totalCapitulos} itens, numerados de 1 a ${briefing.totalCapitulos}, sem furo nem repetição.`,
+    `- "fio" de cada capítulo é UM dos fios declarados acima, escrito igual.`,
+    `- "resumo_estrutural" aponta objetivo e virada em ≤25 palavras, sem prosa, sem diálogo.`,
+    `- Cada capítulo tem função PRÓPRIA: dois capítulos com resumo intercambiável reprovam a fundação inteira (o portão compara por similaridade, não só por igualdade).`,
+    `- Os capítulos de plantio, reforço e pagamento de cada promessa, e os de abertura/escalada/clímax/fechamento de cada fio, têm de bater com a macro acima.`,
+  ].join("\n");
+}
+
 /** Editor estrutural: PROPÕE corte/fusão/reordenação — nunca escreve prosa. */
 export function tarefaEditorEstrutural(totalCaps: number, contrato: SkillContract): string {
   return [

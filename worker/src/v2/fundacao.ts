@@ -14,9 +14,14 @@ import type { Gravador } from "./gravador.js";
 import { hashJsonCanonico } from "./hash.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
-import { avaliarFundacaoV2, correcaoParaRetry } from "./portao-fundacao.js";
+import {
+  avaliarFundacaoV2,
+  avaliarMacroFundacao,
+  correcaoParaRetry,
+  gateMacroMicroCoerentes,
+} from "./portao-fundacao.js";
 import type { ProvedorModelo } from "./provedor.js";
-import { tarefaArquitetoEnredo } from "./tarefas.js";
+import { tarefaArquitetoEnredoMacro, tarefaArquitetoEnredoMicro } from "./tarefas.js";
 import { ErroEngine, type ArcoFundacao, type ContratoCompilado, type MapaModelos } from "./tipos.js";
 
 export interface PersonagemMapa {
@@ -56,7 +61,33 @@ export type VersaoFundacao = "2" | "3";
 
 const CAMPOS_PERSONAGEM: (keyof PersonagemMapa)[] = ["nome", "papel", "ferida", "segredo", "desejo", "voz", "arco"];
 
-export function parseFundacao(texto: string): FundacaoV2 {
+/**
+ * Passada 1 (macro): a mesma validação, sem exigir `estrutura` — que é o produto
+ * da passada 2. A estrutura entra vazia e o portão da macro ignora os bloqueios
+ * que só a micro pode satisfazer.
+ */
+export function parseFundacaoMacro(texto: string): FundacaoV2 {
+  return parseFundacao(texto, { exigirEstrutura: false });
+}
+
+/** Passada 2 (micro): só a estrutura capítulo a capítulo. */
+export function parseEstruturaMicro(texto: string): FundacaoV2["estrutura"] {
+  const r = validarSaidaJson<FundacaoV2["estrutura"]>(texto, (o) => {
+    const bruto = (o as { estrutura?: unknown }).estrutura ?? o;
+    if (!Array.isArray(bruto) || bruto.length < 1) throw new Error("estrutura vazia");
+    for (const e of bruto as FundacaoV2["estrutura"]) {
+      if (!Number.isInteger(e?.capitulo) || typeof e?.fio !== "string" || typeof e?.resumo_estrutural !== "string") {
+        throw new Error("item de estrutura inválido (esperado {capitulo:int, fio:string, resumo_estrutural:string})");
+      }
+    }
+    return bruto as FundacaoV2["estrutura"];
+  });
+  if (!r.ok) throw new Error(`estrutura fora do schema: ${r.gate.evidencia}`);
+  return r.valor;
+}
+
+export function parseFundacao(texto: string, opts: { exigirEstrutura?: boolean } = {}): FundacaoV2 {
+  const exigirEstrutura = opts.exigirEstrutura !== false;
   const r = validarSaidaJson<FundacaoV2>(texto, (o) => {
     const f = o as FundacaoV2;
     if (typeof f?.perfil_voz !== "string" || f.perfil_voz.trim().length < 80) throw new Error("perfil_voz ausente/curto");
@@ -68,7 +99,8 @@ export function parseFundacao(texto: string): FundacaoV2 {
       }
       if (!p.nome.trim()) throw new Error("personagem sem nome");
     }
-    if (!Array.isArray(f.estrutura) || f.estrutura.length < 1) throw new Error("estrutura vazia");
+    if (!Array.isArray(f.estrutura)) f.estrutura = [];
+    if (exigirEstrutura && f.estrutura.length < 1) throw new Error("estrutura vazia");
     for (const e of f.estrutura) {
       if (!Number.isInteger(e.capitulo) || typeof e.fio !== "string" || typeof e.resumo_estrutural !== "string") {
         throw new Error("item de estrutura inválido");
@@ -107,6 +139,8 @@ export interface DepsFundacao {
 export interface ResultadoPortao {
   /** Quantos retries dirigidos o portão consumiu (0 = passou de primeira). */
   retries: number;
+  /** Run da passada MACRO (a micro tem o seu em `runId`). */
+  runIdMacro?: string;
   /** Motivo de cada reprovação, na ordem — adendo do autor ao §5 da spec. */
   reprovacoes: string[];
   avisos: string[];
@@ -121,11 +155,17 @@ export const MAX_RETRIES_PORTAO = 2;
  * regerada com instrução dirigida citando cada bloqueio; esgotados os retries,
  * lança — fundação reprovada não vira livro.
  *
- * Decisão de spec §5: geração ÚNICA com portão, em vez de duas passadas (macro
- * validada antes da micro). Duas passadas dobrariam o consumo de cota (esta
- * chamada já tem timeout de 900s) e o defeito que evitariam é o mesmo que o
- * portão detecta. O adendo do autor exige registrar quantos retries cada fundação
- * consumiu: se os dois virarem rotina, a decisão se revisita com dado.
+ * DUAS PASSADAS (revoga a decisão de spec §5, que era geração única):
+ * 1. MACRO — atos, conflito, promessa editorial, arcos, fios, clímax e resolução;
+ * 2. MICRO — a função e a progressão de cada capítulo, DENTRO da macro aprovada.
+ *
+ * A objeção original à divisão era custo de cota. Na prática ela o reduz onde
+ * mais dói: a macro é validada ANTES de gerar a estrutura inteira, e uma falha
+ * só da micro regenera só a micro — antes, um retry por resumo repetido no
+ * capítulo 31 regerava bíblia, mapa, perfil e arco junto.
+ *
+ * O adendo do autor sobre registrar retries continua valendo: `ResultadoPortao`
+ * traz `retries` e `reprovacoes`, agora separados por passada.
  */
 export async function gerarFundacaoV2(
   deps: DepsFundacao,
@@ -154,9 +194,16 @@ export async function gerarFundacaoV2(
       mensagem: `compilação da fundação bloqueada: ${comp.bloqueios.map((b) => `${b.codigo}: ${b.detalhe}`).join(" · ")}`,
     });
   }
-  const tarefaBase = tarefaArquitetoEnredo(briefing, deps.contrato.contrato);
   const reprovacoes: string[] = [];
   let avisos: string[] = [];
+  let retriesTotais = 0;
+
+  // ---------------------------------------------------------------------------
+  // PASSADA 1 — MACRO (sem a linha por capítulo)
+  // ---------------------------------------------------------------------------
+  const tarefaMacro = tarefaArquitetoEnredoMacro(briefing, deps.contrato.contrato);
+  let macro: FundacaoV2 | null = null;
+  let runIdMacro = "";
   let correcao = "";
 
   for (let tentativa = 0; ; tentativa++) {
@@ -166,16 +213,13 @@ export async function gerarFundacaoV2(
       mapa: deps.mapa,
       jobId: deps.jobId ?? null,
       papel: "arquiteto_enredo",
-      alvo: tentativa === 0 ? "fundacao" : `fundacao:portao-retry-${tentativa}`,
+      alvo: tentativa === 0 ? "fundacao:macro" : `fundacao:macro:portao-retry-${tentativa}`,
       pacote: comp.pacote!,
-      tarefa: correcao ? `${tarefaBase}\n\n## CORREÇÃO DO PORTÃO\n${correcao}` : tarefaBase,
-      parse: parseFundacao,
-      // Fundação completa (perfil + bíblia + mapa + estrutura por capítulo) é a
-      // maior geração única da engine: 5 min estourava com briefing rico.
+      tarefa: correcao ? `${tarefaMacro}\n\n## CORREÇÃO DO PORTÃO\n${correcao}` : tarefaMacro,
+      parse: parseFundacaoMacro,
       timeoutMs: 900000,
     });
-
-    const av = avaliarFundacaoV2(
+    const av = avaliarMacroFundacao(
       r.valor,
       deps.contrato.contrato,
       briefing.totalCapitulos,
@@ -183,25 +227,93 @@ export async function gerarFundacaoV2(
     );
     avisos = av.avisos;
     if (av.bloqueios.length === 0) {
-      return { fundacao: r.valor, runId: r.runId, portao: { retries: tentativa, reprovacoes, avisos } };
+      macro = r.valor;
+      runIdMacro = r.runId;
+      retriesTotais = tentativa;
+      break;
     }
-
     const motivo = av.bloqueios.map((b) => `${b.codigo}: ${b.mensagem}`).join(" · ");
-    reprovacoes.push(motivo);
-    console.warn(`[engine-v2] portão da fundação reprovou (tentativa ${tentativa + 1}): ${motivo}`);
-
+    reprovacoes.push(`[macro] ${motivo}`);
+    console.warn(`[engine-v2] portão da fundação reprovou a MACRO (tentativa ${tentativa + 1}): ${motivo}`);
     if (tentativa >= MAX_RETRIES_PORTAO) {
       throw new ErroEngine({
         codigo: "FUNDACAO_REPROVADA",
         classe: "qualidade",
         mensagem:
-          `fundação reprovada pelo portão após ${MAX_RETRIES_PORTAO} retry(s) dirigido(s); ` +
+          `macro da fundação reprovada pelo portão após ${MAX_RETRIES_PORTAO} retry(s) dirigido(s); ` +
           `nenhum capítulo foi escrito. Último motivo — ${motivo}`,
-        detalhe: { reprovacoes, avisos: av.avisos },
+        detalhe: { passada: "macro", reprovacoes, avisos: av.avisos },
       });
     }
     correcao = correcaoParaRetry(av);
   }
+
+  // ---------------------------------------------------------------------------
+  // PASSADA 2 — MICRO (dentro da macro aprovada; falha aqui NÃO regenera a macro)
+  // ---------------------------------------------------------------------------
+  const tarefaMicro = tarefaArquitetoEnredoMicro(briefing, deps.contrato.contrato, {
+    fios: macro.fios,
+    promessa_editorial: macro.promessa_editorial,
+    arcoResumo: resumirArcoParaMicro(macro),
+  });
+  correcao = "";
+
+  for (let tentativa = 0; ; tentativa++) {
+    const r = await executarPapel<FundacaoV2["estrutura"]>({
+      gravador: deps.gravador,
+      provedor: deps.provedor,
+      mapa: deps.mapa,
+      jobId: deps.jobId ?? null,
+      papel: "arquiteto_enredo",
+      alvo: tentativa === 0 ? "fundacao:micro" : `fundacao:micro:portao-retry-${tentativa}`,
+      pacote: comp.pacote!,
+      tarefa: correcao ? `${tarefaMicro}\n\n## CORREÇÃO DO PORTÃO\n${correcao}` : tarefaMicro,
+      parse: parseEstruturaMicro,
+      timeoutMs: 900000,
+    });
+    const completa: FundacaoV2 = { ...macro, estrutura: r.valor };
+    const av = avaliarFundacaoV2(
+      completa,
+      deps.contrato.contrato,
+      briefing.totalCapitulos,
+      Object.keys(completa.docs_exigidos ?? {})
+    );
+    av.bloqueios.push(...gateMacroMicroCoerentes(completa));
+    avisos = av.avisos;
+    if (av.bloqueios.length === 0) {
+      return {
+        fundacao: completa,
+        runId: r.runId,
+        portao: { retries: retriesTotais + tentativa, reprovacoes, avisos, runIdMacro },
+      };
+    }
+    const motivo = av.bloqueios.map((b) => `${b.codigo}: ${b.mensagem}`).join(" · ");
+    reprovacoes.push(`[micro] ${motivo}`);
+    console.warn(`[engine-v2] portão da fundação reprovou a MICRO (tentativa ${tentativa + 1}): ${motivo}`);
+    if (tentativa >= MAX_RETRIES_PORTAO) {
+      throw new ErroEngine({
+        codigo: "FUNDACAO_REPROVADA",
+        classe: "qualidade",
+        mensagem:
+          `micro da fundação reprovada pelo portão após ${MAX_RETRIES_PORTAO} retry(s) dirigido(s); ` +
+          `a macro segue aprovada e nenhum capítulo foi escrito. Último motivo — ${motivo}`,
+        detalhe: { passada: "micro", reprovacoes, avisos: av.avisos },
+      });
+    }
+    correcao = correcaoParaRetry(av);
+  }
+}
+
+/** A macro, condensada, para entrar como contexto vinculante da passada 2. */
+export function resumirArcoParaMicro(macro: FundacaoV2): string {
+  if (!macro.arco) return "(fundação sem grade de arco)";
+  const linhas = [
+    "Atos: " + macro.arco.atos.map((a) => `${a.numero} (cap ${a.cap_inicio}–${a.cap_fim}, ${a.funcao}, tensão ${a.tensao_alvo})`).join("; "),
+    "Promessas: " + macro.arco.promessas.map((p) => `${p.id} "${p.enunciado}" planta ${p.plantada_em} → paga ${p.paga_em}`).join("; "),
+    "Fios: " + macro.arco.fios.map((f) => `${f.nome} (abre ${f.abre}, escalada ${f.escalada.join("/")}, clímax ${f.climax}, fecha ${f.fecha})`).join("; "),
+    "Arcos: " + macro.arco.arcos.map((a) => `${a.personagem} [${a.marcos.map((m) => `cap ${m.capitulo}: ${m.estado}`).join(" → ")}]`).join("; "),
+  ];
+  return linhas.join("\n");
 }
 
 /** Materializa a fundação: disco (perfil/bíblia/mapa/estrutura) + estado canônico + fases. */

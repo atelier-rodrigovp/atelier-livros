@@ -226,6 +226,16 @@ export function validarFios(fios: FioArco[], total: number): ViolacaoArco[] {
       v.push({ alvo, invariante: "todo fio tem fechamento", detalhe: `fio "${f.nome}" abre em ${f.abre} e nunca fecha` });
       continue;
     }
+    // Escalada vazia = fio que abre e fecha sem nunca subir de aposta. O check de
+    // ordem abaixo aceitava a lista vazia (usava `abre` como substituto), então um
+    // fio sem um único passo intermediário passava pelo portão.
+    if (!f.escalada.length) {
+      v.push({
+        alvo,
+        invariante: "todo fio tem escalada não vazia",
+        detalhe: `fio "${f.nome}" abre em ${f.abre} e vai direto ao clímax em ${f.climax}, sem nenhum passo de escalada`,
+      });
+    }
     const escalaMin = f.escalada.length ? Math.min(...f.escalada) : f.abre;
     const escalaMax = f.escalada.length ? Math.max(...f.escalada) : f.abre;
     if (!(f.abre <= escalaMin && escalaMax <= f.climax && f.climax <= f.fecha)) {

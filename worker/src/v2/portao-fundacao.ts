@@ -11,7 +11,7 @@
 
 import { validarArco, type ViolacaoArco } from "./arco.js";
 import type { FundacaoV2 } from "./fundacao.js";
-import type { ResultadoGate, SkillContract } from "./tipos.js";
+import type { ArcoFundacao, ResultadoGate, SkillContract } from "./tipos.js";
 
 export interface BloqueioFundacao {
   codigo: string;
@@ -39,6 +39,111 @@ function documentoContem(documento: string, nome: string): boolean {
   const alvo = normalizarNome(nome.split(/[,;]|\s[—–]\s/, 1)[0]);
   if (!alvo) return false;
   return ` ${normalizarNome(documento)} `.includes(` ${alvo} `);
+}
+
+// ---------------------------------------------------------------------------
+// Detectores do portão (puros; cada um sustenta um bloqueio nomeado)
+// ---------------------------------------------------------------------------
+
+/** Limiar alto de propósito: só acusa função REALMENTE intercambiável. */
+export const LIMIAR_RESUMO_SIMILAR = 0.75;
+
+function tokensRelevantes(texto: string): Set<string> {
+  const vazias = new Set([
+    "a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "em", "no", "na", "nos", "nas",
+    "um", "uma", "para", "com", "que", "se", "por", "ao", "à", "as", "ele", "ela", "seu", "sua",
+  ]);
+  return new Set(
+    normalizarNome(texto)
+      .split(/\s+/)
+      .filter((t) => t.length > 2 && !vazias.has(t))
+  );
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (!a.size || !b.size) return 0;
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
+/** Pares de capítulos cujo resumo estrutural descreve a mesma função. */
+export function paresDeResumosSimilares(
+  estrutura: { capitulo: number; resumo_estrutural: string }[],
+  limiar = LIMIAR_RESUMO_SIMILAR
+): { a: number; b: number; similaridade: number }[] {
+  const uteis = estrutura
+    .map((e) => ({ capitulo: e.capitulo, tokens: tokensRelevantes(e.resumo_estrutural), bruto: e.resumo_estrutural.trim() }))
+    .filter((e) => e.bruto.length > 20);
+  const out: { a: number; b: number; similaridade: number }[] = [];
+  for (let i = 0; i < uteis.length; i++) {
+    for (let j = i + 1; j < uteis.length; j++) {
+      const s = jaccard(uteis[i].tokens, uteis[j].tokens);
+      if (s >= limiar) out.push({ a: uteis[i].capitulo, b: uteis[j].capitulo, similaridade: s });
+    }
+  }
+  return out.sort((x, y) => y.similaridade - x.similaridade);
+}
+
+/**
+ * Invariância explícita: o autor pode declarar que um personagem central NÃO
+ * muda — mas tem de dizer isso e por quê. Silêncio nunca conta como declaração.
+ */
+export function declaraInvariancia(arco: string | undefined): boolean {
+  const t = (arco ?? "").trim();
+  if (t.length < 20) return false;
+  return /invari[aá]|n[aã]o muda|n[aã]o se transforma|permanece o mesmo|imut[aá]vel|sem arco/i.test(t);
+}
+
+/**
+ * Tensão que escala: não basta cada ato estar na faixa 1–5 (o que já era
+ * validado). O pico tem de ser maior que a abertura e a série não pode ser plana.
+ */
+export function progressaoDeTensao(
+  atos: { numero: number; cap_inicio: number; tensao_alvo: number }[]
+): { progride: boolean; detalhe: string } {
+  if (atos.length < 2) return { progride: true, detalhe: "menos de dois atos: progressão não aplicável" };
+  const serie = [...atos].sort((a, b) => a.cap_inicio - b.cap_inicio).map((a) => a.tensao_alvo);
+  const primeira = serie[0];
+  const pico = Math.max(...serie);
+  if (serie.every((t) => t === primeira)) {
+    return { progride: false, detalhe: `todos os atos com tensao_alvo = ${primeira} (série plana)` };
+  }
+  if (pico <= primeira) {
+    return { progride: false, detalhe: `pico de tensão (${pico}) não supera a abertura (${primeira}) — série [${serie.join(", ")}]` };
+  }
+  return { progride: true, detalhe: `[${serie.join(", ")}]` };
+}
+
+/**
+ * Promessas centrais pagas antes do último ato deixam o desfecho sem o que
+ * resolver. "Central" = promessa cujo plantio está no primeiro ato.
+ */
+export function promessasForaDoDesfecho(arco: ArcoFundacao, total: number): string[] {
+  if (!arco.atos.length) return [];
+  const ultimoAto = [...arco.atos].sort((a, b) => a.cap_inicio - b.cap_inicio)[arco.atos.length - 1];
+  const primeiroAto = [...arco.atos].sort((a, b) => a.cap_inicio - b.cap_inicio)[0];
+  return arco.promessas
+    .filter((p) => p.plantada_em <= primeiroAto.cap_fim)
+    .filter((p) => p.paga_em > 0 && p.paga_em < ultimoAto.cap_inicio && p.paga_em <= total)
+    .map((p) => `${p.id} (paga no cap ${p.paga_em}; último ato começa no ${ultimoAto.cap_inicio})`);
+}
+
+/** Documento exigido que existe mas não diz nada. */
+export function motivoDocInsubstancial(conteudo: string): string | null {
+  const t = (conteudo ?? "").trim();
+  if (!t) return "vazio";
+  const semTitulos = t
+    .split("\n")
+    .filter((l) => !/^\s*#{1,6}\s/.test(l))
+    .join(" ")
+    .trim();
+  const palavras = semTitulos.split(/\s+/).filter(Boolean).length;
+  if (palavras < 40) return `${palavras} palavra(s) de conteúdo fora dos títulos (mínimo 40)`;
+  if (/\b(TODO|TBD|A DEFINIR|PREENCHER|LOREM IPSUM|PLACEHOLDER|EM BRANCO|\.\.\.)\b/i.test(semTitulos)) {
+    return "contém marcador de placeholder (TODO/TBD/a definir/…)";
+  }
+  return null;
 }
 
 /**
@@ -159,23 +264,182 @@ export function avaliarFundacaoV2(
     );
   }
 
-  // --- 8. Rubrica anti-genérico (sinaliza, não prova qualidade) --------------
+  // --- 8. O que a fundação PROMETE ao leitor (bloqueante) --------------------
+  // Antes eram avisos: uma promessa editorial vazia, um livro sem antagonista e
+  // capítulos intercambiáveis passavam pelo portão e viravam 40 capítulos.
   if (!f.promessa_editorial.trim()) {
-    avisos.push("promessa_editorial vazia");
+    bloqueios.push({
+      codigo: "PROMESSA_EDITORIAL_VAZIA",
+      mensagem: "promessa_editorial vazia: a fundação não declara o que o livro promete ao leitor",
+      severidade: "critical",
+    });
   }
+  if (!/antagonista|vil[aã]o|advers[aá]ri|for[cç]a antagon/i.test(f.biblia) && !f.mapa_personagens.some((p) => /antagonista/i.test(p.papel))) {
+    bloqueios.push({
+      codigo: "ANTAGONISTA_AUSENTE",
+      mensagem: "nenhum antagonista nem força antagônica identificável na bíblia ou no mapa de personagens",
+      severidade: "critical",
+    });
+  }
+
+  // Funções de capítulo intercambiáveis: resumos idênticos OU quase iguais.
+  // Comparar só igualdade literal deixava passar a paráfrase — que é justamente
+  // como um modelo raso preenche 40 linhas de estrutura.
+  const similares = paresDeResumosSimilares(f.estrutura);
+  if (similares.length) {
+    bloqueios.push({
+      codigo: "FUNCOES_CAPITULO_REPETIDAS",
+      mensagem:
+        `capítulos com função intercambiável (resumo estrutural quase igual): ` +
+        similares.slice(0, 6).map((s) => `${s.a}≈${s.b} (${Math.round(s.similaridade * 100)}%)`).join(", "),
+      severidade: "critical",
+    });
+  }
+
   if (!/virada|reviravolta|twist|revela[cç][aã]o/i.test(f.biblia + f.estrutura.map((e) => e.resumo_estrutural).join(" "))) {
     avisos.push("nenhuma virada/reviravolta declarada na bíblia ou na estrutura (estrutura possivelmente episódica)");
   }
-  const resumos = f.estrutura.map((e) => e.resumo_estrutural.trim().toLowerCase()).filter((r) => r.length > 20);
-  const repetidos = resumos.filter((r, i) => resumos.indexOf(r) !== i).length;
-  if (repetidos > 0) {
-    avisos.push(`${repetidos} resumo(s) estrutural(is) repetido(s) — capítulos que repetem informação`);
+
+  // --- 9. Arco de personagem OU invariância explícita ------------------------
+  // O padrão exigido depende do schema: com grade de arco (v3), o personagem
+  // central precisa de MARCOS verificáveis; sem grade (v2, livros em produção),
+  // a descrição textual do arco basta. Em ambos, invariância vale — desde que
+  // declarada e justificada. O que nunca vale é o silêncio.
+  const centrais = f.mapa_personagens.filter((p) => /protagonista|antagonista/i.test(p.papel));
+  const comArcoNaGrade = new Set((f.arco?.arcos ?? []).map((a) => normalizarNome(a.personagem)));
+  const semArco = centrais.filter((p) => {
+    if (declaraInvariancia(p.arco)) return false;
+    return f.arco ? !comArcoNaGrade.has(normalizarNome(p.nome)) : (p.arco ?? "").trim().length < 20;
+  });
+  if (semArco.length) {
+    bloqueios.push({
+      codigo: "ARCO_PERSONAGEM_AUSENTE",
+      mensagem:
+        `personagem(ns) central(is) sem arco verificável e sem justificativa explícita de invariância: ` +
+        `${semArco.map((p) => p.nome).join(", ")}. ` +
+        (f.arco
+          ? `Declare marcos em arco.arcos, ou explicite no campo "arco" por que este personagem NÃO muda.`
+          : `Descreva o arco no campo "arco" do mapa, ou explicite por que este personagem NÃO muda.`),
+      severidade: "critical",
+    });
   }
-  if (!/antagonista|vil[aã]o|advers[aá]ri/i.test(f.biblia) && !f.mapa_personagens.some((p) => /antagonista/i.test(p.papel))) {
-    avisos.push("nenhum antagonista identificável na bíblia nem no mapa");
+
+  // --- 10. Arco v3: promessa concreta, tensão que escala, clímax que paga ----
+  if (f.arco) {
+    if (f.arco.promessas.length === 0) {
+      bloqueios.push({
+        codigo: "PROMESSA_NARRATIVA_AUSENTE",
+        mensagem: "a grade de arco não declara nenhuma promessa narrativa concreta (id, enunciado, plantio, pagamento)",
+        severidade: "critical",
+      });
+    }
+    const prog = progressaoDeTensao(f.arco.atos);
+    if (!prog.progride) {
+      bloqueios.push({
+        codigo: "TENSAO_SEM_PROGRESSAO",
+        mensagem: `a tensão não escala entre os atos: ${prog.detalhe}`,
+        severidade: "critical",
+      });
+    }
+    const semPagamentoNoFim = promessasForaDoDesfecho(f.arco, total);
+    if (semPagamentoNoFim.length) {
+      bloqueios.push({
+        codigo: "CLIMAX_NAO_PAGA_PROMESSAS",
+        mensagem:
+          `clímax/resolução não pagam as promessas centrais: ${semPagamentoNoFim.join(", ")} ` +
+          `são pagas antes do último ato, deixando o desfecho sem o que resolver`,
+        severidade: "high",
+      });
+    }
+  }
+
+  // --- 11. Docs exigidos: substantivos, não placeholders ---------------------
+  for (const [nome, conteudo] of Object.entries(f.docs_exigidos ?? {})) {
+    const motivo = motivoDocInsubstancial(conteudo);
+    if (motivo) {
+      bloqueios.push({
+        codigo: "DOC_PLACEHOLDER",
+        mensagem: `documento exigido "${nome}" não é substantivo: ${motivo}`,
+        severidade: "critical",
+      });
+    }
   }
 
   return { bloqueios, avisos, capitulosEstrutura: numeros.length };
+}
+
+// ---------------------------------------------------------------------------
+// Duas passadas: o que a MACRO já basta para julgar, e a coerência macro × micro
+// ---------------------------------------------------------------------------
+
+/** Bloqueios que dependem da estrutura capítulo a capítulo (só existem na micro). */
+const CODIGOS_DA_MICRO = new Set([
+  "ESTRUTURA_CAPITULOS_INCOERENTES",
+  "FIO_DESCONHECIDO",
+  "FUNCOES_CAPITULO_REPETIDAS",
+]);
+
+/**
+ * Avalia SÓ a macro (passada 1): tudo o que não depende da linha por capítulo.
+ * Rodar isto antes da micro é o que evita gastar a geração da estrutura inteira
+ * sobre um arco que já nasceu quebrado — e o que permite regenerar só a micro
+ * quando é só a micro que falha.
+ */
+export function avaliarMacroFundacao(
+  macro: Omit<FundacaoV2, "estrutura">,
+  contrato: SkillContract,
+  total: number,
+  docsPresentes: string[] = []
+): AvaliacaoFundacaoV2 {
+  const av = avaliarFundacaoV2({ ...macro, estrutura: [] }, contrato, total, docsPresentes);
+  return {
+    ...av,
+    bloqueios: av.bloqueios.filter((b) => !CODIGOS_DA_MICRO.has(b.codigo)),
+  };
+}
+
+/**
+ * Macro e micro não podem se contradizer. A micro é detalhamento: se ela aponta
+ * um fio que a macro não declarou, ou coloca o pagamento de uma promessa num
+ * capítulo que a macro reservou para outra coisa, o plano está incoerente.
+ */
+export function gateMacroMicroCoerentes(f: FundacaoV2): BloqueioFundacao[] {
+  const out: BloqueioFundacao[] = [];
+  if (!f.arco) return out;
+
+  // 1. Todo fio da grade de arco aparece em algum capítulo da estrutura.
+  const fiosNaEstrutura = new Set(f.estrutura.map((e) => normalizarNome(e.fio)));
+  const fiosSemCapitulo = f.arco.fios
+    .filter((fio) => !fiosNaEstrutura.has(normalizarNome(fio.nome)) && !fiosNaEstrutura.has(normalizarNome(fio.id)))
+    .map((fio) => fio.nome);
+  if (fiosSemCapitulo.length) {
+    out.push({
+      codigo: "MACRO_MICRO_CONTRADIZEM",
+      mensagem: `fio(s) da macro sem um único capítulo na estrutura: ${fiosSemCapitulo.join(", ")}`,
+      severidade: "critical",
+    });
+  }
+
+  // 2. Os capítulos-chave da macro existem na micro.
+  const capitulos = new Set(f.estrutura.map((e) => e.capitulo));
+  const chavesAusentes: string[] = [];
+  for (const fio of f.arco.fios) {
+    for (const [rotulo, cap] of [["abre", fio.abre], ["clímax", fio.climax], ["fecha", fio.fecha]] as const) {
+      if (cap > 0 && !capitulos.has(cap)) chavesAusentes.push(`fio "${fio.nome}" ${rotulo} no capítulo ${cap}, que a estrutura não declara`);
+    }
+  }
+  for (const p of f.arco.promessas) {
+    if (p.plantada_em > 0 && !capitulos.has(p.plantada_em)) chavesAusentes.push(`promessa ${p.id} plantada no capítulo ${p.plantada_em}, que a estrutura não declara`);
+    if (p.paga_em > 0 && !capitulos.has(p.paga_em)) chavesAusentes.push(`promessa ${p.id} paga no capítulo ${p.paga_em}, que a estrutura não declara`);
+  }
+  if (chavesAusentes.length) {
+    out.push({
+      codigo: "MACRO_MICRO_CONTRADIZEM",
+      mensagem: chavesAusentes.slice(0, 6).join(" · "),
+      severidade: "critical",
+    });
+  }
+  return out;
 }
 
 /** Forma de gate universal — para o ledger de runs e o progresso da UI. */
