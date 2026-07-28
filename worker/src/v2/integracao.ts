@@ -18,6 +18,7 @@ import { compilarPacote, type SecaoContexto } from "./compilador.js";
 import { executarPapel } from "./papeis.js";
 import { tarefaCanarioVoz, tarefaEditorEstrutural, tarefaRevisorCanario } from "./tarefas.js";
 import { gerarFundacaoV2, materializarFundacao } from "./fundacao.js";
+import { autorizarFundacao, type BriefingAprovado } from "./briefing-aprovacao.js";
 import { documentosDaFundacao } from "./documentos.js";
 import { parsearArco } from "./arco.js";
 import { avaliarFechamentoLivro } from "./fechamento.js";
@@ -1003,6 +1004,27 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
   }
 
   // Briefing COMPLETO da entrevista chega ao arquiteto (não só a ideia central).
+  // Fatia E — o briefing precisa estar COMPLETO, sem conflito e APROVADO pelo
+  // autor. Antes, a fundação era gerada do que estivesse gravado, inclusive
+  // contraditório, e nada registrava que o autor tinha visto aquilo.
+  const briefingBruto = ((proj as { briefing?: BriefingAutor }).briefing ?? {}) as BriefingAutor;
+  const autorizacaoBriefing = autorizarFundacao(
+    briefingBruto,
+    (proj as { briefing_aprovado?: BriefingAprovado | null }).briefing_aprovado ?? null,
+    {
+      idioma_origem: (proj as { idioma_origem?: string | null }).idioma_origem ?? null,
+      total_capitulos: (proj as { total_capitulos?: number | null }).total_capitulos ?? null,
+      skill_escrita: (proj as { skill_escrita?: string | null }).skill_escrita ?? null,
+    }
+  );
+  if (!autorizacaoBriefing.permitido) {
+    throw new ErroEngine({
+      codigo: "BRIEFING_NAO_APROVADO",
+      classe: "configuracao",
+      mensagem: `fundação bloqueada — ${autorizacaoBriefing.motivo}: ${autorizacaoBriefing.detalhe}`,
+      detalhe: { motivo: autorizacaoBriefing.motivo },
+    });
+  }
   const briefingFundacao = briefingParaFundacao(proj as Parameters<typeof briefingParaFundacao>[0]);
   if (!briefingFundacao.premissa) {
     throw new ErroEngine({ codigo: "BRIEFING_AUSENTE", classe: "configuracao", mensagem: "criar_fundacao V2 exige briefing.ideia_central" });
@@ -1108,6 +1130,27 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
   await fs.mkdir(dirProjeto, { recursive: true }); // cwd do CLI precisa existir antes do provedor
   const { persistencia } = await criarPersistencia({ dirProjeto });
   const gravador = new Gravador({ persistencia, projectId });
+  // Fatia E — o briefing precisa estar COMPLETO, sem conflito e APROVADO pelo
+  // autor. Antes, a fundação era gerada do que estivesse gravado, inclusive
+  // contraditório, e nada registrava que o autor tinha visto aquilo.
+  const briefingBruto = ((proj as { briefing?: BriefingAutor }).briefing ?? {}) as BriefingAutor;
+  const autorizacaoBriefing = autorizarFundacao(
+    briefingBruto,
+    (proj as { briefing_aprovado?: BriefingAprovado | null }).briefing_aprovado ?? null,
+    {
+      idioma_origem: (proj as { idioma_origem?: string | null }).idioma_origem ?? null,
+      total_capitulos: (proj as { total_capitulos?: number | null }).total_capitulos ?? null,
+      skill_escrita: (proj as { skill_escrita?: string | null }).skill_escrita ?? null,
+    }
+  );
+  if (!autorizacaoBriefing.permitido) {
+    throw new ErroEngine({
+      codigo: "BRIEFING_NAO_APROVADO",
+      classe: "configuracao",
+      mensagem: `fundação bloqueada — ${autorizacaoBriefing.motivo}: ${autorizacaoBriefing.detalhe}`,
+      detalhe: { motivo: autorizacaoBriefing.motivo },
+    });
+  }
   const briefingFundacao = briefingParaFundacao(proj as Parameters<typeof briefingParaFundacao>[0]);
   const detalhes = [briefingFundacao.detalhes, `- Instruções de refino do autor: ${instrucoes}`].filter(Boolean).join("\n");
 

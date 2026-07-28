@@ -27,6 +27,12 @@ export interface BriefingAutor {
   idioma?: string;
   decisoes_autor?: { texto?: string; em?: string }[];
   preferencias?: { texto?: string; em?: string }[];
+  /**
+   * Justificativas de `não se aplica` (fatia E): para cada campo `x` que o autor
+   * respondeu com o marcador, `x_justificativa` diz POR QUÊ. Sem ela, o marcador
+   * volta a ser omissão — e omissão nunca vira default silencioso na fundação.
+   */
+  [justificativa: `${string}_justificativa`]: unknown;
 }
 
 // ---------------------------------------------------------------------------
