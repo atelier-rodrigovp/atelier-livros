@@ -240,7 +240,11 @@ export async function escreverCapitulo(
   const alvoCap = `capitulo:${capitulo}`;
   const nn = String(capitulo).padStart(2, "0");
   const caminho = path.join(deps.dirManuscrito, `capitulo-${nn}.md`);
-  const maxCorrecoes = deps.maxCorrecoes ?? 2;
+  // `julgamento_alternativo` NÃO chama o escritor: a hipótese sob teste é que o
+  // texto está adequado e o veredito é que estava errado. Corrigir a prosa aqui
+  // mudaria o hash e destruiria justamente o que se quer rejulgar.
+  const maxCorrecoes =
+    opts?.correcaoDirigida?.estrategia === "julgamento_alternativo" ? 0 : (deps.maxCorrecoes ?? 2);
 
   if (opts?.textoBase && !opts.fichaExistente) {
     throw new ErroEngine({
@@ -587,6 +591,9 @@ export async function escreverCapitulo(
   const garantirGates = async (): Promise<ResultadoGate[]> => {
     let falhos = rodarGates();
     if (falhos.length === 0) return [];
+    // Rejulgamento não toca no texto — nem para consertar gate. Devolve os gates
+    // falhos como estão: o objetivo é saber se ESTE hash passa com outro juiz.
+    if (maxCorrecoes === 0) return falhos;
     await corrigirComEscritor(
       falhos.map((g) => ({ local: g.gate, problema: g.evidencia ?? g.gate, instrucao: "elimine a causa" }))
     );

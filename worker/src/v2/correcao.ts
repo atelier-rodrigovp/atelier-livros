@@ -15,9 +15,17 @@
 // - falha local de qualidade JAMAIS reinicia o livro: a retomada é no capítulo.
 // - nada aqui é importado pelo caminho V1.
 
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import type { Gravador } from "./gravador.js";
 import { escreverCapitulo, type DepsPipeline, type ResultadoCapitulo } from "./pipeline.js";
-import type { ErroEstruturado, EstrategiaCorrecao, TentativaCorrecao } from "./tipos.js";
+import type { ErroEstruturado, EstrategiaCorrecao, SceneSpec, TentativaCorrecao } from "./tipos.js";
+
+/** Texto vigente do capítulo no disco (a verdade da engine), ou null. */
+export function lerTextoDoDisco(dirManuscrito: string, capitulo: number): string | null {
+  const caminho = path.join(dirManuscrito, `capitulo-${String(capitulo).padStart(2, "0")}.md`);
+  return existsSync(caminho) ? readFileSync(caminho, "utf8") : null;
+}
 
 export type { TentativaCorrecao };
 
@@ -70,6 +78,32 @@ export const ORDEM_ESTRATEGIAS: Estrategia[] = [
   "reescrita_integral",
   "julgamento_alternativo",
 ];
+
+/**
+ * O CAMINHO DE EXECUÇÃO de cada estratégia. Isto é o que separa "estratégia
+ * diferente" de "mesma instrução com outras palavras": duas estratégias que
+ * chamam os mesmos papéis, com as mesmas entradas, são a mesma tentativa
+ * repetida — mesmo que o texto produzido tenha hash novo.
+ */
+export type AcaoEstrategia =
+  /** Parte do texto reprovado e corrige os trechos citados. Não gera prosa nova. */
+  | "corrige_texto"
+  /** Parte do texto reprovado e reescreve a superfície, preservando eventos. */
+  | "reescreve_superficie"
+  /** Descarta a ficha, gera uma versão nova e escreve a partir dela. */
+  | "regenera_ficha"
+  /** Descarta o texto e escreve o capítulo do zero, com a mesma ficha. */
+  | "reescreve_do_zero"
+  /** NÃO chama o escritor: rejulga o mesmo texto com o juiz alternativo. */
+  | "rejulga_mesmo_texto";
+
+export const ACAO_DA_ESTRATEGIA: Record<Estrategia, AcaoEstrategia> = {
+  correcao_cirurgica: "corrige_texto",
+  reescrita_orientada: "reescreve_superficie",
+  reficha: "regenera_ficha",
+  reescrita_integral: "reescreve_do_zero",
+  julgamento_alternativo: "rejulga_mesmo_texto",
+};
 
 export const HIPOTESE: Record<Estrategia, string> = {
   correcao_cirurgica: "o defeito está localizado em trechos citados e não contamina a cena",
@@ -227,6 +261,87 @@ export function blockersDoResultado(r: ResultadoCapitulo): string[] {
   return [...r.gatesFalhos.map((g) => `${g.gate}: ${g.evidencia ?? ""}`), ...r.problemas].filter(Boolean);
 }
 
+export interface ContextoTentativa {
+  /** Texto reprovado da tentativa anterior (do disco). */
+  textoAnterior: string | null;
+  /** Ficha vigente do capítulo. */
+  fichaVigente: SceneSpec | null;
+  blockers: string[];
+}
+
+/**
+ * Traduz a estratégia no CAMINHO DE EXECUÇÃO concreto. É aqui que as estratégias
+ * deixam de ser rótulos: cada uma monta um conjunto DIFERENTE de opções para
+ * `escreverCapitulo`, chamando papéis diferentes com entradas diferentes.
+ *
+ * Antes desta função, `correcao_cirurgica` e `reescrita_integral` produziam
+ * exatamente a mesma execução (gerar ficha → contextualizar → escrever do zero),
+ * e `julgamento_alternativo` chamava o escritor sem necessidade nenhuma.
+ */
+export function opcoesPorEstrategia(
+  estrategia: Estrategia,
+  ctx: ContextoTentativa,
+  base: Parameters<typeof escreverCapitulo>[2] = {}
+): Parameters<typeof escreverCapitulo>[2] {
+  const correcoes = ctx.blockers.map((b) => ({
+    local: b.split(":")[0] ?? "capítulo inteiro",
+    problema: b,
+    instrucao: "elimine a causa nomeada, preservando o que já estava correto",
+  }));
+  // Sem texto ou sem ficha no disco não há de onde partir: qualquer estratégia
+  // baseada no anterior degrada para escrever do zero (honesto e explícito).
+  const temBase = Boolean(ctx.textoAnterior && ctx.fichaVigente);
+
+  switch (ACAO_DA_ESTRATEGIA[estrategia]) {
+    case "corrige_texto":
+      return temBase
+        ? {
+            ...base,
+            fichaExistente: ctx.fichaVigente!,
+            textoBase: ctx.textoAnterior!,
+            reescritaDirigida: { correcoes },
+          }
+        : { ...base };
+    case "reescreve_superficie":
+      return temBase
+        ? {
+            ...base,
+            fichaExistente: ctx.fichaVigente!,
+            textoBase: ctx.textoAnterior!,
+            reescritaDirigida: {
+              correcoes: [
+                ...correcoes,
+                {
+                  local: "capítulo inteiro",
+                  problema: "o defeito é difuso na superfície do capítulo",
+                  instrucao:
+                    "reescreva a superfície preservando eventos, fatos, diálogo e estrutura — mude a construção das frases, não o que acontece",
+                },
+              ],
+            },
+          }
+        : { ...base };
+    case "regenera_ficha":
+      // Sem fichaExistente: o arquiteto de cena produz uma VERSÃO NOVA da ficha,
+      // e o capítulo é escrito a partir dela. Sem textoBase: a prosa velha morre.
+      return { ...base, fichaExistente: undefined, textoBase: undefined, reescritaDirigida: undefined };
+    case "reescreve_do_zero":
+      // Mantém a ficha (o plano não é a causa) e joga a prosa fora.
+      return {
+        ...base,
+        ...(ctx.fichaVigente ? { fichaExistente: ctx.fichaVigente } : {}),
+        textoBase: undefined,
+        reescritaDirigida: undefined,
+      };
+    case "rejulga_mesmo_texto":
+      // NÃO chama o escritor: mesmo texto, mesma ficha, juiz alternativo (o
+      // pipeline troca o modelo de julgamento quando vê esta estratégia).
+      return temBase
+        ? { ...base, fichaExistente: ctx.fichaVigente!, textoBase: ctx.textoAnterior!, reescritaDirigida: undefined }
+        : { ...base };
+  }
+}
+
 export interface EntradaEscada {
   deps: DepsPipeline;
   gravador: Gravador;
@@ -304,8 +419,15 @@ export async function escreverCapituloComEscada(entrada: EntradaEscada): Promise
     });
 
     const anterior = resultado;
+    // O caminho de execução muda por estratégia: corrigir o texto, reescrever a
+    // superfície, regenerar a ficha, escrever do zero ou só rejulgar.
+    const ctx: ContextoTentativa = {
+      textoAnterior: lerTextoDoDisco(deps.dirManuscrito, capitulo),
+      fichaVigente: await deps.persistencia.lerFichaMaisRecente(deps.projectId, capitulo),
+      blockers,
+    };
     resultado = await escreverCapitulo(deps, capitulo, {
-      ...entrada.opts,
+      ...opcoesPorEstrategia(decisao.estrategia!, ctx, entrada.opts),
       correcaoDirigida: {
         estrategia: decisao.estrategia!,
         blockers,

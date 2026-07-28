@@ -60,6 +60,19 @@ function estruturaDe(n: number, fio = "investigacao") {
   }));
 }
 
+/**
+ * Estrutura em que os capítulos-chave da macro batem com o fio de cada capítulo:
+ * investigacao abre em 1, escala em 3, tem clímax em 10 e fecha em 12;
+ * conspiracao abre em 2, escala em 5, tem clímax em 9 e fecha em 11.
+ */
+function estruturaCoerente() {
+  const investigacao = new Set([1, 3, 6, 8, 10, 12]);
+  return estruturaDe(12).map((e) => ({
+    ...e,
+    fio: investigacao.has(e.capitulo) ? "investigacao" : "conspiracao",
+  }));
+}
+
 const arcoOk = (total: number): ArcoFundacao => ({
   atos: [
     { numero: 1, cap_inicio: 1, cap_fim: Math.floor(total / 3), funcao: "instala", tensao_alvo: 2 },
@@ -392,10 +405,10 @@ describe("fundação em duas passadas", () => {
   it("micro que aponta capítulo inexistente na macro é contradição bloqueante", () => {
     const arco = arcoOk(12);
     arco.promessas[0].paga_em = 11;
-    const f = fundacao({ arco, estrutura: estruturaDe(12).filter((e) => e.capitulo !== 11) });
+    const f = fundacao({ arco, estrutura: estruturaCoerente().filter((e) => e.capitulo !== 11) });
     const b = gateMacroMicroCoerentes(f);
     expect(b.some((x) => x.codigo === "MACRO_MICRO_CONTRADIZEM")).toBe(true);
-    expect(b.map((x) => x.mensagem).join(" ")).toContain("paga no capítulo 11");
+    expect(b.map((x) => x.mensagem).join(" ")).toContain("paga_em=11");
   });
 
   it("fio da macro sem um único capítulo na micro é contradição bloqueante", () => {
@@ -406,8 +419,80 @@ describe("fundação em duas passadas", () => {
   });
 
   it("macro e micro coerentes não geram bloqueio", () => {
-    const arco = arcoOk(12);
-    const estrutura = estruturaDe(12).map((e, i) => ({ ...e, fio: i % 2 === 0 ? "investigacao" : "conspiracao" }));
-    expect(gateMacroMicroCoerentes(fundacao({ arco, estrutura }))).toEqual([]);
+    expect(gateMacroMicroCoerentes(fundacao({ arco: arcoOk(12), estrutura: estruturaCoerente() }))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D6 — o cruzamento macro × micro cobre TODOS os campos estruturados
+// ---------------------------------------------------------------------------
+
+describe("macro × micro por campo estruturado", () => {
+  const base = () => fundacao({ arco: arcoOk(12), estrutura: estruturaCoerente() });
+  const mensagens = (f: FundacaoV2) => gateMacroMicroCoerentes(f).map((x) => x.mensagem).join(" · ");
+
+  it("PLANTIO em capítulo inexistente reprova", () => {
+    const f = base();
+    f.arco!.promessas[0].plantada_em = 99;
+    expect(mensagens(f)).toContain("plantada_em=99");
+  });
+
+  it("REFORÇO em capítulo inexistente reprova", () => {
+    const f = base();
+    f.arco!.promessas[0].reforcada_em = [4, 77];
+    expect(mensagens(f)).toContain("reforcada_em[1]=77");
+  });
+
+  it("PAGAMENTO em capítulo inexistente reprova", () => {
+    const f = base();
+    f.arco!.promessas[0].paga_em = 40;
+    expect(mensagens(f)).toContain("paga_em=40");
+  });
+
+  it("ESCALADA de fio em capítulo inexistente reprova", () => {
+    const f = base();
+    f.arco!.fios[0].escalada = [3, 88];
+    expect(mensagens(f)).toContain("escalada[1] no capítulo 88");
+  });
+
+  it("CLÍMAX de fio num capítulo que a micro deu a OUTRO fio reprova", () => {
+    const f = base();
+    // cap 9 pertence a "conspiracao" na estrutura coerente
+    f.arco!.fios[0].climax = 9;
+    expect(mensagens(f)).toContain('entregou esse capítulo ao fio "conspiracao"');
+  });
+
+  it("MARCO de arco em capítulo inexistente reprova", () => {
+    const f = base();
+    f.arco!.arcos[0].marcos.push({ capitulo: 55, estado: "estado fora do livro" });
+    expect(mensagens(f)).toContain('arco de "Marina Alencar" tem marco no capítulo 55');
+  });
+
+  it("ATO que cobre capítulo que a micro não declara reprova", () => {
+    const f = base();
+    f.arco!.atos[2].cap_fim = 15;
+    expect(mensagens(f)).toContain("ato(s) cobrem capítulo(s) que a estrutura não declara: 13, 14, 15");
+  });
+
+  it("capítulo da micro fora de qualquer ato reprova", () => {
+    const f = base();
+    f.arco!.atos[2].cap_fim = 10; // 11 e 12 ficam sem ato
+    expect(mensagens(f)).toContain("capítulo(s) da estrutura fora de qualquer ato: 11, 12");
+  });
+
+  it("TENSÃO: nenhum fio com clímax no ato de maior tensão reprova", () => {
+    const f = base();
+    // Empurra os dois clímax para o primeiro ato (tensão 2), longe do pico (5).
+    f.arco!.fios[0].climax = 3;
+    f.arco!.fios[0].fecha = 4;
+    f.arco!.fios[1].climax = 2;
+    f.arco!.fios[1].fecha = 4;
+    expect(mensagens(f)).toContain("nenhum fio tem clímax no ato de maior tensão");
+  });
+
+  it("fio que a MICRO inventou e a macro não declara reprova", () => {
+    const f = base();
+    f.estrutura[5] = { ...f.estrutura[5], fio: "romance" };
+    expect(mensagens(f)).toContain('estrutura usa o fio "romance"');
   });
 });

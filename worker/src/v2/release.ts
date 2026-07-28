@@ -618,10 +618,21 @@ export interface LiberacaoCanarioV2 {
  * 2. autorização de produção → exige certificado válido;
  * 3. autorização de canário → dispensa o certificado, e SÓ ela dispensa.
  */
+/**
+ * O que a execução vai fazer. A liberação de canário NÃO é um passe livre: ela
+ * cobre apenas a escrita CURTA e supervisionada que produz a evidência do
+ * certificado. Fundação e escrita de livro exigem certificado, sempre.
+ */
+export type OperacaoV2 = "canario" | "fundacao" | "escrita" | "avaliacao";
+
+/** Operações que a liberação de canário NUNCA cobre. */
+const EXIGEM_CERTIFICADO: ReadonlySet<OperacaoV2> = new Set<OperacaoV2>(["fundacao", "escrita", "avaliacao"]);
+
 export function exigirReleaseAtual(
   skillId: string,
   projectId?: string | null,
-  autorizacao?: AutorizacaoProjetoV2 | null
+  autorizacao?: AutorizacaoProjetoV2 | null,
+  operacao: OperacaoV2 = "escrita"
 ): CertificadoReleaseV2 | LiberacaoCanarioV2 {
   if (projectId) {
     if (!autorizacao) {
@@ -636,6 +647,20 @@ export function exigirReleaseAtual(
       });
     }
     if (autorizacao.modo === "canario") {
+      // O canário libera SÓ a operação de canário. Fundação e escrita de livro
+      // continuam exigindo certificado — senão "modo canário" viraria a porta
+      // dos fundos para produzir obra sem release certificado.
+      if (EXIGEM_CERTIFICADO.has(operacao)) {
+        throw new ErroEngine({
+          codigo: "CANARIO_NAO_COBRE_OPERACAO",
+          classe: "configuracao",
+          mensagem:
+            `projeto ${projectId} está autorizado em modo CANÁRIO, que cobre apenas a amostra de canário. ` +
+            `A operação "${operacao}" exige certificado de release válido. ` +
+            `Para produzir obra, emita o certificado e mude a autorização para modo 'producao'.`,
+          detalhe: { project_id: projectId, skill: skillId, operacao },
+        });
+      }
       return {
         schema: "engine-v2-liberacao-canario/v1",
         modo: "canario",

@@ -2,20 +2,22 @@
 // Duas camadas: a política (função pura) e a EXECUÇÃO (a escada rodando de
 // verdade contra o pipeline, com provedor mock). Política testada sem execução
 // prova intenção, não fiação.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Gravador } from "./gravador.js";
 import { DiscoPersistencia } from "./persistencia.js";
 import { ProvedorMock } from "./provedor.js";
-import type { DepsPipeline } from "./pipeline.js";
+import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
+import { hashText } from "../quality-state.js";
 import {
   classificarFalha,
   decidirCorrecao,
   escreverCapituloComEscada,
   estrategiaInicial,
   ORDEM_ESTRATEGIAS,
+  opcoesPorEstrategia,
   proximaTentativaEm,
   semProgresso,
   type TentativaCorrecao,
@@ -346,5 +348,109 @@ describe("escada em execução", () => {
     const estado = await disco.lerEstado("proj-1");
     expect(Object.keys(estado?.doc.correcoes ?? {})).toEqual(["3"]);
     expect((estado?.doc.circuit_breaker ?? []).map((c) => c.capitulo)).toEqual([3]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D2 — cada estratégia executa um CAMINHO diferente, não a mesma tentativa
+// com hash novo. Prova por quais PAPÉIS são chamados e com que entradas.
+// ---------------------------------------------------------------------------
+
+describe("caminho de execução por estratégia", () => {
+  const ctx = {
+    textoAnterior: PROSA("REPROVADO."),
+    fichaVigente: ficha(),
+    blockers: ["sinal_cadencia: fragmento acima da cota"],
+  };
+
+  it("cirúrgica: parte do MESMO texto e da MESMA ficha", () => {
+    const o = opcoesPorEstrategia("correcao_cirurgica", ctx);
+    expect(o?.textoBase).toBe(ctx.textoAnterior);
+    expect(o?.fichaExistente).toBe(ctx.fichaVigente);
+    expect(o?.reescritaDirigida?.correcoes.length).toBeGreaterThan(0);
+  });
+
+  it("reescrita orientada: usa o texto reprovado e manda preservar os eventos", () => {
+    const o = opcoesPorEstrategia("reescrita_orientada", ctx);
+    expect(o?.textoBase).toBe(ctx.textoAnterior);
+    const instrucoes = (o?.reescritaDirigida?.correcoes ?? []).map((c) => c.instrucao).join(" ");
+    expect(instrucoes).toContain("preservando eventos");
+  });
+
+  it("reficha: DESCARTA a ficha (nova versão será gerada) e descarta o texto", () => {
+    const o = opcoesPorEstrategia("reficha", ctx);
+    expect(o?.fichaExistente).toBeUndefined();
+    expect(o?.textoBase).toBeUndefined();
+    expect(o?.reescritaDirigida).toBeUndefined();
+  });
+
+  it("reescrita integral: escreve do zero MAS mantém a ficha (o plano não é a causa)", () => {
+    const o = opcoesPorEstrategia("reescrita_integral", ctx);
+    expect(o?.textoBase).toBeUndefined();
+    expect(o?.fichaExistente).toBe(ctx.fichaVigente);
+    expect(o?.reescritaDirigida).toBeUndefined();
+  });
+
+  it("julgamento alternativo: mesmo texto, mesma ficha, SEM instrução de reescrita", () => {
+    const o = opcoesPorEstrategia("julgamento_alternativo", ctx);
+    expect(o?.textoBase).toBe(ctx.textoAnterior);
+    expect(o?.fichaExistente).toBe(ctx.fichaVigente);
+    expect(o?.reescritaDirigida).toBeUndefined();
+  });
+
+  it("as cinco estratégias produzem cinco combinações DISTINTAS de entrada", () => {
+    const assinatura = (e: Parameters<typeof opcoesPorEstrategia>[0]) => {
+      const o = opcoesPorEstrategia(e, ctx);
+      return [
+        o?.textoBase ? "com-texto" : "sem-texto",
+        o?.fichaExistente ? "com-ficha" : "sem-ficha",
+        o?.reescritaDirigida ? `correcoes:${o.reescritaDirigida.correcoes.length}` : "sem-correcoes",
+      ].join("|");
+    };
+    const todas = ORDEM_ESTRATEGIAS.map(assinatura);
+    // cirúrgica e orientada compartilham texto+ficha, mas divergem no nº de correções
+    expect(new Set(todas).size).toBe(ORDEM_ESTRATEGIAS.length);
+  });
+
+  it("sem texto no disco, as estratégias baseadas no anterior degradam para escrever do zero", () => {
+    const vazio = { textoAnterior: null, fichaVigente: null, blockers: [] };
+    for (const e of ORDEM_ESTRATEGIAS) {
+      expect(opcoesPorEstrategia(e, vazio)?.textoBase).toBeUndefined();
+    }
+  });
+});
+
+describe("julgamento alternativo em EXECUÇÃO não chama o escritor", () => {
+  it("rejulga o mesmo hash com o modelo de julgamento trocado", async () => {
+    const texto = PROSA("UNICO.");
+    mkdirSync(path.join(dir, "manuscrito"), { recursive: true });
+    writeFileSync(path.join(dir, "manuscrito", "capitulo-03.md"), texto, "utf8");
+    await disco.inserirSpec({
+      project_id: "proj-1", edition_id: null, capitulo: 3, versao: 1,
+      hash: "h1", status: "validada", ficha: ficha(), origem_run_id: "r1",
+    });
+
+    provedor.enfileirar("contextualizador", CTX);
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecer("aprovado")));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    const r = await escreverCapitulo(deps, 3, {
+      fichaExistente: ficha(),
+      textoBase: texto,
+      correcaoDirigida: {
+        estrategia: "julgamento_alternativo",
+        blockers: ["parecer reprovado"],
+        hipotese: "o juiz é que pode estar errado",
+        tentativa: 2,
+      },
+    });
+
+    expect(r.status).toBe("aprovado");
+    // O escritor NUNCA foi chamado — e o hash julgado é o mesmo do disco.
+    expect(provedor.chamadas.filter((c) => c.papel === "escritor")).toHaveLength(0);
+    expect(r.textHash).toBe(hashText(texto));
+    // O papel de julgamento rodou com o modelo alternativo (mapa.raciocinio).
+    const chamadaRevisor = provedor.chamadas.find((c) => c.papel === "revisor_literario");
+    expect(chamadaRevisor?.modelo).toBe("modelo-r");
   });
 });

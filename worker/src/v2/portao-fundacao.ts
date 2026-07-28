@@ -407,35 +407,111 @@ export function gateMacroMicroCoerentes(f: FundacaoV2): BloqueioFundacao[] {
   const out: BloqueioFundacao[] = [];
   if (!f.arco) return out;
 
-  // 1. Todo fio da grade de arco aparece em algum capítulo da estrutura.
-  const fiosNaEstrutura = new Set(f.estrutura.map((e) => normalizarNome(e.fio)));
-  const fiosSemCapitulo = f.arco.fios
-    .filter((fio) => !fiosNaEstrutura.has(normalizarNome(fio.nome)) && !fiosNaEstrutura.has(normalizarNome(fio.id)))
-    .map((fio) => fio.nome);
-  if (fiosSemCapitulo.length) {
-    out.push({
-      codigo: "MACRO_MICRO_CONTRADIZEM",
-      mensagem: `fio(s) da macro sem um único capítulo na estrutura: ${fiosSemCapitulo.join(", ")}`,
-      severidade: "critical",
-    });
-  }
-
-  // 2. Os capítulos-chave da macro existem na micro.
   const capitulos = new Set(f.estrutura.map((e) => e.capitulo));
-  const chavesAusentes: string[] = [];
+  const fioDoCapitulo = new Map(f.estrutura.map((e) => [e.capitulo, normalizarNome(e.fio)]));
+  const fiosNaEstrutura = new Set(f.estrutura.map((e) => normalizarNome(e.fio)));
+  const nomesDoFio = (fio: { id: string; nome: string }) => [normalizarNome(fio.nome), normalizarNome(fio.id)];
+  const problemas: string[] = [];
+
+  // 1. FIOS — todo fio da macro ocupa capítulos na micro.
   for (const fio of f.arco.fios) {
-    for (const [rotulo, cap] of [["abre", fio.abre], ["clímax", fio.climax], ["fecha", fio.fecha]] as const) {
-      if (cap > 0 && !capitulos.has(cap)) chavesAusentes.push(`fio "${fio.nome}" ${rotulo} no capítulo ${cap}, que a estrutura não declara`);
+    if (!nomesDoFio(fio).some((n) => fiosNaEstrutura.has(n))) {
+      problemas.push(`fio "${fio.nome}" da macro não ocupa um único capítulo da estrutura`);
     }
   }
-  for (const p of f.arco.promessas) {
-    if (p.plantada_em > 0 && !capitulos.has(p.plantada_em)) chavesAusentes.push(`promessa ${p.id} plantada no capítulo ${p.plantada_em}, que a estrutura não declara`);
-    if (p.paga_em > 0 && !capitulos.has(p.paga_em)) chavesAusentes.push(`promessa ${p.id} paga no capítulo ${p.paga_em}, que a estrutura não declara`);
+  // Fio declarado na micro que a macro não conhece: a micro inventou subtrama.
+  const fiosDaMacro = new Set(f.arco.fios.flatMap(nomesDoFio));
+  for (const nome of new Set(f.estrutura.map((e) => normalizarNome(e.fio)))) {
+    if (nome && fiosDaMacro.size > 0 && !fiosDaMacro.has(nome)) {
+      problemas.push(`estrutura usa o fio "${nome}", que a grade de arco não declara`);
+    }
   }
-  if (chavesAusentes.length) {
+
+  // 2. FIOS — abertura, escalada, clímax e fechamento caem em capítulos reais,
+  //    e no capítulo cujo fio é o próprio (o marco de um fio não pode cair num
+  //    capítulo que a micro entregou a outro fio).
+  for (const fio of f.arco.fios) {
+    const marcos: [string, number][] = [
+      ["abre", fio.abre],
+      ...fio.escalada.map((c, i) => [`escalada[${i}]`, c] as [string, number]),
+      ["clímax", fio.climax],
+      ["fecha", fio.fecha],
+    ];
+    for (const [rotulo, cap] of marcos) {
+      if (!cap) continue;
+      if (!capitulos.has(cap)) {
+        problemas.push(`fio "${fio.nome}" ${rotulo} no capítulo ${cap}, que a estrutura não declara`);
+        continue;
+      }
+      const fioDaMicro = fioDoCapitulo.get(cap);
+      if (fioDaMicro && !nomesDoFio(fio).includes(fioDaMicro)) {
+        problemas.push(
+          `fio "${fio.nome}" ${rotulo} no capítulo ${cap}, mas a estrutura entregou esse capítulo ao fio "${fioDaMicro}"`
+        );
+      }
+    }
+  }
+
+  // 3. PROMESSAS — plantio, reforço e pagamento caem em capítulos declarados.
+  for (const p of f.arco.promessas) {
+    const pontos: [string, number][] = [
+      ["plantada_em", p.plantada_em],
+      ...p.reforcada_em.map((c, i) => [`reforcada_em[${i}]`, c] as [string, number]),
+      ["paga_em", p.paga_em],
+    ];
+    for (const [rotulo, cap] of pontos) {
+      if (cap > 0 && !capitulos.has(cap)) {
+        problemas.push(`promessa ${p.id} tem ${rotulo}=${cap}, capítulo que a estrutura não declara`);
+      }
+    }
+  }
+
+  // 4. MARCOS DE ARCO — cada marco cai num capítulo que a micro declara.
+  for (const a of f.arco.arcos) {
+    for (const m of a.marcos) {
+      if (!capitulos.has(m.capitulo)) {
+        problemas.push(`arco de "${a.personagem}" tem marco no capítulo ${m.capitulo}, que a estrutura não declara`);
+      }
+    }
+  }
+
+  // 5. ATOS — a grade cobre exatamente os capítulos que a micro declara.
+  if (f.arco.atos.length && f.estrutura.length) {
+    const cobertos = new Set<number>();
+    for (const ato of f.arco.atos) {
+      for (let c = ato.cap_inicio; c <= ato.cap_fim; c++) cobertos.add(c);
+    }
+    const semAto = [...capitulos].filter((c) => !cobertos.has(c)).sort((a, b) => a - b);
+    const semCapitulo = [...cobertos].filter((c) => !capitulos.has(c)).sort((a, b) => a - b);
+    if (semAto.length) {
+      problemas.push(`capítulo(s) da estrutura fora de qualquer ato: ${semAto.slice(0, 8).join(", ")}`);
+    }
+    if (semCapitulo.length) {
+      problemas.push(`ato(s) cobrem capítulo(s) que a estrutura não declara: ${semCapitulo.slice(0, 8).join(", ")}`);
+    }
+  }
+
+  // 6. CLÍMAX × TENSÃO — o clímax dos fios cai no ato de maior tensão-alvo.
+  if (f.arco.atos.length > 1 && f.arco.fios.length) {
+    const picoTensao = Math.max(...f.arco.atos.map((a) => a.tensao_alvo));
+    const atosDePico = f.arco.atos.filter((a) => a.tensao_alvo === picoTensao);
+    const dentroDoPico = (cap: number) => atosDePico.some((a) => cap >= a.cap_inicio && cap <= a.cap_fim);
+    const forasDoPico = f.arco.fios
+      .filter((fio) => fio.climax > 0 && !dentroDoPico(fio.climax))
+      .map((fio) => `fio "${fio.nome}" tem clímax no capítulo ${fio.climax}`);
+    // Um fio secundário pode fechar antes; TODOS fora do pico é que denuncia uma
+    // grade em que a tensão declarada não corresponde ao desenho dramático.
+    if (forasDoPico.length === f.arco.fios.length) {
+      problemas.push(
+        `nenhum fio tem clímax no ato de maior tensão (${picoTensao}): ${forasDoPico.slice(0, 4).join(", ")}`
+      );
+    }
+  }
+
+  if (problemas.length) {
     out.push({
       codigo: "MACRO_MICRO_CONTRADIZEM",
-      mensagem: chavesAusentes.slice(0, 6).join(" · "),
+      mensagem: problemas.slice(0, 8).join(" · "),
       severidade: "critical",
     });
   }

@@ -30,8 +30,8 @@ describe("autorização de projeto (V2)", () => {
     );
   });
 
-  it("autorização de CANÁRIO dispensa o certificado — e só ela", () => {
-    const release = exigirReleaseAtual("dan-brown", PROJETO, autorizacao("canario"));
+  it("autorização de CANÁRIO dispensa o certificado — só ela, e só na operação de canário", () => {
+    const release = exigirReleaseAtual("dan-brown", PROJETO, autorizacao("canario"), "canario");
     expect(release).toMatchObject({
       modo: "canario",
       codigo_commit: "canario-sem-certificado",
@@ -40,12 +40,17 @@ describe("autorização de projeto (V2)", () => {
   });
 
   it("a liberação de canário carrega QUEM autorizou e POR QUÊ (auditoria)", () => {
-    const release = exigirReleaseAtual("dan-brown", PROJETO, {
-      project_id: PROJETO,
-      modo: "canario",
-      autorizado_por: "rodrigo",
-      motivo: "Canário V2 — O Cofre de Alcobaça",
-    });
+    const release = exigirReleaseAtual(
+      "dan-brown",
+      PROJETO,
+      {
+        project_id: PROJETO,
+        modo: "canario",
+        autorizado_por: "rodrigo",
+        motivo: "Canário V2 — O Cofre de Alcobaça",
+      },
+      "canario"
+    );
     expect(release).toMatchObject({ autorizado_por: "rodrigo", motivo: "Canário V2 — O Cofre de Alcobaça" });
   });
 
@@ -66,6 +71,50 @@ describe("autorização de projeto (V2)", () => {
     } catch (e) {
       expect((e as Error).message).toContain("Autorize-o na tela do projeto");
       expect((e as Error).message).toContain("Autorização não substitui certificado");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D3 — modo canário cobre APENAS a amostra de canário
+// ---------------------------------------------------------------------------
+
+describe("o modo canário não é porta dos fundos para produzir obra", () => {
+  it("cobre a operação de canário", () => {
+    const r = exigirReleaseAtual("dan-brown", PROJETO, autorizacao("canario"), "canario");
+    expect(r).toMatchObject({ modo: "canario" });
+  });
+
+  it("NÃO cobre fundação", () => {
+    expect(() => exigirReleaseAtual("dan-brown", PROJETO, autorizacao("canario"), "fundacao")).toThrowError(
+      /CANÁRIO.*apenas a amostra de canário|exige certificado de release válido/s
+    );
+  });
+
+  it("NÃO cobre escrita de livro", () => {
+    expect(() => exigirReleaseAtual("dan-brown", PROJETO, autorizacao("canario"), "escrita")).toThrowError(
+      /exige certificado de release válido/
+    );
+  });
+
+  it("NÃO cobre avaliação", () => {
+    expect(() => exigirReleaseAtual("dan-brown", PROJETO, autorizacao("canario"), "avaliacao")).toThrowError(
+      /exige certificado de release válido/
+    );
+  });
+
+  it("o default da operação é `escrita` — nunca o mais permissivo", () => {
+    expect(() => exigirReleaseAtual("dan-brown", PROJETO, autorizacao("canario"))).toThrowError(
+      /exige certificado de release válido/
+    );
+  });
+
+  it("a mensagem diz o caminho: certificar e mudar para modo producao", () => {
+    try {
+      exigirReleaseAtual("dan-brown", PROJETO, autorizacao("canario"), "escrita");
+      throw new Error("deveria ter lançado");
+    } catch (e) {
+      expect((e as Error).message).toContain("modo 'producao'");
     }
   });
 });

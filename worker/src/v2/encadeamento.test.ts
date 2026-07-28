@@ -1,6 +1,11 @@
 // Fatia D — execução encadeada por checkpoint.
 import { describe, expect, it } from "vitest";
-import { capsPorExecucao, devolverAFilaNoCheckpoint } from "./integracao.js";
+import {
+  capsPorExecucao,
+  devolverAFilaNoCheckpoint,
+  livroCompleto,
+  pararPorLoteDeNovos,
+} from "./integracao.js";
 
 describe("tamanho do lote por execução", () => {
   it("sem variável = livro inteiro numa execução (0 = sem lote)", () => {
@@ -32,5 +37,62 @@ describe("decisão de devolver o job à fila no checkpoint", () => {
 
   it("ÚLTIMO capítulo nunca encadeia — a execução tem de seguir para o fechamento", () => {
     expect(devolverAFilaNoCheckpoint({ lote: 1, novosCaps: 1, capitulo: 12, total: 12 })).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D5 — `max_novos_caps` limita o LOTE; nunca produz falso `done`
+// ---------------------------------------------------------------------------
+
+describe("parada por lote de capítulos novos", () => {
+  it("max_novos_caps=1 num livro de 12 devolve o job à fila, apontando o capítulo 2", () => {
+    const p = pararPorLoteDeNovos({ maxNovosCaps: 1, novosCaps: 1, proximoCapitulo: 2, total: 12 });
+    expect(p).not.toBeNull();
+    expect(p!.proximoCapitulo).toBe(2);
+    expect(p!.motivo).toContain("livro incompleto (1/12)");
+  });
+
+  it("lote ainda não cheio não para", () => {
+    expect(pararPorLoteDeNovos({ maxNovosCaps: 3, novosCaps: 1, proximoCapitulo: 2, total: 12 })).toBeNull();
+  });
+
+  it("sem max_novos_caps (Infinity) nunca para por lote", () => {
+    expect(pararPorLoteDeNovos({ maxNovosCaps: Infinity, novosCaps: 99, proximoCapitulo: 5, total: 12 })).toBeNull();
+  });
+
+  it("lote cheio no ÚLTIMO capítulo não encadeia — a execução segue para o fechamento", () => {
+    expect(pararPorLoteDeNovos({ maxNovosCaps: 1, novosCaps: 1, proximoCapitulo: 13, total: 12 })).toBeNull();
+  });
+});
+
+describe("livro completo é derivado dos capítulos, nunca do fim da execução", () => {
+  const aprovados = (n: number) =>
+    Object.fromEntries(Array.from({ length: n }, (_, i) => [String(i + 1), { status: "aprovado" }]));
+
+  it("1 de 12 aprovados NÃO é livro completo (o falso `done` que D5 corrige)", () => {
+    expect(livroCompleto({ total: 12, statusPorCapitulo: aprovados(1) })).toBe(false);
+  });
+
+  it("12 de 12 aprovados é livro completo", () => {
+    expect(livroCompleto({ total: 12, statusPorCapitulo: aprovados(12) })).toBe(true);
+  });
+
+  it("aprovado_com_excecao conta como aprovado", () => {
+    const caps = { ...aprovados(11), "12": { status: "aprovado_com_excecao" } };
+    expect(livroCompleto({ total: 12, statusPorCapitulo: caps })).toBe(true);
+  });
+
+  it("furo no meio não é livro completo", () => {
+    const caps = { ...aprovados(12), "7": { status: "bloqueado" } };
+    expect(livroCompleto({ total: 12, statusPorCapitulo: caps })).toBe(false);
+  });
+
+  it("capítulo legado sem evidência não conta como aprovado", () => {
+    const caps = { ...aprovados(12), "4": { status: "legado_sem_evidencia" } };
+    expect(livroCompleto({ total: 12, statusPorCapitulo: caps })).toBe(false);
+  });
+
+  it("total zero nunca é completo", () => {
+    expect(livroCompleto({ total: 0, statusPorCapitulo: {} })).toBe(false);
   });
 });

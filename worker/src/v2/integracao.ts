@@ -43,7 +43,7 @@ import { fundirFichas, PersistenciaEstadoIsolado } from "./estrutural-staging.js
 import { executarMeta9 } from "./meta9.js";
 import { resolverTotalCapitulos } from "./total-capitulos.js";
 import { medirSinais, resumoSinais } from "./sinais.js";
-import { exigirReleaseAtual, lerAutorizacaoProjeto } from "./release.js";
+import { exigirReleaseAtual, lerAutorizacaoProjeto, type OperacaoV2 } from "./release.js";
 import { conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
 import {
   ErroEngine,
@@ -262,7 +262,7 @@ export async function prepararEdicaoEstrutural(opts: {
  * (escrever_livro, revisar): projeto, contrato, release, persistência, perfil,
  * briefing (camadas 3/7), fundação e edição de origem — caminho ÚNICO.
  */
-async function prepararProjetoV2(job: Job): Promise<{
+async function prepararProjetoV2(job: Job, operacao: OperacaoV2 = "escrita"): Promise<{
   proj: Record<string, unknown>;
   contrato: ReturnType<typeof carregarContrato>;
   release: ReturnType<typeof exigirReleaseAtual>;
@@ -294,7 +294,7 @@ async function prepararProjetoV2(job: Job): Promise<{
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const skillId = MAPA_SKILL_V1_V2[skillV1] ?? skillV1;
   const contrato = carregarContrato(skillId); // skill desconhecida/contrato inválido = falha clara AQUI, antes do escritor
-  const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId));
+  const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId), operacao);
 
   const dirProjeto = projDir(projectId);
   const { persistencia, migracaoPendente } = await criarPersistencia({ dirProjeto });
@@ -436,6 +436,42 @@ export function devolverAFilaNoCheckpoint(opts: {
   return opts.lote > 0 && opts.novosCaps >= opts.lote && opts.capitulo < opts.total;
 }
 
+/**
+ * D5 — o livro está COMPLETO? Só quando todo capítulo de 1..N está aprovado.
+ * `done` derivado de "a execução retornou sem erro" é falso positivo: com
+ * `max_novos_caps=1`, um livro de 12 capítulos aparecia concluído no primeiro.
+ */
+export function livroCompleto(opts: {
+  total: number;
+  statusPorCapitulo: Record<string, { status?: string } | undefined>;
+}): boolean {
+  if (!opts.total || opts.total < 1) return false;
+  for (let n = 1; n <= opts.total; n++) {
+    const s = opts.statusPorCapitulo[String(n)]?.status;
+    if (s !== "aprovado" && s !== "aprovado_com_excecao") return false;
+  }
+  return true;
+}
+
+/**
+ * Parada por limite de lote (`max_novos_caps`). Retorna o próximo capítulo a
+ * escrever, ou null quando não há motivo para parar. Nunca "encerra" o livro:
+ * parar por lote e concluir o livro são coisas diferentes.
+ */
+export function pararPorLoteDeNovos(opts: {
+  maxNovosCaps: number;
+  novosCaps: number;
+  proximoCapitulo: number;
+  total: number;
+}): { motivo: string; proximoCapitulo: number } | null {
+  if (!Number.isFinite(opts.maxNovosCaps) || opts.novosCaps < opts.maxNovosCaps) return null;
+  if (opts.proximoCapitulo > opts.total) return null; // nada a continuar
+  return {
+    motivo: `max_novos_caps=${opts.maxNovosCaps} atingido; livro incompleto (${opts.proximoCapitulo - 1}/${opts.total})`,
+    proximoCapitulo: opts.proximoCapitulo,
+  };
+}
+
 export async function executarEscritaV2(job: Job): Promise<ResultadoRoteado | void> {
   const { proj, contrato, release, dirProjeto, persistencia, migracaoPendente, gravador, estado, deps, docsFactuais, editionId } =
     await prepararProjetoV2(job);
@@ -492,13 +528,21 @@ export async function executarEscritaV2(job: Job): Promise<ResultadoRoteado | vo
       legadosPulados.push(n);
       continue;
     }
-    if (novosCaps >= maxNovosCaps) {
-      await atualizarProgresso(job.id, {
+    // D5 — `max_novos_caps` LIMITA O LOTE, não encerra o livro. Antes, atingir o
+    // limite fazia `return` limpo e o worker marcava o job como `done`: um livro
+    // de 12 capítulos com max_novos_caps=1 aparecia CONCLUÍDO no capítulo 1.
+    // Agora devolve o job à fila, com o próximo capítulo declarado.
+    const paradaLote = pararPorLoteDeNovos({ maxNovosCaps, novosCaps, proximoCapitulo: n, total });
+    if (paradaLote) {
+      const progresso = {
         fase: "ESCRITA",
-        etapa: `limite de ${maxNovosCaps} capítulo(s) novo(s) atingido — job encerrado sem revisão final`,
+        etapa: `lote de ${maxNovosCaps} capítulo(s) novo(s) concluído — execução encadeada continua no capítulo ${n}`,
+        cap_atual: n - 1,
+        proximo_capitulo: n,
         ...(legadosPulados.length ? { aviso_legado: `capítulos legado preservados (não reescritos): ${legadosPulados.join(", ")}` } : {}),
-      });
-      return;
+      };
+      await atualizarProgresso(job.id, progresso);
+      return { continuar: { ...paradaLote, progresso } };
     }
 
     // Trechos anteriores estritamente relevantes: cauda do capítulo anterior (gancho/continuidade local).
@@ -885,7 +929,7 @@ async function executarMeta9Integrada(
  * antes de qualquer rodada de reescrita) — quem reescreve é `escrever_livro`.
  */
 export async function executarAvaliarV2(job: Job): Promise<void> {
-  const ctx = await prepararProjetoV2(job);
+  const ctx = await prepararProjetoV2(job, "avaliacao");
   const estado = await ctx.gravador.carregarEstado();
   const total = estado.doc.total_capitulos ?? 0;
   const aprovados = Object.values(estado.doc.capitulos).filter(
@@ -935,7 +979,7 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
   }
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const contrato = carregarContrato(MAPA_SKILL_V1_V2[skillV1] ?? skillV1);
-  const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId));
+  const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId), "fundacao");
   const dirProjeto = projDir(projectId);
   await fs.mkdir(dirProjeto, { recursive: true }); // cwd do CLI precisa existir antes do provedor
   const { persistencia } = await criarPersistencia({ dirProjeto });
@@ -1047,7 +1091,7 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
   }
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const contrato = carregarContrato(MAPA_SKILL_V1_V2[skillV1] ?? skillV1);
-  const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId));
+  const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId), "fundacao");
   const totalCaps = (proj as { total_capitulos?: number }).total_capitulos ?? 0;
   if (!totalCaps || totalCaps < 1) {
     throw new ErroEngine({ codigo: "TOTAL_CAPITULOS_INDEFINIDO", classe: "configuracao", mensagem: "refinar_fundacao V2 exige total_capitulos definido no projeto" });
