@@ -161,13 +161,24 @@ export function medirSinais(texto: string, contrato: SkillContract): SinalMedido
   // casava com sinal nenhum — cota silenciosamente morta (o léxico existia em
   // maneirismo.ts e `sinais.ts` nunca o importava). Mede EXATAMENTE os termos que
   // a regra nomeia ("coisa"/"algo"), não o léxico inteiro de muletas.
-  // BLOQUEADO AGUARDANDO DECISÃO DO AUTOR (ver DIAGNOSTICO/relatório da fatia E).
-  // O detector está pronto (`ocorrenciasMuletaGenerica`) e a emissão é uma linha,
-  // mas ligá-la exige um bloco de rótulos `muleta_coisa` nas 4 amostras romantasy
-  // do corpus (13 ocorrências que pedem julgamento humano legítima × tique).
-  // `worker/calibration/` está fora do escopo desta tarefa, então a emissão fica
-  // segurada — cota declarada e não medida, registrada na tabela regra→sinal→cota.
-  // Emitir só quando o contrato declara a regra mantém dan-brown e hoover intactos.
+  // ⚠ EMISSÃO RETIDA — `muleta_coisa` (cota declarada, detector pronto).
+  // Decisão do autor em 2026-07-28, registrada em docs/engine-v2/03-cotas-regra-sinal.md.
+  //
+  // Ligar a emissão faz calibracao.ts:190 exigir um bloco de rótulos `muleta_coisa`
+  // nas 4 amostras romantasy (13 ocorrências, julgamento humano legítima × tique).
+  // Não vale forçar: os 14 arquivos de worker/calibration/v1/labels/ são todos
+  // PRÉ-RÓTULO AUTOMÁTICO, nenhum revisado por humano — o corpus já não certifica
+  // nada, e um 15º bloco fabricado só aprofundaria a dívida que trava o release.
+  //
+  // Para sair da retenção: rotular as 4 amostras e descomentar o bloco abaixo.
+  // O detector (`ocorrenciasMuletaGenerica`) permanece exportado e testado.
+  //
+  // const regraMuleta = regraDeCota(contrato, "muleta") ?? regraDeCota(contrato, "coisa");
+  // if (regraMuleta?.cota) {
+  //   const mu = ocorrenciasMuletaGenerica(texto);
+  //   out.push(medir("muleta_coisa", mu.length, mu, { min: regraMuleta.cota.min, max: regraMuleta.cota.max },
+  //     { sem_excecao: regraMuleta.sem_excecao }));
+  // }
 
   // Tamanho do capítulo (sinal, não gate — decisão da F6).
   // O NÚMERO do piso vem de `faixa_palavras` (fonte única — a regra `piso-densidade`

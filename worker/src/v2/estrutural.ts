@@ -218,6 +218,30 @@ function semCabecalhoCapitulo(texto: string): string {
   return linhas.join("\n").trim();
 }
 
+/**
+ * Reescreve o NÚMERO no cabeçalho `## Capítulo N` da prosa quando a edição
+ * estrutural renumera o arquivo. Antes, a edição só renomeava `capitulo-NN.md`:
+ * o arquivo virava o capítulo 7 e a primeira linha continuava dizendo
+ * "## Capítulo 9" — o leitor lia a numeração errada no EPUB.
+ *
+ * Conservador de propósito: só troca o NÚMERO, na primeira linha de cabeçalho,
+ * preservando o nível de `#`, a palavra usada ("Capítulo"/"Cap."), maiúsculas,
+ * acento e qualquer subtítulo depois do número. Cabeçalho ausente ou sem número
+ * é devolvido intacto (a prosa nunca é inventada aqui).
+ */
+export function renumerarCabecalhoCapitulo(texto: string, novo: number): string {
+  const crlf = texto.includes("\r\n");
+  const linhas = texto.replace(/\r\n/g, "\n").split("\n");
+  const i = linhas.findIndex((l) => l.trim().length > 0);
+  if (i < 0) return texto;
+  const re = /^(\s*#{1,6}\s+(?:cap[íi]tulo|cap\.?)\s*)(\d+)(\b.*)$/i;
+  const m = linhas[i].match(re);
+  if (!m) return texto;
+  linhas[i] = `${m[1]}${novo}${m[3]}`;
+  const saida = linhas.join("\n");
+  return crlf ? saida.replace(/\n/g, "\r\n") : saida;
+}
+
 /** Combinação mecânica conservadora: preserva toda a prosa e remove só cabeçalhos duplicados. */
 export function fundirTextosCapitulos(textos: string[]): string {
   if (textos.length < 2) throw new Error("fusão exige ao menos dois textos");
@@ -305,7 +329,13 @@ export function aplicarEdicaoEstrutural(entrada: {
     for (const [idx, antigo] of ordemFinal.entries()) {
       const novo = idx + 1;
       const fusao = fusoes.find((f) => f[0] === antigo);
-      const conteudo = fusao ? entrada.conteudosFusao![antigo] : originais.get(antigo)!;
+      const bruto = fusao ? entrada.conteudosFusao![antigo] : originais.get(antigo)!;
+      // A prosa acompanha a renumeração: o arquivo vira capitulo-07.md E o
+      // cabeçalho vira "## Capítulo 7". Antes só o arquivo era renomeado.
+      // A renumeração do cabeçalho é CONSEQUÊNCIA da reordenação/corte, não uma
+      // operação estrutural própria: não entra em `aplicadas` (que audita as
+      // operações) para o rastro não virar 39 linhas de ruído num livro de 40.
+      const conteudo = novo === antigo ? bruto : renumerarCabecalhoCapitulo(bruto, novo);
       const tmp = path.join(dirManuscrito, `.${nomeCapitulo(novo)}.${assinatura}.tmp-struct`);
       writeFileSync(tmp, conteudo, "utf8");
       temporarios.push(tmp);
