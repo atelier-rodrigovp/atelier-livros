@@ -48,7 +48,7 @@ describe("fluxo CSV de rotulagem humana", () => {
     expect(parsearCsv(serializarCsv(linhas))[0].justificativa).toBe('Contexto "humano"; linha um\r\nlinha dois.');
   });
 
-  it("valida o pacote completo sem modificar o corpus no dry-run", () => {
+  it("[DOD:Q-01] valida o pacote completo sem modificar o corpus no dry-run", () => {
     const dir = copiarCorpus();
     const antes = readFileSync(path.join(dir, "corpus.json"), "utf8");
     const exportado = exportarRotulosCsv(dir, { amostra: "dan-brown-aprovado-01" });

@@ -114,7 +114,7 @@ describe("extração exige evidência na página", () => {
 });
 
 describe("conflito ficha × prosa é EVENTO, não sobrescrita", () => {
-  it("divergência com trecho real vira conflito explícito", () => {
+  it("[DOD:H-02] divergência com trecho real vira conflito explícito", () => {
     const e = extracao({
       divergencias: [
         {
@@ -152,7 +152,7 @@ describe("conflito ficha × prosa é EVENTO, não sobrescrita", () => {
 describe("fechamento cruza fundação × fichas × prosa", () => {
   const memoriaDaProsa = () => derivar().entradas;
 
-  it("PROMESSA QUE SÓ A PROSA ABRIU exige payoff (o buraco que a fatia H fecha)", () => {
+  it("[DOD:H-01] PROMESSA QUE SÓ A PROSA ABRIU exige payoff (o buraco que a fatia H fecha)", () => {
     const p = pendenciasDeFechamento({
       promessasFundacao: [],
       promessasFichas: [],

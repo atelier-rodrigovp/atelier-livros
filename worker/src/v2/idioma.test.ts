@@ -126,7 +126,7 @@ describe("fixtures obrigatórias", () => {
     expect(decidirIdioma(sinal, { schema: "parecer-idioma/v1", narracao_conforme: true, intencionais: [], injustificadas: [] }).passou).toBe(true);
   });
 
-  it("DIÁLOGO INTENCIONAL em outra variante NÃO reprova sozinho", () => {
+  it("[DOD:J-03] DIÁLOGO INTENCIONAL em outra variante NÃO reprova sozinho", () => {
     const sinal = medirIdioma(DIALOGO_INTENCIONAL, "pt-BR");
     const parecer: ParecerIdioma = {
       schema: "parecer-idioma/v1",
@@ -164,7 +164,7 @@ describe("o detector é SINAL, nunca juiz único", () => {
     expect(v.passou).toBe(true);
   });
 
-  it("narração declarada fora do alvo reprova citando o que o detector viu", () => {
+  it("[DOD:J-03] narração declarada fora do alvo reprova citando o que o detector viu", () => {
     const sinal = medirIdioma(DAN_BROWN_PT_PT, "pt-BR");
     const v = decidirIdioma(sinal, {
       schema: "parecer-idioma/v1",

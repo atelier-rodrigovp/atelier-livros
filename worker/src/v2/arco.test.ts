@@ -298,7 +298,7 @@ describe("gate de rotação de POV", () => {
     expect(g.evidencia).toContain("máx 3");
   });
 
-  it("fio ausente por mais capítulos que o contrato permite reprova", () => {
+  it("[DOD:N-01] fio ausente por mais capítulos que o contrato permite reprova", () => {
     // "conspiracao" avança no cap 1 e some nos capítulos 2..6 (5 > máx 3).
     const anteriores = serie(
       [["conspiracao"], ["investigacao"], ["investigacao"], ["investigacao"], ["investigacao"]],
@@ -379,19 +379,19 @@ describe("gateFichaContraArco", () => {
     expect(gateFichaContraArco(6, f, arco).passou).toBe(true);
   });
 
-  it("ato errado reprova citando o ato da grade", () => {
+  it("[DOD:N-01] ato errado reprova citando o ato da grade", () => {
     const g = gateFichaContraArco(6, ficha({ capitulo: 6, ato: 1, tensao_alvo: 4 }), arco);
     expect(g.passou).toBe(false);
     expect(g.evidencia).toContain("ato 2");
   });
 
-  it("tensão-alvo divergente do ato reprova", () => {
+  it("[DOD:N-01] tensão-alvo divergente do ato reprova", () => {
     const g = gateFichaContraArco(6, ficha({ capitulo: 6, ato: 2, tensao_alvo: 2 }), arco);
     expect(g.passou).toBe(false);
     expect(g.evidencia).toContain("tensao_alvo");
   });
 
-  it("promessa inexistente na grade reprova", () => {
+  it("[DOD:N-01] promessa inexistente na grade reprova", () => {
     const f = ficha({ capitulo: 6, ato: 2, tensao_alvo: 4, promessas_tocadas: [{ id: "P9", acao: "planta" }] });
     const g = gateFichaContraArco(6, f, arco);
     expect(g.passou).toBe(false);
@@ -405,7 +405,7 @@ describe("gateFichaContraArco", () => {
     expect(g.evidencia).toContain("pagamento previsto no capítulo 11");
   });
 
-  it("marco de arco fora do capítulo previsto reprova", () => {
+  it("[DOD:N-01] marco de arco fora do capítulo previsto reprova", () => {
     const f = ficha({ capitulo: 6, ato: 2, tensao_alvo: 4, marcos_arco: [{ personagem: "Marina", marco: "decide agir" }] });
     const g = gateFichaContraArco(6, f, arco);
     expect(g.passou).toBe(false);

@@ -106,7 +106,7 @@ describe("conferência do parecer", () => {
     expect(r.validadas).toHaveLength(7);
   });
 
-  it("CAPÍTULO BEM ESCRITO QUE NÃO CUMPRE A VIRADA É REPROVADO, com evidência", () => {
+  it("[DOD:G-01] CAPÍTULO BEM ESCRITO QUE NÃO CUMPRE A VIRADA É REPROVADO, com evidência", () => {
     const p = parecerCompleto();
     p.afirmacoes = p.afirmacoes.map((a) =>
       a.item === "virada"
@@ -120,7 +120,7 @@ describe("conferência do parecer", () => {
     expect(prob?.detalhe).toContain("nada muda por causa dela");
   });
 
-  it("afirmação com trecho INVENTADO não sustenta aprovação", () => {
+  it("[DOD:G-02] afirmação com trecho INVENTADO não sustenta aprovação", () => {
     const p = parecerCompleto();
     p.afirmacoes = p.afirmacoes.map((a) =>
       a.item === "gancho" ? { ...a, trecho: "o arquivista sacou uma arma e apontou para Marina" } : a

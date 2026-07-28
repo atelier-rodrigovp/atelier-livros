@@ -243,7 +243,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("ciclo completo com mock: interface → worker → gates → Storage → Leitor", () => {
-  it("percorre o caminho inteiro e o capítulo aprovado chega legível ao Leitor", async () => {
+  it("[DOD:Q-02] percorre o caminho inteiro e o capítulo aprovado chega legível ao Leitor", async () => {
     // --- 1. INTERFACE: o autor aprova o briefing e autoriza o projeto --------
     const aprovacao = aprovarBriefing(briefing, "rodrigo", "2026-07-28T00:00:00.000Z");
     expect(autorizarFundacao(briefing, aprovacao).permitido).toBe(true);

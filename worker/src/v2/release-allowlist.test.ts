@@ -19,11 +19,11 @@ const autorizacao = (modo: "producao" | "canario", projectId = PROJETO): Autoriz
 });
 
 describe("autorização de projeto (V2)", () => {
-  it("SEM certificado e SEM autorização: não executa", () => {
+  it("[DOD:M-01] SEM certificado e SEM autorização: não executa", () => {
     expect(() => exigirReleaseAtual("dan-brown", PROJETO, null)).toThrowError(/não tem autorização ativa/);
   });
 
-  it("autorização de PRODUÇÃO não substitui o certificado", () => {
+  it("[DOD:M-03] autorização de PRODUÇÃO não substitui o certificado", () => {
     // Não há certificado válido no checkout: mesmo autorizado, o projeto para.
     expect(() => exigirReleaseAtual("dan-brown", PROJETO, autorizacao("producao"))).toThrowError(
       /Engine V2 bloqueada para fundação\/escrita/
@@ -54,7 +54,7 @@ describe("autorização de projeto (V2)", () => {
     expect(release).toMatchObject({ autorizado_por: "rodrigo", motivo: "Canário V2 — O Cofre de Alcobaça" });
   });
 
-  it("obra fora de escopo sem autorização continua fail-closed", () => {
+  it("[DOD:M-02] obra fora de escopo sem autorização continua fail-closed", () => {
     expect(() => exigirReleaseAtual("dan-brown", OBRA_REAL_FORA_DE_ESCOPO, null)).toThrowError(
       /não tem autorização ativa/
     );
@@ -85,19 +85,19 @@ describe("o modo canário não é porta dos fundos para produzir obra", () => {
     expect(r).toMatchObject({ modo: "canario" });
   });
 
-  it("NÃO cobre fundação", () => {
+  it("[DOD:D3-01] NÃO cobre fundação", () => {
     expect(() => exigirReleaseAtual("dan-brown", PROJETO, autorizacao("canario"), "fundacao")).toThrowError(
       /CANÁRIO.*apenas a amostra de canário|exige certificado de release válido/s
     );
   });
 
-  it("NÃO cobre escrita de livro", () => {
+  it("[DOD:D3-01] NÃO cobre escrita de livro", () => {
     expect(() => exigirReleaseAtual("dan-brown", PROJETO, autorizacao("canario"), "escrita")).toThrowError(
       /exige certificado de release válido/
     );
   });
 
-  it("NÃO cobre avaliação", () => {
+  it("[DOD:D3-01] NÃO cobre avaliação", () => {
     expect(() => exigirReleaseAtual("dan-brown", PROJETO, autorizacao("canario"), "avaliacao")).toThrowError(
       /exige certificado de release válido/
     );

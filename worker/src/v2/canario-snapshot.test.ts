@@ -95,7 +95,7 @@ describe("snapshot do canário é imutável e completo", () => {
 });
 
 describe("o perfil de voz DERIVA do snapshot, de forma verificável", () => {
-  it("o perfil carrega o hash do canário aprovado", () => {
+  it("[DOD:L-01] o perfil carrega o hash do canário aprovado", () => {
     const s = snapshot();
     const p = derivarPerfilDoCanario(s, "Voz seca, frase curta, sem ornamento.");
     expect(p.canario_hash).toBe(s.hash);
@@ -131,20 +131,20 @@ describe("mudança de premissa invalida os artefatos dependentes", () => {
     expect(invalidarPorPremissa([])).toBeNull();
   });
 
-  it("trocar o CANÁRIO invalida perfil, fundação, fichas, capítulos e avaliação", () => {
+  it("[DOD:L-02] trocar o CANÁRIO invalida perfil, fundação, fichas, capítulos e avaliação", () => {
     const m = compararPremissas(premissas(), premissas({ canario_hash: "outro" }));
     const inv = invalidarPorPremissa(m)!;
     expect(inv.artefatos).toEqual(DEPENDENCIAS.canario_hash);
     expect(inv.motivo).toContain("canario_hash");
   });
 
-  it("trocar o BRIEFING invalida fundação em diante", () => {
+  it("[DOD:L-02] trocar o BRIEFING invalida fundação em diante", () => {
     const inv = invalidarPorPremissa(compararPremissas(premissas(), premissas({ briefing_hash: "novo" })))!;
     expect(inv.artefatos).toContain("fundacao");
     expect(inv.artefatos).toContain("capitulos");
   });
 
-  it("trocar a SKILL invalida tudo que a voz sustenta", () => {
+  it("[DOD:L-02] trocar a SKILL invalida tudo que a voz sustenta", () => {
     const inv = invalidarPorPremissa(compararPremissas(premissas(), premissas({ skill_id: "hoover-mcfadden" })))!;
     expect(inv.artefatos).toContain("perfil_de_voz");
   });
@@ -154,7 +154,7 @@ describe("mudança de premissa invalida os artefatos dependentes", () => {
     expect(inv.artefatos).toContain("capitulos");
   });
 
-  it("mudar o TOTAL DE CAPÍTULOS invalida fundação, fichas e manuscrito", () => {
+  it("[DOD:L-02] mudar o TOTAL DE CAPÍTULOS invalida fundação, fichas e manuscrito", () => {
     const inv = invalidarPorPremissa(compararPremissas(premissas(), premissas({ total_capitulos: 20 })))!;
     expect(inv.artefatos).toEqual(expect.arrayContaining(["fundacao", "fichas", "manuscrito"]));
   });

@@ -43,11 +43,30 @@ canarios_novos   BLOQUEADOS_AGUARDANDO_AUTOR
 ## Próxima tarefa
 
 CONCLUÍDO. Os defeitos D1–D7 e as fatias B–Q estão fechados e comprovados por
-`INVENTARIO_DOD` (46 garantias, cada uma amarrada a um teste). Não existe fatia
-"A" no plano: a numeração das fatias começa em B (`1af5d44`, ledger de
-revelações), e nenhum commit ou documento do repositório define uma fatia A.
-Redação anterior deste arquivo dizia "A–Q" — era imprecisa, não havia trabalho
-faltando.
+`INVENTARIO_DOD` (46 garantias). Não existe fatia "A" no plano: a numeração das
+fatias começa em B (`1af5d44`, ledger de revelações), e nenhum commit ou
+documento do repositório define uma fatia A. Redação anterior deste arquivo dizia
+"A–Q" — era imprecisa, não havia trabalho faltando.
+
+### Como a DoD é comprovada (correção final do D1)
+
+A conferência **não** olha mais se o arquivo de teste existe — isso deixava a
+garantia evaporar por dentro do arquivo sem que nada acusasse. Cada garantia tem
+um **ID estável** (`B-01`, `D6-01`, `Q-02`…), o teste que a prova declara esse ID
+no título (`[DOD:<id>]`), e `dod-conferencia.ts` lê o **resultado da execução**:
+
+- ID inventariado sem nenhum teste declarando → REPROVA;
+- ID cujo teste está `skip`/`todo` → REPROVA (não conta como aprovado);
+- ID cujo teste falhou → REPROVA;
+- ID duplicado no inventário → REPROVA;
+- ID declarado num teste e ausente do inventário → REPROVA.
+
+Uma garantia pode ser provada por vários testes (o cruzamento macro × micro,
+`D6-01`, tem oito); nesse caso **todos** precisam rodar e passar. Os meta-testes
+de `dod-conferencia.test.ts` provam cada um desses modos de reprovação.
+
+A regressão completa continua rodando e não foi substituída: a conferência por ID
+é evidência **adicional**.
 
 DoD local executada em 2026-07-28 sobre `83ac05d`:
 

@@ -52,7 +52,7 @@ describe("cobertura da entrevista", () => {
     }
   });
 
-  it("nenhum default silencioso: campo ausente é LACUNA, nunca valor inventado", () => {
+  it("[DOD:E-01] nenhum default silencioso: campo ausente é LACUNA, nunca valor inventado", () => {
     const b = completo({ tom: undefined });
     const l = lacunasDoBriefing(b).find((x) => x.campo === "tom");
     expect(l).toBeDefined();
@@ -144,7 +144,7 @@ describe("aprovação do briefing é pré-requisito da fundação", () => {
     expect(r).toMatchObject({ motivo: "briefing_com_lacunas" });
   });
 
-  it("briefing CONTRADITÓRIO não gera fundação", () => {
+  it("[DOD:E-02] briefing CONTRADITÓRIO não gera fundação", () => {
     const b = completo({ idioma: "pt-BR" });
     const aprov = aprovarBriefing(b, "rodrigo", "2026-07-28T00:00:00.000Z");
     const r = autorizarFundacao(b, aprov, { idioma_origem: "pt-PT" });
@@ -173,7 +173,7 @@ describe("aprovação do briefing é pré-requisito da fundação", () => {
     expect(aprov.aprovado_por).toBe("rodrigo");
   });
 
-  it("mudar qualquer decisão muda o hash (a aprovação é hash-bound)", () => {
+  it("[DOD:E-03] mudar qualquer decisão muda o hash (a aprovação é hash-bound)", () => {
     expect(hashBriefing(completo())).not.toBe(hashBriefing(completo({ pdv: "primeira pessoa" })));
   });
 });

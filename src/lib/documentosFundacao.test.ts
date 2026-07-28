@@ -14,7 +14,7 @@ describe("lista de documentos da fundação na interface", () => {
     expect(documentosParaExibir({ documentos: [] })).toEqual(DOCUMENTOS_LEGADO);
   });
 
-  it("com índice do worker V2, usa os caminhos REAIS (o bug: nomes da V1 em livro V2)", () => {
+  it("[DOD:D7-01] com índice do worker V2, usa os caminhos REAIS (o bug: nomes da V1 em livro V2)", () => {
     const docs = documentosParaExibir({
       documentos: [
         { titulo: "Bíblia da obra", caminho: "fundacao/biblia-da-obra.md", origem: "nucleo" },

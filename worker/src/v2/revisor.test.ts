@@ -374,7 +374,7 @@ describe("pisos por eixo: a regra numérica vence a declaração", () => {
     expect(conferirParecer(comNotas({}), []).verdictEfetivo).toBe("aprovado");
   });
 
-  it("CONTINUIDADE abaixo do piso torna a aprovação impossível", () => {
+  it("[DOD:J-01] CONTINUIDADE abaixo do piso torna a aprovação impossível", () => {
     const c = conferirParecer(comNotas({ continuity: 1 }), []);
     expect(c.verdictEfetivo).toBe("reprovado");
     expect(c.problemas.join(" ")).toContain('eixo "continuity" com nota 1, abaixo do piso 3');
@@ -420,7 +420,7 @@ describe("evidência precisa LOCALIZAR", () => {
     expect(c.verdictEfetivo).toBe("aprovado");
   });
 
-  it("trecho vazio NÃO sustenta aprovação", () => {
+  it("[DOD:J-02] trecho vazio NÃO sustenta aprovação", () => {
     const c = conferirParecer(comEvidencia({ local: "L:5", trecho: "  ", observacao: "gancho" }), []);
     expect(c.verdictEfetivo).toBe("reprovado");
     expect(c.problemas.join(" ")).toContain("trecho vazio");

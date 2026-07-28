@@ -17,7 +17,7 @@ import type { EntradaMemoria } from "./memoria-prosa.js";
 const FRASE = "A maré de sizígia descobre a entrada do túnel duas vezes por ano, em março e setembro.";
 
 describe("camada 1 — repetição LITERAL contra TODOS os capítulos", () => {
-  it("pega a frase repetida DEZ capítulos atrás (o que o gate antigo não via)", () => {
+  it("[DOD:I-01] pega a frase repetida DEZ capítulos atrás (o que o gate antigo não via)", () => {
     const anteriores = Array.from({ length: 10 }, (_, i) => ({
       numero: i + 1,
       texto: i === 0 ? `Marina desceu ao porão. ${FRASE}` : `Capítulo ${i + 1} sem nada em comum com o resto do livro.`,
@@ -85,7 +85,7 @@ describe("camada 2 — repetição SEMÂNTICA (mesma revelação, outras palavra
     ...over,
   });
 
-  it("PARÁFRASE da mesma revelação é detectada", () => {
+  it("[DOD:I-02] PARÁFRASE da mesma revelação é detectada", () => {
     const a = detectarRepeticaoSemantica({
       capitulo: 9,
       novoEnunciado: "Marina descobre que o irmão passou pelo consulado no ano de 1987",
@@ -159,7 +159,7 @@ describe("camada 3 — MANEIRISMO é sinal acumulativo", () => {
     expect(padrao?.ocorrencias[0].trecho).toContain("Não era medo");
   });
 
-  it("padrão em CINCO capítulos gera sinal acumulativo", () => {
+  it("[DOD:I-03] padrão em CINCO capítulos gera sinal acumulativo", () => {
     const s = medirManeirismosDoLivro(comPadrao(CAPITULOS_PARA_SINAL))[0];
     const d = decidirManeirismo(s, { calibrados: {}, excecoesDoAutor: [] });
     expect(d.acao).toBe("sinalizar");
@@ -171,7 +171,7 @@ describe("camada 3 — MANEIRISMO é sinal acumulativo", () => {
     expect(decidirManeirismo(s, { calibrados: {}, excecoesDoAutor: [] }).acao).toBe("ignorar");
   });
 
-  it("MANEIRISMO NÃO CALIBRADO NUNCA BLOQUEIA — nem com vinte capítulos", () => {
+  it("[DOD:I-04] MANEIRISMO NÃO CALIBRADO NUNCA BLOQUEIA — nem com vinte capítulos", () => {
     const s = medirManeirismosDoLivro(comPadrao(20))[0];
     const d = decidirManeirismo(s, { calibrados: {}, excecoesDoAutor: [] });
     expect(d.acao).toBe("sinalizar");

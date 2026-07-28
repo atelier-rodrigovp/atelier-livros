@@ -284,7 +284,7 @@ describe("o que virou bloqueante (antes: aviso)", () => {
     expect(av.bloqueios.some((x) => x.codigo === "ANTAGONISTA_AUSENTE")).toBe(true);
   });
 
-  it("personagem central sem arco e sem invariância explícita reprova", () => {
+  it("[DOD:F-01] personagem central sem arco e sem invariância explícita reprova", () => {
     const mapa = fundacao().mapa_personagens.map((p) => ({ ...p, arco: "" }));
     const av = avaliarFundacaoV2(fundacao({ mapa_personagens: mapa }), contrato, 12, ["dossie-factual.md"]);
     const b = av.bloqueios.find((x) => x.codigo === "ARCO_PERSONAGEM_AUSENTE");
@@ -313,7 +313,7 @@ describe("o que virou bloqueante (antes: aviso)", () => {
     expect(av.bloqueios.some((x) => x.codigo === "ARCO_PERSONAGEM_AUSENTE")).toBe(false);
   });
 
-  it("tensão plana entre os atos reprova (estar na faixa 1–5 não basta)", () => {
+  it("[DOD:F-03] tensão plana entre os atos reprova (estar na faixa 1–5 não basta)", () => {
     const arco = arcoOk(12);
     arco.atos = arco.atos.map((a) => ({ ...a, tensao_alvo: 3 }));
     const av = avaliarFundacaoV2(fundacao({ arco }), contrato, 12, ["dossie-factual.md"]);
@@ -322,7 +322,7 @@ describe("o que virou bloqueante (antes: aviso)", () => {
     expect(b!.mensagem).toContain("plana");
   });
 
-  it("fio sem nenhum passo de escalada reprova", () => {
+  it("[DOD:F-02] fio sem nenhum passo de escalada reprova", () => {
     const arco = arcoOk(12);
     arco.fios[0].escalada = [];
     const av = avaliarFundacaoV2(fundacao({ arco }), contrato, 12, ["dossie-factual.md"]);
@@ -431,44 +431,44 @@ describe("macro × micro por campo estruturado", () => {
   const base = () => fundacao({ arco: arcoOk(12), estrutura: estruturaCoerente() });
   const mensagens = (f: FundacaoV2) => gateMacroMicroCoerentes(f).map((x) => x.mensagem).join(" · ");
 
-  it("PLANTIO em capítulo inexistente reprova", () => {
+  it("[DOD:D6-01] PLANTIO em capítulo inexistente reprova", () => {
     const f = base();
     f.arco!.promessas[0].plantada_em = 99;
     expect(mensagens(f)).toContain("plantada_em=99");
   });
 
-  it("REFORÇO em capítulo inexistente reprova", () => {
+  it("[DOD:D6-01] REFORÇO em capítulo inexistente reprova", () => {
     const f = base();
     f.arco!.promessas[0].reforcada_em = [4, 77];
     expect(mensagens(f)).toContain("reforcada_em[1]=77");
   });
 
-  it("PAGAMENTO em capítulo inexistente reprova", () => {
+  it("[DOD:D6-01] PAGAMENTO em capítulo inexistente reprova", () => {
     const f = base();
     f.arco!.promessas[0].paga_em = 40;
     expect(mensagens(f)).toContain("paga_em=40");
   });
 
-  it("ESCALADA de fio em capítulo inexistente reprova", () => {
+  it("[DOD:D6-01] ESCALADA de fio em capítulo inexistente reprova", () => {
     const f = base();
     f.arco!.fios[0].escalada = [3, 88];
     expect(mensagens(f)).toContain("escalada[1] no capítulo 88");
   });
 
-  it("CLÍMAX de fio num capítulo que a micro deu a OUTRO fio reprova", () => {
+  it("[DOD:D6-01] CLÍMAX de fio num capítulo que a micro deu a OUTRO fio reprova", () => {
     const f = base();
     // cap 9 pertence a "conspiracao" na estrutura coerente
     f.arco!.fios[0].climax = 9;
     expect(mensagens(f)).toContain('entregou esse capítulo ao fio "conspiracao"');
   });
 
-  it("MARCO de arco em capítulo inexistente reprova", () => {
+  it("[DOD:D6-01] MARCO de arco em capítulo inexistente reprova", () => {
     const f = base();
     f.arco!.arcos[0].marcos.push({ capitulo: 55, estado: "estado fora do livro" });
     expect(mensagens(f)).toContain('arco de "Marina Alencar" tem marco no capítulo 55');
   });
 
-  it("ATO que cobre capítulo que a micro não declara reprova", () => {
+  it("[DOD:D6-01] ATO que cobre capítulo que a micro não declara reprova", () => {
     const f = base();
     f.arco!.atos[2].cap_fim = 15;
     expect(mensagens(f)).toContain("ato(s) cobrem capítulo(s) que a estrutura não declara: 13, 14, 15");
@@ -480,7 +480,7 @@ describe("macro × micro por campo estruturado", () => {
     expect(mensagens(f)).toContain("capítulo(s) da estrutura fora de qualquer ato: 11, 12");
   });
 
-  it("TENSÃO: nenhum fio com clímax no ato de maior tensão reprova", () => {
+  it("[DOD:D6-01] TENSÃO: nenhum fio com clímax no ato de maior tensão reprova", () => {
     const f = base();
     // Empurra os dois clímax para o primeiro ato (tensão 2), longe do pico (5).
     f.arco!.fios[0].climax = 3;

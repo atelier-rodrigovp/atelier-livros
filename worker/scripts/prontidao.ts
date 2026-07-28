@@ -12,11 +12,12 @@
 //      npm run prontidao -- --ciclo (inclui o nível 3)
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { analisarCalibracao } from "../src/v2/calibracao.js";
 import { CAMPOS_DECISORIOS, EXCECOES_NAO_DECISORIAS } from "../src/v2/campos-decisorios.js";
+import { conferirDod, resumoConferencia, type ConferenciaDod, type ResultadoTesteDod } from "../src/v2/dod-conferencia.js";
 import { fatiasDoInventario, INVENTARIO_DOD } from "../src/v2/inventario-dod.js";
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
@@ -47,7 +48,7 @@ interface Relatorio {
   gerado_em: string;
   duracao_ms: number;
   estados: Record<string, Estado | string>;
-  nivel1: { comando: string; itens: Item[] };
+  nivel1: { comando: string; itens: Item[]; dod: ConferenciaDod };
   nivel2: { itens: Item[] };
   nivel3: { executado: boolean; itens: Item[] };
   bloqueios: string[];
@@ -114,10 +115,74 @@ function contarTestes(saida: string): { passaram: number; falharam: number; pula
 }
 
 // ---------------------------------------------------------------------------
+// Coleta estruturada da DoD (defeito D1)
+//
+// Roda os testes que provam a DoD e lê o RESULTADO de cada um. A execução sai da
+// RAIZ porque o inventário cita tanto suítes do worker quanto da interface, e é
+// a config da raiz que enxerga as duas.
+// ---------------------------------------------------------------------------
+
+/** Caminho do inventário (relativo a `worker/`) normalizado para a raiz do repo. */
+function caminhoDaRaiz(teste: string): string {
+  return path.relative(RAIZ, path.resolve(DIR_WORKER, teste)).replace(/\\/g, "/");
+}
+
+function coletarDod(): { conferencia: ConferenciaDod; comando: string; erro?: string } {
+  const alvos = [...new Set(INVENTARIO_DOD.flatMap((g) => g.testes.map(caminhoDaRaiz)))]
+    .filter((a) => existsSync(path.join(RAIZ, a)))
+    .sort();
+  // RELATIVO de propósito: com `shell: true` (obrigatório no Windows para achar
+  // o `npx.cmd`), um caminho absoluto contendo espaço — "…/Rodrigo Paiva/…" — é
+  // re-dividido pelo shell e o vitest grava o relatório em outro lugar. O sintoma
+  // é o pior possível: a DoD reprova inteira por falta de dados, não por defeito.
+  const saidaRel = ".prontidao/dod-resultados.json";
+  const saidaJson = path.join(RAIZ, saidaRel);
+  mkdirSync(path.dirname(saidaJson), { recursive: true });
+  rmSync(saidaJson, { force: true });
+
+  const comando = `npx vitest run <${alvos.length} suítes da DoD> --reporter=json`;
+  try {
+    execFileSync(
+      process.platform === "win32" ? "npx.cmd" : "npx",
+      ["vitest", "run", ...alvos, "--reporter=json", `--outputFile=${saidaRel}`],
+      { cwd: RAIZ, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, shell: true }
+    );
+  } catch {
+    // Teste vermelho faz o vitest sair != 0. O relatório JSON ainda é escrito, e
+    // é ele que diz QUAL garantia caiu — engolir aqui seria repetir o defeito.
+  }
+
+  if (!existsSync(saidaJson)) {
+    return {
+      comando,
+      erro: "o vitest não produziu o relatório JSON da DoD",
+      conferencia: conferirDod(INVENTARIO_DOD, []),
+    };
+  }
+
+  const bruto = JSON.parse(readFileSync(saidaJson, "utf8")) as {
+    testResults?: { name?: string; assertionResults?: { fullName?: string; title?: string; status?: string }[] }[];
+  };
+  const resultados: ResultadoTesteDod[] = [];
+  for (const arquivo of bruto.testResults ?? []) {
+    const rel = arquivo.name ? path.relative(RAIZ, arquivo.name).replace(/\\/g, "/") : "?";
+    for (const t of arquivo.assertionResults ?? []) {
+      resultados.push({
+        arquivo: rel,
+        nome: t.fullName ?? t.title ?? "",
+        // Só `passed` aprova. `pending`, `todo` e `skipped` são não-execução.
+        estado: t.status === "passed" ? "passou" : t.status === "failed" ? "falhou" : "pulado",
+      });
+    }
+  }
+  return { comando, conferencia: conferirDod(INVENTARIO_DOD, resultados) };
+}
+
+// ---------------------------------------------------------------------------
 // Nível 1 — fiação e mutação
 // ---------------------------------------------------------------------------
 
-function nivel1(): { itens: Item[]; comando: string; ok: boolean; garantiasFaltando: string[] } {
+function nivel1(): { itens: Item[]; comando: string; ok: boolean; garantiasFaltando: string[]; dod: ConferenciaDod } {
   const itens: Item[] = [];
   const alvos = SUITES_MUTACAO.map((s) => s.arquivo).filter((a) => existsSync(path.join(DIR_WORKER, a)));
   const ausentes = SUITES_MUTACAO.filter((s) => !existsSync(path.join(DIR_WORKER, s.arquivo)));
@@ -154,24 +219,36 @@ function nivel1(): { itens: Item[]; comando: string; ok: boolean; garantiasFalta
     evidencia: EXCECOES_NAO_DECISORIAS.map((e) => e.campo).join(", "),
   });
 
-  // D1 — a DoD INTEIRA, garantia por garantia. Sem isto, uma garantia ainda não
-  // implementada simplesmente não aparecia no relatório e o estado saía verde
-  // por omissão. Garantia cujo teste não existe = implementação REPROVADA.
-  const faltando: string[] = [];
-  for (const g of INVENTARIO_DOD) {
-    const ausentes = g.testes.filter((t) => !existsSync(path.join(DIR_WORKER, t)));
-    if (ausentes.length) faltando.push(`[${g.fatia}] ${g.garantia} → falta ${ausentes.join(", ")}`);
-  }
+  // D1 — a DoD INTEIRA, garantia por garantia, POR EXECUÇÃO. A versão anterior
+  // conferia se o arquivo de teste existia: bastava apagar o teste de dentro (ou
+  // marcá-lo `skip`) para a garantia sumir e o estado continuar verde. Agora cada
+  // garantia tem um ID que o teste declara no título, e só aprova o ID que foi
+  // encontrado, executado e passou.
+  const dod = coletarDod();
+  const conf = dod.conferencia;
+  const faltando = conf.problemas;
+  if (dod.erro) itens.push({ item: "coleta estruturada da DoD", ok: false, evidencia: dod.erro });
   itens.push({
-    item: `DoD: ${INVENTARIO_DOD.length} garantias obrigatórias`,
-    ok: faltando.length === 0,
-    evidencia:
-      faltando.length === 0
-        ? `todas com teste presente (fatias ${fatiasDoInventario().join(", ")})`
-        : `${faltando.length} sem prova: ${faltando.slice(0, 6).join(" · ")}${faltando.length > 6 ? ` · (+${faltando.length - 6})` : ""}`,
+    item: `DoD: ${conf.inventariadas} garantias obrigatórias (por execução)`,
+    ok: conf.ok,
+    evidencia: conf.ok
+      ? `${resumoConferencia(conf)} — fatias ${fatiasDoInventario().join(", ")}`
+      : `${resumoConferencia(conf)} · ${conf.problemas.slice(0, 6).join(" · ")}${conf.problemas.length > 6 ? ` · (+${conf.problemas.length - 6})` : ""}`,
   });
+  // Cada modo de falha aparece em linha própria: "reprovou" sem dizer POR QUE é
+  // o que fazia o relatório envelhecer sem ninguém notar.
+  const detalhes: [string, string[]][] = [
+    ["garantias sem teste declarando o ID", conf.semTeste],
+    ["garantias com teste pulado (não conta como aprovada)", conf.naoExecutadas.map((p) => p.id)],
+    ["garantias com teste falhando", conf.reprovadas.map((p) => p.id)],
+    ["IDs duplicados no inventário", conf.duplicadosInventario],
+    ["IDs declarados em teste e ausentes do inventário", conf.orfaos],
+  ];
+  for (const [rotulo, ids] of detalhes) {
+    if (ids.length) itens.push({ item: rotulo, ok: false, evidencia: ids.join(", ") });
+  }
 
-  return { itens, comando, ok: itens.every((i) => i.ok !== false), garantiasFaltando: faltando };
+  return { itens, comando, ok: itens.every((i) => i.ok !== false), garantiasFaltando: faltando, dod: conf };
 }
 
 // ---------------------------------------------------------------------------
@@ -327,14 +404,15 @@ for (const i of [...n1.itens, ...n2.itens, ...n3.itens, ...reg.itens]) {
   if (i.ok === null) naoComprovados.push(`${i.item}: ${i.evidencia}`);
 }
 
-// D1 — a implementação só é aprovada com TODAS as garantias da DoD provadas.
-// Antes, uma garantia ainda não implementada não aparecia e o estado saía verde.
-const implementacao: Estado =
-  n1.ok && n1.garantiasFaltando.length === 0 ? "IMPLEMENTACAO_APROVADA" : "IMPLEMENTACAO_REPROVADA";
+// D1 — a implementação só é aprovada com TODAS as garantias da DoD provadas
+// POR EXECUÇÃO: ID encontrado, teste executado e passando. Arquivo presente não
+// aprova mais nada — era exatamente por ali que uma garantia sumia sem alarme.
+const dodOk = n1.dod.ok;
+const implementacao: Estado = n1.ok && dodOk ? "IMPLEMENTACAO_APROVADA" : "IMPLEMENTACAO_REPROVADA";
 const regressaoEstado: Estado = reg.ok ? "REGRESSAO_APROVADA" : "REGRESSAO_REPROVADA";
 const acuracia: Estado = n2.calibrada ? "ACURACIA_CALIBRADA" : "ACURACIA_AGUARDANDO_ROTULAGEM_HUMANA";
 // Certificado exige TUDO: implementação, regressão e calibração humana.
-const releaseOk = n1.ok && n1.garantiasFaltando.length === 0 && reg.ok && n2.calibrada;
+const releaseOk = n1.ok && dodOk && reg.ok && n2.calibrada;
 const release = releaseOk ? "RELEASE_CERTIFICADO" : "RELEASE_BLOQUEADO";
 const motivoRelease = releaseOk
   ? ""
@@ -362,7 +440,7 @@ const relatorio: Relatorio = {
     projeto: "PROJETO_NAO_AUTORIZADO (por projeto; consulte engine_autorizacoes_v2)",
     prova_literaria: "PROVA_LITERARIA_NAO_EXECUTADA",
   },
-  nivel1: { comando: n1.comando, itens: n1.itens },
+  nivel1: { comando: n1.comando, itens: n1.itens, dod: n1.dod },
   nivel2: { itens: n2.itens },
   nivel3: { executado: n3.executado, itens: n3.itens },
   bloqueios,

@@ -303,7 +303,7 @@ describe("escada em execução", () => {
     expect(estado?.doc.correcoes?.["3"] ?? []).toEqual([]);
   });
 
-  it("reprovado → nova tentativa com estratégia DIFERENTE, e o ledger registra hipótese e hashes", async () => {
+  it("[DOD:C-01] reprovado → nova tentativa com estratégia DIFERENTE, e o ledger registra hipótese e hashes", async () => {
     enfileirarCiclo("reprovado", "A.");
     enfileirarCiclo("aprovado", "B.", false); // reficha? não: a 2ª tentativa reusa o fluxo completo
     provedor.enfileirar("arquiteto_cena", JSON.stringify(ficha()));
@@ -323,7 +323,7 @@ describe("escada em execução", () => {
     expect(r.status === "aprovado" || r.status === "reprovado").toBe(true);
   });
 
-  it("o texto reprovado repetidamente sem mudar dispara o circuit breaker e PARA", async () => {
+  it("[DOD:C-02] o texto reprovado repetidamente sem mudar dispara o circuit breaker e PARA", async () => {
     // Sempre o mesmo texto, sempre reprovado: a escada tenta, não progride, para.
     for (let i = 0; i < 12; i++) enfileirarCiclo("reprovado", "IGUAL.");
     for (let i = 0; i < 12; i++) provedor.enfileirar("arquiteto_cena", JSON.stringify(ficha()));
@@ -398,7 +398,7 @@ describe("caminho de execução por estratégia", () => {
     expect(o?.reescritaDirigida).toBeUndefined();
   });
 
-  it("as cinco estratégias produzem cinco combinações DISTINTAS de entrada", () => {
+  it("[DOD:D2-01] as cinco estratégias produzem cinco combinações DISTINTAS de entrada", () => {
     const assinatura = (e: Parameters<typeof opcoesPorEstrategia>[0]) => {
       const o = opcoesPorEstrategia(e, ctx);
       return [
@@ -421,7 +421,7 @@ describe("caminho de execução por estratégia", () => {
 });
 
 describe("julgamento alternativo em EXECUÇÃO não chama o escritor", () => {
-  it("rejulga o mesmo hash com o modelo de julgamento trocado", async () => {
+  it("[DOD:D2-02] rejulga o mesmo hash com o modelo de julgamento trocado", async () => {
     const texto = PROSA("UNICO.");
     mkdirSync(path.join(dir, "manuscrito"), { recursive: true });
     writeFileSync(path.join(dir, "manuscrito", "capitulo-03.md"), texto, "utf8");

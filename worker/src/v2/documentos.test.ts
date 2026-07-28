@@ -100,7 +100,7 @@ describe("hashes e índice", () => {
 });
 
 describe("chave do Storage bate com a que a interface pede", () => {
-  it("é <owner>/<projeto>/<caminho relativo>", () => {
+  it("[DOD:D7-01] é <owner>/<projeto>/<caminho relativo>", () => {
     expect(chaveStorage("dono", "proj", "fundacao/biblia-da-obra.md")).toBe("dono/proj/fundacao/biblia-da-obra.md");
     expect(chaveStorage("dono", "proj", "estrutura.json")).toBe("dono/proj/estrutura.json");
   });

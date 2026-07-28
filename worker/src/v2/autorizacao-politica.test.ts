@@ -55,7 +55,7 @@ describe("INSERT — owner tem de ser o DONO DO PROJETO", () => {
     expect(podeInserir(nova, { uid: EU, donoDoProjeto: EU }).permitido).toBe(true);
   });
 
-  it("REJEITA autorizar projeto de outra pessoa em nome próprio", () => {
+  it("[DOD:D4-01] REJEITA autorizar projeto de outra pessoa em nome próprio", () => {
     // O buraco que `owner = auth.uid()` sozinho deixava aberto.
     const { id: _i, ...nova } = linha({ owner: EU, project_id: PROJETO });
     const v = podeInserir(nova, { uid: EU, donoDoProjeto: OUTRO });
@@ -94,13 +94,13 @@ describe("INSERT — owner tem de ser o DONO DO PROJETO", () => {
 });
 
 describe("UPDATE — revogar sem reescrever", () => {
-  it("revogação é permitida e é a ÚNICA transição", () => {
+  it("[DOD:D4-01] revogação é permitida e é a ÚNICA transição", () => {
     const antiga = linha();
     const nova = revogar(antiga, "2026-07-28T02:00:00.000Z");
     expect(podeAtualizar(antiga, nova, { uid: EU, donoDoProjeto: EU }).permitido).toBe(true);
   });
 
-  it("TODO campo histórico é imutável", () => {
+  it("[DOD:D4-01] TODO campo histórico é imutável", () => {
     const antiga = linha();
     for (const campo of CAMPOS_HISTORICOS) {
       const nova = revogar({ ...antiga, [campo]: "adulterado" } as LinhaAutorizacao, "2026-07-28T02:00:00.000Z");

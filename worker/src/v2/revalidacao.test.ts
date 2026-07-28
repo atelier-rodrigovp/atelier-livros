@@ -117,7 +117,7 @@ describe("fecho transitivo — o capítulo 11 aparece quando o 4 muda", () => {
       memoria: [],
     });
 
-  it("alteração no 4 reabre APENAS os dependentes", () => {
+  it("[DOD:K-01] alteração no 4 reabre APENAS os dependentes", () => {
     const afetados = capitulosAfetados(cenario(), 4);
     const numeros = afetados.map((a) => a.capitulo);
     expect(numeros).toContain(5);
@@ -159,7 +159,7 @@ describe("reabrir NÃO é reescrever", () => {
     expect(d.motivo).toContain("REAVALIADOS");
   });
 
-  it("capítulo que continua válido é MANTIDO — o texto original fica intacto", () => {
+  it("[DOD:K-02] capítulo que continua válido é MANTIDO — o texto original fica intacto", () => {
     const plano = planejarAposReavaliacao([
       { capitulo: 5, continuaValido: true, problemas: [] },
       { capitulo: 11, continuaValido: false, problemas: ["a promessa P1 não fecha mais"] },
@@ -188,7 +188,7 @@ describe("teto de propagação e circuit breaker", () => {
     distancia: 1,
   });
 
-  it("cascata acima do teto aciona DECISÃO HUMANA", () => {
+  it("[DOD:K-03] cascata acima do teto aciona DECISÃO HUMANA", () => {
     const d = decidirRevalidacao(Array.from({ length: TETO_PROPAGACAO + 1 }, (_, i) => afetado(i + 2)));
     expect(d.acao).toBe("decisao_humana");
     expect(d.motivo).toContain("refazer meio livro");

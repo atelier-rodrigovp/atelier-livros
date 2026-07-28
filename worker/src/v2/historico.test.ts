@@ -77,13 +77,13 @@ describe("leitura e escrita de eventos", () => {
 });
 
 describe("HISTÓRICO PROTEGIDO não aceita update nem delete", () => {
-  it("update é recusado — nem para o worker", () => {
+  it("[DOD:P-01] update é recusado — nem para o worker", () => {
     const v = podeAtualizarEvento();
     expect(v.permitido).toBe(false);
     expect(v).toMatchObject({ motivo: expect.stringContaining("corrige_id") });
   });
 
-  it("delete é recusado", () => {
+  it("[DOD:P-01] delete é recusado", () => {
     expect(podeApagarEvento().permitido).toBe(false);
   });
 
@@ -98,7 +98,7 @@ describe("HISTÓRICO PROTEGIDO não aceita update nem delete", () => {
 });
 
 describe("correção gera EVENTO NOVO, não reescreve o anterior", () => {
-  it("o evento corrigido referencia o original e o original permanece intacto", () => {
+  it("[DOD:P-02] o evento corrigido referencia o original e o original permanece intacto", () => {
     const original = evento();
     const antes = JSON.stringify(original);
     const correcao = corrigirEvento(original, {

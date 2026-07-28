@@ -51,7 +51,7 @@ const estado = (over: Partial<EstadoV2Painel> = {}): EstadoV2Painel => ({
 });
 
 describe("promessas e pistas chegam ao autor", () => {
-  it("lista promessas e pistas, com origem e trecho da página", () => {
+  it("[DOD:O-01] lista promessas e pistas, com origem e trecho da página", () => {
     const p = promessasEPistas(estado());
     expect(p).toHaveLength(2); // revelação não é promessa
     expect(p[0]).toMatchObject({ id: "M03.1", origem: "prosa", plantada_em: 3 });
@@ -69,7 +69,7 @@ describe("promessas e pistas chegam ao autor", () => {
     expect(promessasEPistas(estado()).map((p) => p.plantada_em)).toEqual([3, 5]);
   });
 
-  it("o ledger de revelações aparece no painel", () => {
+  it("[DOD:O-01] o ledger de revelações aparece no painel", () => {
     expect(montarPainel(estado()).ledger).toHaveLength(1);
   });
 
@@ -93,7 +93,7 @@ describe("estratégias de correção já tentadas", () => {
       },
     });
 
-  it("mostra o que foi tentado, com a hipótese de cada tentativa", () => {
+  it("[DOD:O-01] mostra o que foi tentado, com a hipótese de cada tentativa", () => {
     const p = painelDeCorrecoes(comCorrecoes())[0];
     expect(p.capitulo).toBe(7);
     expect(p.tentativas.map((t) => t.estrategia)).toEqual(["correcao_cirurgica", "reescrita_orientada"]);
@@ -141,7 +141,7 @@ describe("motivo estruturado do bloqueio, com ação dirigida", () => {
     expect(acaoParaBloqueio("QUALIDADE_REPROVADA", "sinal_cadencia fora da cota")).toBe("aceitar_excecao");
   });
 
-  it("o painel expõe o bloqueio com código, alvo, detalhe e ação", () => {
+  it("[DOD:O-01] o painel expõe o bloqueio com código, alvo, detalhe e ação", () => {
     const p = motivosDeBloqueio(
       estado({ bloqueios: [{ codigo: "GATE_promessa_nao_paga", alvo: "livro", detalhe: "P7 nunca paga" }] })
     );
@@ -163,7 +163,7 @@ describe("motivo estruturado do bloqueio, com ação dirigida", () => {
 });
 
 describe("propagação de reescrita é visível e HONESTA", () => {
-  it("mostra os capítulos afetados e por quê", () => {
+  it("[DOD:O-01] mostra os capítulos afetados e por quê", () => {
     const p = painelDeReescritas(
       estado({
         revalidacoes: [
@@ -186,7 +186,7 @@ describe("propagação de reescrita é visível e HONESTA", () => {
     expect(p.explicacao).toContain("Nada foi alterado");
   });
 
-  it("A INTERFACE NÃO PROMETE que capítulo aprovado nunca é reescrito", () => {
+  it("[DOD:O-02] A INTERFACE NÃO PROMETE que capítulo aprovado nunca é reescrito", () => {
     // O Meta9 pode reescrevê-lo. A política declarada tem de dizer isso.
     expect(POLITICA_REESCRITA).toContain("podem ser reescritos");
     expect(POLITICA_REESCRITA).not.toMatch(/nunca (são|serão) reescritos/i);

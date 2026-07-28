@@ -149,7 +149,7 @@ describe("mutação: pov_violado decide o veredito do capítulo", () => {
     expect(r.problemas.filter((p) => p.startsWith("POV violado"))).toEqual([]);
   });
 
-  it("MUTAÇÃO: só `pov_violado.ha` vira true → o MESMO capítulo, com o MESMO parecer aprovado, reprova", async () => {
+  it("[DOD:B-01] MUTAÇÃO: só `pov_violado.ha` vira true → o MESMO capítulo, com o MESMO parecer aprovado, reprova", async () => {
     // 3 rodadas: o pipeline tenta corrigir (orçamento 2) antes de reprovar.
     enfileirarCiclo({ ha: true, detalhe: "parágrafo 2 entra na cabeça do arquivista, fora do POV de Marina" }, 3);
     const r = await escreverCapitulo(deps, 3);
@@ -248,7 +248,7 @@ describe("mutação: promessa não paga bloqueia o FECHAMENTO do livro", () => {
     expect(r.passou).toBe(true);
   });
 
-  it("MUTAÇÃO: a MESMA promessa deixa de ser paga na ficha → fechamento bloqueia citando o id", async () => {
+  it("[DOD:B-02] MUTAÇÃO: a MESMA promessa deixa de ser paga na ficha → fechamento bloqueia citando o id", async () => {
     await aprovarCapituloComFicha(1, { promessas_tocadas: [{ id: "P7", acao: "planta" }] });
     await aprovarCapituloComFicha(2);
     await aprovarCapituloComFicha(3, { promessas_tocadas: [{ id: "P9", acao: "paga" }] }); // paga OUTRA
@@ -280,7 +280,7 @@ describe("mutação: promessa não paga bloqueia o FECHAMENTO do livro", () => {
 });
 
 describe("o gate de fechamento NÃO reprova o capítulo que apenas planta a promessa", () => {
-  it("capítulo 1 planta P7 (a pagar no 3) e é aprovado normalmente no ciclo do capítulo", async () => {
+  it("[DOD:B-03] capítulo 1 planta P7 (a pagar no 3) e é aprovado normalmente no ciclo do capítulo", async () => {
     const fichaPlanta = ficha({ capitulo: 1, promessas_tocadas: [{ id: "P7", acao: "planta" }] });
     provedor.enfileirar("arquiteto_cena", JSON.stringify(fichaPlanta));
     provedor.enfileirar("contextualizador", CTX_OK);

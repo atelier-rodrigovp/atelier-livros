@@ -26,7 +26,7 @@ describe("decisão de devolver o job à fila no checkpoint", () => {
     expect(devolverAFilaNoCheckpoint({ lote: 0, novosCaps: 5, capitulo: 5, total: 12 })).toBe(false);
   });
 
-  it("lote cheio com livro incompleto devolve à fila (a execução continua depois)", () => {
+  it("[DOD:D-01] lote cheio com livro incompleto devolve à fila (a execução continua depois)", () => {
     expect(devolverAFilaNoCheckpoint({ lote: 1, novosCaps: 1, capitulo: 3, total: 12 })).toBe(true);
     expect(devolverAFilaNoCheckpoint({ lote: 4, novosCaps: 4, capitulo: 8, total: 12 })).toBe(true);
   });
@@ -69,11 +69,11 @@ describe("livro completo é derivado dos capítulos, nunca do fim da execução"
   const aprovados = (n: number) =>
     Object.fromEntries(Array.from({ length: n }, (_, i) => [String(i + 1), { status: "aprovado" }]));
 
-  it("1 de 12 aprovados NÃO é livro completo (o falso `done` que D5 corrige)", () => {
+  it("[DOD:D5-01] 1 de 12 aprovados NÃO é livro completo (o falso `done` que D5 corrige)", () => {
     expect(livroCompleto({ total: 12, statusPorCapitulo: aprovados(1) })).toBe(false);
   });
 
-  it("12 de 12 aprovados é livro completo", () => {
+  it("[DOD:D5-02] 12 de 12 aprovados é livro completo", () => {
     expect(livroCompleto({ total: 12, statusPorCapitulo: aprovados(12) })).toBe(true);
   });
 
