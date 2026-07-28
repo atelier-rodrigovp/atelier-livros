@@ -111,7 +111,9 @@ export async function gerarFundacaoV2(
     pacote: comp.pacote!,
     tarefa: tarefaArquitetoEnredo(briefing, deps.contrato.contrato),
     parse: parseFundacao,
-    timeoutMs: 300000,
+    // Fundação completa (perfil + bíblia + mapa + estrutura por capítulo) é a
+    // maior geração única da engine: 5 min estourava com briefing rico.
+    timeoutMs: 900000,
   });
   return { fundacao: r.valor, runId: r.runId };
 }

@@ -591,6 +591,7 @@ export const PROJETOS_CANARIO_V2: ReadonlySet<string> = Object.freeze(new Set([
   "8b11072c-097d-4964-8f89-abecb96eb16c", // Canário V2 — O Cofre de Alcobaça (dan-brown)
   "aa8af83f-b2a1-41e0-ac0b-e46e620ee5c7", // Canário V2 — Tudo o que não te contei (hoover-mcfadden)
   "5f59a08b-5947-46ab-9547-76bd31e74e5f", // Canário V2 — A Corte do Sal (romantasy)
+  "5ac9d614-1d1c-4fbd-8376-a731d1945ac6", // Canário V2 — Prova V2 O Farol Cego (dan-brown; prova ponta-a-ponta interface→Leitor, 2026-07-27)
 ]));
 
 /** Liberação de canário: substitui o certificado APENAS para os projetos da allowlist. */

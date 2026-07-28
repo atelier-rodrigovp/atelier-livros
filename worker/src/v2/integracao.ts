@@ -767,6 +767,7 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
   const contrato = carregarContrato(MAPA_SKILL_V1_V2[skillV1] ?? skillV1);
   const release = exigirReleaseAtual(contrato.contrato.id, projectId);
   const dirProjeto = projDir(projectId);
+  await fs.mkdir(dirProjeto, { recursive: true }); // cwd do CLI precisa existir antes do provedor
   const { persistencia } = await criarPersistencia({ dirProjeto });
   const gravador = new Gravador({ persistencia, projectId });
 
@@ -873,6 +874,7 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
     throw new ErroEngine({ codigo: "TOTAL_CAPITULOS_INDEFINIDO", classe: "configuracao", mensagem: "refinar_fundacao V2 exige total_capitulos definido no projeto" });
   }
   const dirProjeto = projDir(projectId);
+  await fs.mkdir(dirProjeto, { recursive: true }); // cwd do CLI precisa existir antes do provedor
   const { persistencia } = await criarPersistencia({ dirProjeto });
   const gravador = new Gravador({ persistencia, projectId });
   const briefingFundacao = briefingParaFundacao(proj as Parameters<typeof briefingParaFundacao>[0]);
@@ -1020,6 +1022,9 @@ export async function executarCanarioVoz(job: Job): Promise<void> {
   const ideia = (briefing.ideia_central ?? "").trim() || `um livro na família ${contrato.contrato.familia_editorial}`;
 
   const dirProjeto = projDir(projectId);
+  // Projeto recém-criado ainda não tem pasta: o CLI spawna com cwd=dirProjeto
+  // e um cwd inexistente vira ENOENT (falso "infra") — cria ANTES do provedor.
+  await fs.mkdir(dirProjeto, { recursive: true });
   const { persistencia } = await criarPersistencia({ dirProjeto });
   const gravador = new Gravador({ persistencia, projectId });
   const provedor = new ProvedorClaudeCli(CLAUDE_BIN, dirProjeto);
