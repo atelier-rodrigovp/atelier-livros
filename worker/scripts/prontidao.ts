@@ -18,8 +18,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { analisarCalibracao } from "../src/v2/calibracao.js";
 import { CAMPOS_DECISORIOS, EXCECOES_NAO_DECISORIAS } from "../src/v2/campos-decisorios.js";
-import { conferirDod, resumoConferencia, type ConferenciaDod, type ResultadoTesteDod } from "../src/v2/dod-conferencia.js";
-import { validarEvidencia, type DependenciasEvidencia, type TipoEvidencia } from "../src/v2/evidencia-externa.js";
+import { interpretarRelatorioVitest, type ExecucaoVitest, type RelatorioBruto } from "../src/v2/coleta-vitest.js";
+import { conferirDod, resumoConferencia, type ConferenciaDod } from "../src/v2/dod-conferencia.js";
+import { capturarHead, rodarComando } from "../src/v2/execucao.js";
+import { DIR_EVIDENCIAS, validarEvidencia, type FingerprintsCodigo, type TipoEvidencia } from "../src/v2/evidencia-externa.js";
 import { LIMITACOES_RECALL, resumoLimitacoes } from "../src/limitacoes-conhecidas.js";
 import { fatiasDoInventario, INVENTARIO_DOD } from "../src/v2/inventario-dod.js";
 
@@ -57,6 +59,8 @@ interface Item {
 
 interface Relatorio {
   gerado_em: string;
+  /** HEAD real da execucao. Sem fallback: git que nao responde aborta. */
+  head: string;
   duracao_ms: number;
   estados: Record<string, Estado | string>;
   nivel1: { comando: string; itens: Item[]; dod: ConferenciaDod };
@@ -112,15 +116,7 @@ function caminhoDaRaiz(teste: string): string {
   return path.relative(RAIZ, path.resolve(DIR_WORKER, teste)).replace(/\\/g, "/");
 }
 
-interface ExecucaoJson {
-  ok: boolean;
-  erro?: string;
-  passaram: number;
-  falharam: number;
-  pulados: number;
-  total: number;
-  resultados: ResultadoTesteDod[];
-}
+type ExecucaoJson = ExecucaoVitest;
 
 /**
  * Roda a suíte e devolve o resultado ESTRUTURADO. Uma execução só — a da raiz,
@@ -151,40 +147,15 @@ function rodarVitestJson(cwd: string, alvos: string[], saidaRel: string): Execuc
     erroExec = String((e as { stderr?: string })?.stderr ?? e).slice(-400);
   }
 
-  const vazio: ExecucaoJson = { ok: false, passaram: 0, falharam: 0, pulados: 0, total: 0, resultados: [] };
-  if (!existsSync(saidaJson)) {
-    return { ...vazio, erro: `o vitest não produziu ${saidaRel}${erroExec ? ` — ${erroExec}` : ""}` };
-  }
-  let bruto: {
-    numTotalTests?: number;
-    testResults?: { name?: string; assertionResults?: { fullName?: string; title?: string; status?: string }[] }[];
-  };
-  try {
-    bruto = JSON.parse(readFileSync(saidaJson, "utf8"));
-  } catch (e) {
-    return { ...vazio, erro: `relatório JSON ilegível: ${e instanceof Error ? e.message : String(e)}` };
-  }
-  if (!Array.isArray(bruto.testResults)) {
-    return { ...vazio, erro: "relatório JSON incompleto: sem `testResults`" };
-  }
-
-  const resultados: ResultadoTesteDod[] = [];
-  let passaram = 0;
-  let falharam = 0;
-  let pulados = 0;
-  for (const arquivo of bruto.testResults) {
-    const rel = arquivo.name ? path.relative(RAIZ, arquivo.name).replace(/\\/g, "/") : "?";
-    for (const t of arquivo.assertionResults ?? []) {
-      // Só `passed` aprova. `pending`, `todo` e `skipped` são não-execução.
-      const estado = t.status === "passed" ? "passou" : t.status === "failed" ? "falhou" : "pulado";
-      if (estado === "passou") passaram++;
-      else if (estado === "falhou") falharam++;
-      else pulados++;
-      resultados.push({ arquivo: rel, nome: t.fullName ?? t.title ?? "", estado });
+  let bruto: RelatorioBruto | null = null;
+  if (existsSync(saidaJson)) {
+    try {
+      bruto = JSON.parse(readFileSync(saidaJson, "utf8")) as RelatorioBruto;
+    } catch {
+      bruto = null;
     }
   }
-  const total = resultados.length;
-  return { ok: falharam === 0 && total > 0, passaram, falharam, pulados, total, resultados };
+  return interpretarRelatorioVitest(bruto, erroExec, (abs) => path.relative(RAIZ, abs).replace(/\/g, "/"));
 }
 
 /**
@@ -404,19 +375,6 @@ function nivel3(executar: boolean, suiteRaiz: ExecucaoJson): { itens: Item[]; ex
 // Regressão
 // ---------------------------------------------------------------------------
 
-/** Roda um comando e devolve saída; usado por typecheck, build e lint. */
-function rodarComando(cwd: string, exe: string, args: string[]): { ok: boolean; saida: string } {
-  try {
-    const saida = execFileSync(process.platform === "win32" ? `${exe}.cmd` : exe, args, {
-      cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 32 * 1024 * 1024, shell: true,
-    });
-    return { ok: true, saida };
-  } catch (e) {
-    const err = e as { stdout?: string; stderr?: string };
-    return { ok: false, saida: `${err.stdout ?? ""}\n${err.stderr ?? ""}` };
-  }
-}
-
 /**
  * REGRESSAO_LOCAL só é aprovada com a Definition of Done local INTEIRA. Antes,
  * ela olhava a suíte do worker e o typecheck do worker — e dizia "aprovada" com
@@ -546,18 +504,23 @@ function listarArquivos(dir: string, filtro: RegExp): string[] {
   return saida;
 }
 
-function dependenciasAtuais(): DependenciasEvidencia {
-  const commit = rodarComando(RAIZ, "git", ["rev-parse", "HEAD"]).saida.trim().slice(0, 40) || "desconhecido";
+/**
+ * Impressao do CODIGO. Nao inclui o commit: a evidencia caduca por fingerprint,
+ * nao por HEAD - senao commitar um README invalidaria uma verificacao remota que
+ * continua valendo, que era a contradicao do modelo anterior.
+ */
+function fingerprintsAtuais(): FingerprintsCodigo {
   const migracoes = listarArquivos(path.join(RAIZ, "supabase"), /\.sql$/);
   return {
-    commit,
-    migrations_versao: migracoes.map((m) => path.basename(m)).sort().join(","),
-    schema_hash: hashDe(migracoes),
+    migrations_source_hash: hashDe(migracoes),
     contratos_hash: hashDe(listarArquivos(path.join(DIR_WORKER, "skills-v2"), /contrato\.json$/)),
     worker_hash: hashDe(listarArquivos(path.join(DIR_WORKER, "src"), /\.ts$/).filter((f) => !/\.test\.ts$/.test(f))),
     interface_hash: hashDe(listarArquivos(path.join(RAIZ, "src"), /\.tsx?$/).filter((f) => !/\.test\.tsx?$/.test(f))),
   };
 }
+
+/** Ref do projeto Supabase esperado. Evidencia de outro projeto e recusada. */
+const PROJETO_SUPABASE_ESPERADO = process.env.SUPABASE_PROJECT_REF ?? "dzgbatsecbkjmucmigjv";
 
 const TIPOS_EXTERNOS: { tipo: TipoEvidencia; rotulo: string }[] = [
   { tipo: "migracoes_remotas", rotulo: "migrações aplicadas e verificadas no banco real" },
@@ -572,15 +535,19 @@ const TIPOS_EXTERNOS: { tipo: TipoEvidencia; rotulo: string }[] = [
  * COMPROVADA — que não é zero, não é sucesso e não certifica nada.
  */
 function externas(): { itens: Item[]; aprovadas: Record<TipoEvidencia, boolean> } {
-  const dep = dependenciasAtuais();
-  const dir = path.join(RAIZ, "evidencias-externas");
+  const fingerprints = fingerprintsAtuais();
+  const dir = path.join(RAIZ, DIR_EVIDENCIAS);
   const itens: Item[] = [];
   const aprovadas = {} as Record<TipoEvidencia, boolean>;
   for (const { tipo, rotulo } of TIPOS_EXTERNOS) {
     const arquivo = path.join(dir, `${tipo}.json`);
     if (!existsSync(arquivo)) {
       aprovadas[tipo] = false;
-      itens.push({ item: rotulo, ok: null, evidencia: `sem evidência em evidencias-externas/${tipo}.json` });
+      itens.push({
+        item: rotulo,
+        ok: null,
+        evidencia: `sem evidência em ${DIR_EVIDENCIAS}/${tipo}.json — gere com o harness; JSON escrito à mão não certifica`,
+      });
       continue;
     }
     let doc: unknown;
@@ -591,14 +558,16 @@ function externas(): { itens: Item[]; aprovadas: Record<TipoEvidencia, boolean> 
       itens.push({ item: rotulo, ok: false, evidencia: `evidência ilegível: ${e instanceof Error ? e.message : String(e)}` });
       continue;
     }
-    const v = validarEvidencia(doc, { tipo, ambiente: "producao", dependencias: dep });
+    const v = validarEvidencia(doc, { tipo, ambiente: "producao", supabase_project_ref: PROJETO_SUPABASE_ESPERADO, fingerprints });
     aprovadas[tipo] = v.valida;
     itens.push({
       item: rotulo,
       // Evidência presente e INVÁLIDA é bloqueio (alguém afirmou algo que não
       // se sustenta); evidência ausente é apenas ausência de prova.
       ok: v.valida ? true : false,
-      evidencia: v.valida ? `evidência válida para o commit ${dep.commit.slice(0, 7)}` : v.motivos.join(" · "),
+      evidencia: v.valida
+        ? `evidência válida — testou ${String((doc as { tested_code_commit?: string }).tested_code_commit ?? "?").slice(0, 7)}, fingerprints do código conferem`
+        : v.motivos.join(" · "),
     });
   }
   return { itens, aprovadas };
@@ -666,6 +635,10 @@ const releaseProducao = bloqueiosProducao.length === 0 ? "RELEASE_PRODUCAO_CERTI
 
 const relatorio: Relatorio = {
   gerado_em: new Date().toISOString(),
+  // HEAD real, capturado com fail-closed: se o git não responder, `capturarHead`
+  // lança e o comando morre aqui. A versão anterior engolia a falha e gravava a
+  // string "desconhecido", que num relatório de prontidão passa por dado.
+  head: capturarHead(RAIZ),
   duracao_ms: Date.now() - t0,
   estados: {
     implementacao_local: implementacao,

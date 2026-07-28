@@ -4,8 +4,19 @@ Este é o único item que só você pode fechar. Enquanto ele não fechar, o
 `prontidao` mantém `ACURACIA_AGUARDANDO_ROTULAGEM` e
 `RELEASE_PRODUCAO_BLOQUEADO`. Nenhum atalho de código muda isso.
 
-**Arquivo:** `rotulos-pendentes.csv` — 14 amostras, 596 ocorrências, 182
-atestações. Separador `;`, UTF-8 com BOM (abre direto no Excel).
+## Gere o arquivo (ele não é versionado)
+
+```bash
+cd worker
+npx tsx scripts/v2-rotulos-humanos.ts --export ../calibracao-humana/rotulos.local.csv
+```
+
+14 amostras, 596 ocorrências, 182 atestações. Separador `;`, UTF-8 com BOM (abre
+direto no Excel).
+
+**O arquivo preenchido nunca vai para o Git.** `calibracao-humana/*.local.csv`
+está no `.gitignore`: o remoto é público e a planilha carrega trechos da obra
+com o seu julgamento editorial ao lado. Só este README fica versionado.
 
 | skill | amostras |
 |---|---|
@@ -41,10 +52,10 @@ importador recusar o pacote.
 cd worker
 
 # 1. Confere sem gravar nada (rode primeiro, sempre)
-npx tsx scripts/v2-rotulos-humanos.ts --import ../calibracao-humana/rotulos-pendentes.csv --revisor "Seu Nome"
+npx tsx scripts/v2-rotulos-humanos.ts --import ../calibracao-humana/rotulos.local.csv --revisor "Seu Nome"
 
 # 2. Só depois de passar limpo, aplica
-npx tsx scripts/v2-rotulos-humanos.ts --import ../calibracao-humana/rotulos-pendentes.csv --revisor "Seu Nome" --apply
+npx tsx scripts/v2-rotulos-humanos.ts --import ../calibracao-humana/rotulos.local.csv --revisor "Seu Nome" --apply
 ```
 
 ## O que o importador recusa
