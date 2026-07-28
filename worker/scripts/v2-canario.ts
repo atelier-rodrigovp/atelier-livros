@@ -79,7 +79,7 @@ async function rodarCanario(skillId: string, totalCaps: number, dirExistente?: s
   if (dirExistente) {
     // Retomada: reaproveita o projeto (estado canônico decide o que falta).
     const bruto = await fs.readFile(path.join(dirExistente, "engine-v2", "estado.json"), "utf8");
-    projectId = (JSON.parse(bruto) as { project_id: string }).project_id;
+    projectId = (JSON.parse(bruto) as { project_id: ReturnType<typeof randomUUID> }).project_id;
     console.log(`retomando projeto ${projectId} em ${dirExistente}`);
   }
   await fs.mkdir(dirProjeto, { recursive: true });
@@ -148,7 +148,13 @@ async function rodarCanario(skillId: string, totalCaps: number, dirExistente?: s
     papel: "arquiteto_enredo",
     alvo: "fundacao",
     pacote: pacoteFundacao.pacote!,
-    tarefa: tarefaArquitetoEnredo({ titulo: brief.titulo, premissa: brief.premissa, totalCapitulos: totalCaps }, contrato.contrato),
+    // `idioma` e `detalhes` faltavam: o typecheck do worker nao cobria `scripts/`,
+    // entao o arquiteto do canario vinha rodando SEM a lingua declarada — logo
+    // depois de a fatia J ter criado um gate de idioma. Bug latente, corrigido aqui.
+    tarefa: tarefaArquitetoEnredo(
+      { titulo: brief.titulo, premissa: brief.premissa, totalCapitulos: totalCaps, idioma: "pt-BR", detalhes: "" },
+      contrato.contrato
+    ),
     parse: parseFundacao,
     gravador,
     provedor,

@@ -155,7 +155,7 @@ function rodarVitestJson(cwd: string, alvos: string[], saidaRel: string): Execuc
       bruto = null;
     }
   }
-  return interpretarRelatorioVitest(bruto, erroExec, (abs) => path.relative(RAIZ, abs).replace(/\/g, "/"));
+  return interpretarRelatorioVitest(bruto, erroExec, (abs) => path.relative(RAIZ, abs).split("\\").join("/"));
 }
 
 /**
@@ -410,22 +410,25 @@ function regressao(suiteRaiz: ExecucaoJson): { itens: Item[]; ok: boolean; aviso
   itens.push({
     item: "typecheck (raiz)",
     ok: tcRaiz.ok,
-    evidencia: tcRaiz.ok ? "tsc -b sem erros" : tcRaiz.saida.slice(-500),
+    evidencia: tcRaiz.ok ? "tsc -b sem erros" : `${tcRaiz.stdout}
+${tcRaiz.stderr}`.slice(-500),
   });
 
   const tcWorker = rodarComando(DIR_WORKER, "npm", ["run", "typecheck"]);
   itens.push({
     item: "typecheck (worker)",
     ok: tcWorker.ok,
-    evidencia: tcWorker.ok ? "tsc --noEmit sem erros" : tcWorker.saida.slice(-500),
+    evidencia: tcWorker.ok ? "tsc --noEmit sem erros" : `${tcWorker.stdout}
+${tcWorker.stderr}`.slice(-500),
   });
 
   const build = rodarComando(RAIZ, "npm", ["run", "build"]);
-  const avisoBundle = /chunks are larger than/i.test(build.saida);
+  const avisoBundle = /chunks are larger than/i.test(build.stdout);
   itens.push({
     item: "build de produção",
     ok: build.ok,
-    evidencia: build.ok ? "tsc -b && vite build concluído" : build.saida.slice(-500),
+    evidencia: build.ok ? "tsc -b && vite build concluído" : `${build.stdout}
+${build.stderr}`.slice(-500),
   });
   if (avisoBundle) {
     // Aviso de tamanho de bundle é dívida de performance, não defeito editorial.
@@ -434,8 +437,8 @@ function regressao(suiteRaiz: ExecucaoJson): { itens: Item[]; ok: boolean; aviso
   }
 
   const lint = rodarComando(RAIZ, "npm", ["run", "lint"]);
-  const mErros = /(\d+) errors?/.exec(lint.saida);
-  const mAvisos = /(\d+) warnings?/.exec(lint.saida);
+  const mErros = /(\d+) errors?/.exec(lint.stdout);
+  const mAvisos = /(\d+) warnings?/.exec(lint.stdout);
   const nErros = Number(mErros?.[1] ?? (lint.ok ? 0 : 1));
   const nAvisos = Number(mAvisos?.[1] ?? 0);
   itens.push({

@@ -16,7 +16,8 @@ chamar modelo de prosa; nunca escrever capítulo.**
 - [x] D4. SQL/RLS: owner do projeto, campos históricos imutáveis, revogação sem reescrita
 - [x] D5. Encadeamento real: `max_novos_caps=1` não produz falso `done`; retoma até fechamento/Meta9
 - [x] D6. Cruzamento macro × micro por campos estruturados (plantio, reforço, pagamento, fios, clímax, marcos, atos, tensão)
-- [x] D7. Documentos V2: disco, Storage e abertura real pela interface
+- [x] D7-01 (local). Documentos V2: materialização, caminho canônico, índice, hash e consumo pela interface
+- [ ] D7-02 (**externo, PENDENTE**). Upload no Storage real e download em sessão autenticada — nenhum teste local prova isto
 
 ### Fatias abertas do plano original
 - [x] E — entrevista determinística e aprovação do briefing
@@ -42,7 +43,13 @@ canarios_novos   BLOQUEADOS_AGUARDANDO_AUTOR
 
 ## Próxima tarefa
 
-CONCLUÍDO. Os defeitos D1–D7 e as fatias B–Q estão fechados e comprovados por
+**A DoD NÃO está completa.** A parte local está verde; a parte externa (D7-02,
+migrações, integração real, download autenticado, provedor) permanece não
+comprovada, e a calibração humana não começou. "DoD local aprovada" e "sistema
+pronto" são coisas diferentes — foi exatamente essa confusão que o modelo de
+estados separados passou a impedir.
+
+Os defeitos D1–D6, o D7-01 e as fatias B–Q estão fechados e comprovados por
 `INVENTARIO_DOD` (46 garantias). Não existe fatia "A" no plano: a numeração das
 fatias começa em B (`1af5d44`, ledger de revelações), e nenhum commit ou
 documento do repositório define uma fatia A. Redação anterior deste arquivo dizia
@@ -93,20 +100,30 @@ A regressão completa continua rodando e não foi substituída: a conferência p
 | documentos V2 (real) | worker | Supabase Storage | upload e download | Storage | download | — | **D7-02 externo, não comprovado** |
 | desvio V1/V2 | `executarJobRoteado` | log | rota declarada | log | badge da engine | roteamento.test | local ok |
 
-DoD local executada em 2026-07-28 sobre `5dc4d13`:
+DoD local executada em 2026-07-28 sobre o HEAD `74db809` (capturado pelo próprio
+`prontidao` com `git rev-parse HEAD`, fail-closed — sem fallback textual):
 
 | verificação | resultado |
 |---|---|
-| testes da raiz (inclui interface) | 107 arquivos, 1348 passaram, **0 pulados** |
-| testes do worker | 95 arquivos, 1221 passaram, **0 pulados** |
+| testes da raiz (inclui interface) | 112 arquivos, 1427 passaram, **0 pulados** |
+| testes do worker | 98 arquivos, 1275 passaram, **0 pulados** |
 | typecheck raiz (`tsc -b`) | limpo |
-| typecheck worker (`tsc --noEmit`) | limpo |
+| typecheck worker (`tsc --noEmit`) | limpo — **agora cobre `scripts/`** |
 | build (`tsc -b && vite build`) | ok |
 | lint (`eslint .`) | 0 erros, 3 avisos pré-existentes de `react-refresh` |
 | SQL/RLS isolados | 74 passaram |
-| testes da interface | 127 passaram |
+| interface — lógica (`src/lib`) | 127 passaram |
+| interface — componentes **renderizados** (`src/components`) | 17 passaram |
+| interface — páginas/rotas (`src/pages`) | 8 passaram |
+| interface — smoke de navegador | **não existe nesta fase** |
 | ciclo com `ProvedorMock` | 4 + 28 passaram |
-| `npm run prontidao -- --ciclo` | 0 bloqueios, 8 não comprovados |
+| `npm run prontidao -- --ciclo` | 0 bloqueios, 9 não comprovados |
+
+O typecheck do worker incluía apenas `src`: o próprio comando de prontidão nunca
+foi verificado. Ao incluir `scripts/`, apareceram um regex quebrado no coletor e
+dois erros latentes em `v2-canario.ts` — entre eles, o arquiteto do canário
+rodando **sem o idioma declarado**, logo depois de a fatia J criar um gate de
+idioma. Corrigidos.
 
 Garantias: **47 inventariadas · 46 locais · 46 encontradas · 46 executadas · 46
 aprovadas**. Zero duplicadas, zero órfãs, zero arquivos ausentes, zero falhas de
