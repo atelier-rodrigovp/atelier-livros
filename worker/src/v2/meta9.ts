@@ -15,6 +15,7 @@ import type { ProvedorModelo } from "./provedor.js";
 import { rodarGatesCapitulo } from "./gates.js";
 import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
 import { tarefaAvaliadorLivro, tarefaSinteseArco } from "./tarefas.js";
+import { capitulosAfetados, construirGrafo, decidirRevalidacao } from "./revalidacao.js";
 import { ErroEngine, type ContratoCompilado, type MapaModelos, type Parecer, type ResultadoGate, type SceneSpec } from "./tipos.js";
 import type { CapituloEstado } from "./tipos.js";
 
@@ -803,9 +804,36 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
         // A meta-nota é um funil de melhora: uma exceção nova não substitui uma
         // versão já aprovada. Canários e estado final exigem aprovação plena.
         if (r.status === "aprovado") {
-          // O capítulo seguinte foi escrito consumindo o gancho do N ANTIGO:
-          // revalida a vizinhança contra o texto novo. Antes, os vizinhos nunca
-          // eram reavaliados e a continuidade quebrava em silêncio.
+          // REVALIDAÇÃO TRANSITIVA (fatia K): a vizinhança cobre continuidade
+          // local; o grafo de dependências cobre o capítulo 11 que depende do
+          // que o 4 estabeleceu. Reabrir ≠ reescrever: a lista aqui é de
+          // capítulos cuja aprovação foi INVALIDADA e que serão REAVALIADOS.
+          const estadoDeps = await deps.gravador.carregarEstado();
+          const fichasParaGrafo: { capitulo: number; ficha: SceneSpec }[] = [];
+          for (let n = 1; n <= total; n++) {
+            const f = await deps.persistencia.lerFichaMaisRecente(deps.projectId, n);
+            if (f) fichasParaGrafo.push({ capitulo: n, ficha: f });
+          }
+          const grafo = construirGrafo({
+            fichas: fichasParaGrafo,
+            memoria: estadoDeps.doc.memoria_prosa ?? [],
+          });
+          const afetados = capitulosAfetados(grafo, alvo.capitulo);
+          const decisaoRev = decidirRevalidacao(afetados);
+          await deps.gravador.registrarRevalidacao(alvo.capitulo, decisaoRev.acao, afetados);
+          if (decisaoRev.acao === "decisao_humana") {
+            const motivo = `reescrita do capítulo ${alvo.capitulo}: ${decisaoRev.motivo}`;
+            await restaurarLote(lotePendente, motivo);
+            lotePendente = null;
+            await deps.gravador.registrarBloqueio("META_CASCATA_ACIMA_DO_TETO", "livro", motivo);
+            throw new ErroEngine({
+              codigo: "META_CASCATA_ACIMA_DO_TETO",
+              classe: "qualidade",
+              mensagem: `meta ${meta} não atingida: ${motivo}; melhor versão aprovada restaurada`,
+              detalhe: { capitulo: alvo.capitulo, afetados: afetados.map((a) => a.capitulo) },
+            });
+          }
+
           const vizinhos = revalidarVizinhanca(deps.dirManuscrito, alvo.capitulo, total, deps.contrato);
           if (vizinhos.length) {
             const detalhe = vizinhos

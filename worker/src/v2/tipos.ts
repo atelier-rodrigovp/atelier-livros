@@ -483,6 +483,13 @@ export interface EstadoCanonicoDoc {
   memoria_prosa?: EntradaMemoria[];
   /** Divergências ficha × prosa: evento explícito, nunca sobrescrita silenciosa. */
   conflitos_ficha_prosa?: ConflitoFichaProsa[];
+  /** Ondas de revalidação transitiva (fatia K): o que uma reescrita reabriu. */
+  revalidacoes?: {
+    origem: number;
+    acao: "nenhuma" | "reabrir" | "decisao_humana";
+    em: string;
+    afetados: { capitulo: number; distancia: number; motivos: string[] }[];
+  }[];
   // status_anterior: guarda o status do capítulo antes do bloqueio, para restauração fiel
   bloqueios: { codigo: string; alvo: string; detalhe: string; desde: string; status_anterior?: CapituloStatusV2 }[];
   migracao?: {

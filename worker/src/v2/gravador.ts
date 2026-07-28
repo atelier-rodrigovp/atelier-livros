@@ -414,6 +414,33 @@ export class Gravador {
     });
   }
 
+  /**
+   * Registra uma onda de revalidação transitiva (fatia K): o que foi reaberto,
+   * por quê, e a decisão. É o que a interface mostra como "capítulos afetados
+   * por reescrita" — antes, a propagação era invisível.
+   */
+  async registrarRevalidacao(
+    origem: number,
+    acao: "nenhuma" | "reabrir" | "decisao_humana",
+    afetados: { capitulo: number; distancia: number; motivos: { canal: string; chave: string; via: number }[] }[]
+  ): Promise<void> {
+    await this.mutarEstado((doc) => {
+      doc.revalidacoes = [
+        ...(doc.revalidacoes ?? []).filter((r) => r.origem !== origem),
+        {
+          origem,
+          acao,
+          em: this.agora(),
+          afetados: afetados.map((a) => ({
+            capitulo: a.capitulo,
+            distancia: a.distancia,
+            motivos: a.motivos.map((m) => `${m.canal}:${m.chave} (via cap ${m.via})`),
+          })),
+        },
+      ].sort((a, b) => a.origem - b.origem);
+    });
+  }
+
   /** A escada parou neste capítulo: a decisão passa a ser do autor. */
   async registrarCircuitBreaker(capitulo: number, motivo: string, tentativas: number): Promise<void> {
     await this.mutarEstado((doc) => {
