@@ -33,6 +33,7 @@ import {
   ErroEngine,
   type ArcoFundacao,
   type ContratoCompilado,
+  type EstrategiaCorrecao as Estrategia,
   type MapaModelos,
   type Parecer,
   type ResultadoGate,
@@ -225,6 +226,13 @@ export async function escreverCapitulo(
      * em modo "reescrita" como 1ª ação, seguindo depois o fluxo normal. Exige textoBase.
      */
     reescritaDirigida?: { correcoes: { local: string; problema: string; instrucao: string }[] };
+    /**
+     * Escada de correção (fatia C): a ESTRATÉGIA escolhida pelo controlador muda
+     * a AÇÃO desta execução — regenerar a ficha, reescrever a superfície,
+     * reescrever do zero ou trocar o juiz. Sem isto, "tentar de novo" seria a
+     * mesma ação repetida com outras palavras.
+     */
+    correcaoDirigida?: { estrategia: Estrategia; blockers: string[]; hipotese: string; tentativa: number };
   }
 ): Promise<ResultadoCapitulo> {
   const runs: string[] = [];
@@ -249,14 +257,44 @@ export async function escreverCapitulo(
     });
   }
 
+  // Escada de correção: a estratégia da tentativa muda a AÇÃO desta execução.
+  const estrategia = opts?.correcaoDirigida?.estrategia;
+  /**
+   * `julgamento_alternativo`: mesmo texto, juiz diferente. É a única estratégia
+   * que troca modelo — a hipótese sob teste é que o veredito, não o texto, está
+   * errado. Os pins de prosa/fatos/raciocínio ficam intactos.
+   */
+  const mapaModelos =
+    estrategia === "julgamento_alternativo"
+      ? { ...deps.mapa, julgamento: deps.mapa.raciocinio }
+      : deps.mapa;
+
   // Base comum das execuções de papel (ledger completo por chamada).
   const base = {
     gravador: deps.gravador,
     provedor: deps.provedor,
-    mapa: deps.mapa,
+    mapa: mapaModelos,
     jobId: deps.jobId ?? null,
     editionId: deps.editionId ?? null,
   };
+
+  /** Diretiva da tentativa: entra no pacote de quem PLANEJA e de quem ESCREVE. */
+  const secCorrecao: SecaoContexto[] = opts?.correcaoDirigida
+    ? [
+        {
+          titulo: `CORREÇÃO DIRIGIDA — tentativa ${opts.correcaoDirigida.tentativa} (estratégia: ${opts.correcaoDirigida.estrategia})`,
+          texto: [
+            `Hipótese desta tentativa: ${opts.correcaoDirigida.hipotese}`,
+            "",
+            "A versão anterior deste capítulo foi REPROVADA pelos seguintes bloqueios:",
+            ...opts.correcaoDirigida.blockers.map((b) => `- ${b}`),
+            "",
+            "Ataque a CAUSA nomeada acima. Repetir a mesma solução da tentativa anterior não é aceitável.",
+          ].join("\n"),
+          fonte: "escada-correcao",
+        },
+      ]
+    : [];
 
   const compilar = (
     papel: Parameters<typeof compilarPacote>[0]["papel"],
@@ -362,7 +400,9 @@ export async function escreverCapitulo(
     : [];
   let specVersao: number;
   let ficha: SceneSpec;
-  if (opts?.fichaExistente) {
+  // `reficha`: a hipótese é que o PLANO é a causa. Descartar a ficha existente é
+  // exatamente o que distingue esta estratégia de reescrever a prosa outra vez.
+  if (opts?.fichaExistente && estrategia !== "reficha") {
     // Ficha existente já está persistida (o pipeline não re-insere); o estado
     // referencia a última versão conhecida.
     specVersao = Math.max(versaoConhecida, 1);
@@ -370,7 +410,7 @@ export async function escreverCapitulo(
   } else {
     specVersao = versaoConhecida + 1;
     const comp = compilar("arquiteto_cena", `spec:${capitulo}`, {
-      fatos: [...secoesPlanejamento, ...secLedger, ...secPassado],
+      fatos: [...secoesPlanejamento, ...secLedger, ...secPassado, ...secCorrecao],
     });
     if (!comp.ok) return bloquearPorCompilacao(comp.bloqueios);
     const r = await executarPapel<SceneSpec>({
@@ -471,7 +511,7 @@ export async function escreverCapitulo(
   // -------------------------------------------------------------------------
   const compEsc = compilar("escritor", alvoCap, {
     ficha,
-    fatos: [...secMapa, ...secEstruturaCap, ...fatos],
+    fatos: [...secMapa, ...secEstruturaCap, ...fatos, ...secCorrecao],
     trechosAnteriores: opts?.trechosAnteriores,
     repeticoesRecentes,
   });
@@ -738,8 +778,12 @@ export async function escreverCapitulo(
       correcoesFeitas++;
       // Instrução global presente = meta difusa: modo REESCRITA ORIENTADA (preserva
       // eventos/fatos/diálogo/estrutura, reescreve a superfície). Sem meta global,
-      // modo cirúrgico. A escolha é do pipeline, nunca do modelo.
-      const modo: ModoCorrecao = globais.length > 0 ? "reescrita" : "cirurgico";
+      // modo cirúrgico. A escolha é do pipeline, nunca do modelo — e a estratégia
+      // da escada (`reescrita_orientada`/`reescrita_integral`) força o modo amplo.
+      const modo: ModoCorrecao =
+        globais.length > 0 || estrategia === "reescrita_orientada" || estrategia === "reescrita_integral"
+          ? "reescrita"
+          : "cirurgico";
       await corrigirComEscritor(todasCorrecoes, modo);
       gatesFalhos = await garantirGates();
       if (gatesFalhos.length) return bloquearPorGates(gatesFalhos);

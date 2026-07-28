@@ -369,6 +369,33 @@ export interface CapituloEstado {
   origens_estruturais?: number[];
 }
 
+// ---------------------------------------------------------------------------
+// Escada de correção (fatia C) — a política vive em correcao.ts; o registro, aqui.
+// ---------------------------------------------------------------------------
+
+export type EstrategiaCorrecao =
+  | "correcao_cirurgica"
+  | "reescrita_orientada"
+  | "reficha"
+  | "reescrita_integral"
+  | "julgamento_alternativo";
+
+export interface TentativaCorrecao {
+  capitulo: number;
+  /** Gate/blocker que disparou a tentativa. */
+  gate: string;
+  estrategia: EstrategiaCorrecao;
+  /** Por que esta estratégia deveria resolver ESTE blocker. */
+  hipotese: string;
+  /** Instrução efetivamente enviada ao papel (auditável). */
+  instrucao: string;
+  hash_entrada: string;
+  /** Hash do texto produzido; null = a tentativa não chegou a produzir texto. */
+  hash_saida: string | null;
+  resultado: "resolvido" | "persistiu" | "piorou" | "erro";
+  criado_em: string;
+}
+
 export interface EstadoCanonicoDoc {
   schema: "engine-state/v1";
   // Ordem lógica: escrita → revisao_final → consolidacao → avaliacao → concluido.
@@ -416,6 +443,15 @@ export interface EstadoCanonicoDoc {
   ledger_revelacoes?: RevelacaoLedger[];
   /** Retries dirigidos que o portão da fundação consumiu (adendo do autor ao §5). */
   fundacao_portao?: { retries: number; reprovacoes: string[]; em: string };
+  /**
+   * Ledger da escada de correção (fatia C), por capítulo. É o que impede a escada
+   * de repetir estratégia entre execuções do worker e o que permite retomar no
+   * capítulo certo. Registro completo (hipótese, instrução, hashes) em
+   * `TentativaCorrecao`; a chave é o número do capítulo.
+   */
+  correcoes?: Record<string, TentativaCorrecao[]>;
+  /** Capítulos em que a escada parou e aguardam decisão do autor. */
+  circuit_breaker?: { capitulo: number; motivo: string; tentativas: number; em: string }[];
   // status_anterior: guarda o status do capítulo antes do bloqueio, para restauração fiel
   bloqueios: { codigo: string; alvo: string; detalhe: string; desde: string; status_anterior?: CapituloStatusV2 }[];
   migracao?: {

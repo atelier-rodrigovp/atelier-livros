@@ -15,6 +15,7 @@ import {
   type Parecer,
   type RevelacaoLedger,
   type RunRegistro,
+  type TentativaCorrecao,
   type Verdict,
 } from "./tipos.js";
 
@@ -349,6 +350,47 @@ export class Gravador {
         };
       }
       doc.bloqueios.push(entrada);
+    });
+  }
+
+  /**
+   * Registra uma tentativa da escada de correção (fatia C).
+   *
+   * A tentativa é gravada ABERTA (`hash_saida: null`) ANTES de rodar — assim uma
+   * queda do worker no meio da tentativa não faz a escada repetir a estratégia na
+   * retomada — e FECHADA depois, com o hash produzido e o resultado. Fechar é
+   * completar o registro da MESMA tentativa (mesma estratégia, mesmo texto de
+   * entrada), nunca reescrever uma tentativa anterior: qualquer outra combinação
+   * entra como linha nova.
+   */
+  async registrarTentativaCorrecao(tentativa: TentativaCorrecao): Promise<void> {
+    await this.mutarEstado((doc) => {
+      const chave = String(tentativa.capitulo);
+      doc.correcoes = doc.correcoes ?? {};
+      const lista = [...(doc.correcoes[chave] ?? [])];
+      const aberta = lista.findIndex(
+        (t) =>
+          t.hash_saida === null &&
+          t.estrategia === tentativa.estrategia &&
+          t.hash_entrada === tentativa.hash_entrada
+      );
+      if (aberta >= 0) lista[aberta] = tentativa;
+      else lista.push(tentativa);
+      doc.correcoes[chave] = lista;
+    });
+  }
+
+  /** A escada parou neste capítulo: a decisão passa a ser do autor. */
+  async registrarCircuitBreaker(capitulo: number, motivo: string, tentativas: number): Promise<void> {
+    await this.mutarEstado((doc) => {
+      doc.circuit_breaker = doc.circuit_breaker ?? [];
+      const existente = doc.circuit_breaker.find((c) => c.capitulo === capitulo);
+      if (existente) {
+        existente.motivo = motivo;
+        existente.tentativas = tentativas;
+        return;
+      }
+      doc.circuit_breaker.push({ capitulo, motivo, tentativas, em: this.agora() });
     });
   }
 

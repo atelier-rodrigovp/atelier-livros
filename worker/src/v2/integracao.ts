@@ -20,6 +20,7 @@ import { tarefaCanarioVoz, tarefaEditorEstrutural, tarefaRevisorCanario } from "
 import { gerarFundacaoV2, materializarFundacao } from "./fundacao.js";
 import { parsearArco } from "./arco.js";
 import { avaliarFechamentoLivro } from "./fechamento.js";
+import { escreverCapituloComEscada } from "./correcao.js";
 import { reconstruirLedger } from "./ledger.js";
 import {
   briefingParaFundacao,
@@ -466,7 +467,13 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     }
 
     await atualizarProgresso(job.id, { cap_atual: n, etapa: `capitulo ${n}/${total}` });
-    const r = await escreverCapitulo(deps, n, { anteriores, trechosAnteriores: trechos });
+    const r = await escreverCapituloComEscada({
+      deps,
+      gravador,
+      capitulo: n,
+      opts: { anteriores, trechosAnteriores: trechos },
+      onProgresso: (p) => atualizarProgresso(job.id, p),
+    });
     novosCaps++;
 
     if (r.status === "bloqueado" || r.status === "reprovado" || r.status === "necessita_decisao_humana") {
