@@ -706,6 +706,20 @@ export function hashEvidenciaJson(valor: unknown): string {
 }
 
 /**
+ * A tabela de autorizacao nao existe neste banco? Extraido para funcao PURA
+ * porque e a decisao mais perigosa deste caminho: confundir "tabela ausente"
+ * com "sem autorizacao" transformaria migration esquecida em execucao liberada.
+ */
+export function tabelaAutorizacaoAusente(erro: { code?: string; message?: string } | null | undefined): boolean {
+  if (!erro) return false;
+  return (
+    erro.code === "42P01" ||
+    erro.code === "PGRST205" ||
+    (erro.message ?? "").includes("Could not find the table")
+  );
+}
+
+/**
  * Lê a autorização ATIVA do projeto. Tabela ausente (migração não aplicada) =
  * FAIL-CLOSED com mensagem que diz exatamente o que fazer — nunca um fallback
  * silencioso para "autorizado", que era justamente o risco de tirar a lista do
@@ -721,10 +735,7 @@ export async function lerAutorizacaoProjeto(projectId: string): Promise<Autoriza
     .eq("ativo", true)
     .maybeSingle();
   if (error) {
-    const ausente =
-      error.code === "42P01" ||
-      error.code === "PGRST205" ||
-      (error.message ?? "").includes("Could not find the table");
+    const ausente = tabelaAutorizacaoAusente(error);
     if (ausente) {
       throw new ErroEngine({
         codigo: "AUTORIZACAO_V2_INDISPONIVEL",

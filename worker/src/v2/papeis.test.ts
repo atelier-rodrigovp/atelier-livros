@@ -133,3 +133,70 @@ describe(`teto duro: > ${TETO_FALHAS_INFRA} falhas de infra do mesmo papel na me
     expect(chamadas).toBe(10); // 10 pausas de quota, nenhuma virou TETO_FALHAS_INFRA
   });
 });
+
+// ---------------------------------------------------------------------------
+// Auditoria de fiação: toda execução de papel precisa deixar rastro de COM QUE
+// ela rodou. Sem modelo, contrato e versão da skill gravados, uma regressão de
+// qualidade fica sem causa investigável — e a invalidação por troca de skill
+// (fatia L) não teria em que se apoiar.
+// ---------------------------------------------------------------------------
+describe("rastro de cada execução de papel", () => {
+  async function capturarRun() {
+    const runs: Record<string, unknown>[] = [];
+    const gravador = {
+      iniciarRun: async (r: Record<string, unknown>) => {
+        runs.push(r);
+        return "run-1";
+      },
+      falharRun: async () => undefined,
+      concluirRun: async () => undefined,
+    } as never;
+    const provedor = {
+      nome: "claude-cli",
+      chamar: async () => ({ texto: "ok", modeloExecutado: "claude-sonnet-5" }),
+    } as never;
+    await executarPapel<string>({
+      papel: "arquiteto_cena",
+      alvo: "cap-1",
+      pacote: PACOTE,
+      tarefa: "faça",
+      parse: (t: string) => t,
+      gravador,
+      provedor,
+      mapa: MAPA,
+    } as never);
+    return runs[0];
+  }
+
+  it("grava modelo, provedor e capacidade", async () => {
+    const r = await capturarRun();
+    expect(r.model_name).toBe(MAPA.raciocinio);
+    expect(r.model_provider).toBe("claude-cli");
+    expect(r.capacidade).toBeTruthy();
+  });
+
+  it("grava skill e versão — é o que a invalidação por troca de skill usa", async () => {
+    const r = await capturarRun();
+    expect(r.skill_id).toBe("s");
+    expect(r.skill_version).toBe("1");
+  });
+
+  it("grava o hash do pacote compilado (o contrato que entrou no prompt)", async () => {
+    const r = await capturarRun();
+    expect(r.input_bundle_hash).toBe("bundle");
+  });
+
+  it("grava papel, alvo e tentativa", async () => {
+    const r = await capturarRun();
+    expect(r.papel).toBe("arquiteto_cena");
+    expect(r.alvo).toBe("cap-1");
+    expect(r.attempt).toBe(1);
+  });
+
+  it("nenhum campo de rastro sai indefinido", async () => {
+    const r = await capturarRun();
+    for (const campo of ["papel", "capacidade", "model_provider", "model_name", "alvo", "input_bundle_hash", "skill_id", "skill_version", "attempt"]) {
+      expect(r[campo], `${campo} sem valor`).toBeDefined();
+    }
+  });
+});

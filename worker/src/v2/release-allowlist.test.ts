@@ -6,6 +6,7 @@
 // que mantém a decisão pura e testável.
 import { describe, expect, it } from "vitest";
 import { exigirReleaseAtual, type AutorizacaoProjetoV2 } from "./release.js";
+import { tabelaAutorizacaoAusente } from "./release.js";
 
 const PROJETO = "8b11072c-097d-4964-8f89-abecb96eb16c";
 // Obra REAL fora de escopo por decisão do autor — nunca autorizada aqui.
@@ -116,5 +117,38 @@ describe("o modo canário não é porta dos fundos para produzir obra", () => {
     } catch (e) {
       expect((e as Error).message).toContain("modo 'producao'");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fail-closed quando a INFRAESTRUTURA falta (auditoria de fiação, fase 2).
+// Confundir "tabela ausente" com "sem autorização" transformaria uma migration
+// esquecida em execução liberada — o oposto exato do que o portão existe para
+// fazer.
+// ---------------------------------------------------------------------------
+describe("tabela de autorização ausente é distinguida de projeto sem autorização", () => {
+  it("42P01 (relation does not exist) é tabela ausente", () => {
+    expect(tabelaAutorizacaoAusente({ code: "42P01", message: 'relation "engine_autorizacoes_v2" does not exist' })).toBe(true);
+  });
+
+  it("PGRST205 (PostgREST não achou a tabela) também", () => {
+    expect(tabelaAutorizacaoAusente({ code: "PGRST205" })).toBe(true);
+  });
+
+  it("mensagem do PostgREST sem código também é reconhecida", () => {
+    expect(tabelaAutorizacaoAusente({ message: "Could not find the table 'public.engine_autorizacoes_v2'" })).toBe(true);
+  });
+
+  it("erro de permissão NÃO é tabela ausente — é outro problema, com outra mensagem", () => {
+    expect(tabelaAutorizacaoAusente({ code: "42501", message: "permission denied" })).toBe(false);
+  });
+
+  it("JWT expirado NÃO é tabela ausente", () => {
+    expect(tabelaAutorizacaoAusente({ code: "PGRST301", message: "JWT expired" })).toBe(false);
+  });
+
+  it("ausência de erro nunca é tabela ausente", () => {
+    expect(tabelaAutorizacaoAusente(null)).toBe(false);
+    expect(tabelaAutorizacaoAusente(undefined)).toBe(false);
   });
 });

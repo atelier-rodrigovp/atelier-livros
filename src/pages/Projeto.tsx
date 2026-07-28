@@ -421,8 +421,8 @@ export default function Projeto() {
     setRelRaw(false);
     setRelCarregando(true);
     setRelOpen(true);
-    const txt = await downloadText("manuscritos", rev.storage_path);
-    setRelTxt(txt || "Não consegui carregar o relatório.");
+    const r = await downloadText("manuscritos", rev.storage_path);
+    setRelTxt(r.erro ? `Não consegui carregar o relatório: ${r.erro}` : r.texto || "(relatório vazio)");
     setRelCarregando(false);
   }
   async function enviarMelhorias() {

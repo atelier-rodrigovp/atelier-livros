@@ -130,7 +130,7 @@ function exigirString(valor: unknown, campo: string): string {
   return valor;
 }
 
-function validarSaidaContextualizador(obj: unknown): SaidaContextualizador {
+export function validarSaidaContextualizador(obj: unknown): SaidaContextualizador {
   if (typeof obj !== "object" || obj === null) throw new Error("saída do contextualizador não é objeto");
   const o = obj as Record<string, unknown>;
   if (!Array.isArray(o.fatos) || !Array.isArray(o.continuidade) || !Array.isArray(o.repeticoes_recentes)) {
@@ -148,7 +148,7 @@ function validarSaidaContextualizador(obj: unknown): SaidaContextualizador {
   return { fatos, continuidade, repeticoes_recentes: repeticoes };
 }
 
-function validarSaidaAuditor(obj: unknown): SaidaAuditor {
+export function validarSaidaAuditor(obj: unknown): SaidaAuditor {
   if (typeof obj !== "object" || obj === null) throw new Error("saída do auditor não é objeto");
   const o = obj as Record<string, unknown>;
   if (!Array.isArray(o.contradicoes) || !Array.isArray(o.conhecimento_indevido)) {
@@ -201,7 +201,7 @@ function resumirFicha(capitulo: number, f: SceneSpec): string {
 }
 
 /** Prosa do escritor: só valida presença — o conteúdo é julgado por gates/revisor. */
-function parseProsa(t: string): string {
+export function parseProsa(t: string): string {
   const limpo = t.trim();
   if (!limpo) throw new Error("prosa vazia");
   return limpo;
