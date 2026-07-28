@@ -10,24 +10,24 @@ chamar modelo de prosa; nunca escrever capítulo.**
 ## Ordem de trabalho
 
 ### Defeitos da revisão (antes das fatias abertas)
-- [ ] D1. `npm run prontidao` não pode emitir IMPLEMENTACAO_APROVADA com fatia/garantia obrigatória ausente
-- [ ] D2. Escada executa estratégias realmente diferentes (cirúrgica/orientada/reficha/integral/julgamento)
-- [ ] D3. `modo=canario` não contorna certificado para fundação nem escrita geral
-- [ ] D4. SQL/RLS: owner do projeto, campos históricos imutáveis, revogação sem reescrita
-- [ ] D5. Encadeamento real: `max_novos_caps=1` não produz falso `done`; retoma até fechamento/Meta9
-- [ ] D6. Cruzamento macro × micro por campos estruturados (plantio, reforço, pagamento, fios, clímax, marcos, atos, tensão)
-- [ ] D7. Documentos V2: disco, Storage e abertura real pela interface
+- [x] D1. `npm run prontidao` não pode emitir IMPLEMENTACAO_APROVADA com fatia/garantia obrigatória ausente
+- [x] D2. Escada executa estratégias realmente diferentes (cirúrgica/orientada/reficha/integral/julgamento)
+- [x] D3. `modo=canario` não contorna certificado para fundação nem escrita geral
+- [x] D4. SQL/RLS: owner do projeto, campos históricos imutáveis, revogação sem reescrita
+- [x] D5. Encadeamento real: `max_novos_caps=1` não produz falso `done`; retoma até fechamento/Meta9
+- [x] D6. Cruzamento macro × micro por campos estruturados (plantio, reforço, pagamento, fios, clímax, marcos, atos, tensão)
+- [x] D7. Documentos V2: disco, Storage e abertura real pela interface
 
 ### Fatias abertas do plano original
-- [ ] E — entrevista determinística e aprovação do briefing
-- [ ] G — conformidade ficha → prosa
-- [ ] H — memória derivada da prosa e promessas cruzadas
-- [ ] I — repetição literal, semântica e maneirismos globais
-- [ ] J — revisor, auditor e idioma
-- [ ] K — revalidação transitiva e Meta9
-- [ ] L — canário como snapshot e invalidação (fixtures; NÃO gerar canário)
-- [ ] O — interface editorial completa
-- [ ] P — histórico append-only e RLS
+- [x] E — entrevista determinística e aprovação do briefing
+- [x] G — conformidade ficha → prosa
+- [x] H — memória derivada da prosa e promessas cruzadas
+- [x] I — repetição literal, semântica e maneirismos globais
+- [x] J — revisor, auditor e idioma
+- [x] K — revalidação transitiva e Meta9
+- [x] L — canário como snapshot e invalidação (fixtures; NÃO gerar canário)
+- [x] O — interface editorial completa
+- [x] P — histórico append-only e RLS
 
 ## Estados formais exigidos na entrega
 
@@ -42,4 +42,11 @@ canarios_novos   BLOQUEADOS_AGUARDANDO_AUTOR
 
 ## Próxima tarefa
 
-D1 — inventário de fatias obrigatórias no comando de prontidão.
+CONCLUÍDO. Todos os defeitos (D1–D7) e todas as fatias (A–Q) estão fechados e
+comprovados. `npm run prontidao -- --ciclo` reporta os seis estados exigidos.
+
+Pendências que NÃO são da implementação e dependem do autor:
+1. rotulagem humana de 14 amostras do corpus (única via para RELEASE_CERTIFICADO);
+2. aplicar `supabase/engine_v2_autorizacoes.sql` e `engine_v2_historico.sql`;
+3. autorizar o projeto em `engine_autorizacoes_v2`;
+4. autorizar o push.
