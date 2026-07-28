@@ -3,6 +3,7 @@
 // Sinais editoriais ficam em sinais.ts e só bloqueiam via disposição do revisor.
 
 import { detectarRepeticaoCrossCapitulo, entradasLedgerDoCapitulo } from "../maneirismo.js";
+import { detectarRepeticaoLiteral } from "./repeticao.js";
 import type { ResultadoGate, SceneSpec, SkillContract } from "./tipos.js";
 
 export function gateArtefatoPresente(texto: string | null | undefined): ResultadoGate {
@@ -44,11 +45,26 @@ export function gateRepeticaoQuaseLiteral(
   // O detector já aplica limiar interno alto (slots aforísticos + shingles): tudo que
   // ele retorna (verbatim ou quase-verbatim) conta como repetição quase literal.
   const reps = detectarRepeticaoCrossCapitulo(texto, slotsAnteriores);
-  const passou = reps.length === 0;
+
+  // Fatia I, camada 1: além dos slots aforísticos, comparação de FRASE INTEIRA
+  // contra TODOS os capítulos anteriores. O detector de slots pega a assinatura
+  // reciclada; este pega o parágrafo repetido dez capítulos depois, que passava.
+  const literais = detectarRepeticaoLiteral(
+    texto,
+    anteriores.map((a) => ({ numero: a.numero, texto: a.trecho }))
+  );
+
+  const evidencias = [
+    ...reps.slice(0, 3).map((r) => `cap ${r.capituloAnterior}: "${r.trecho}"`),
+    ...literais.slice(0, 3).map(
+      (r) => `cap ${r.capituloAnterior} (${Math.round(r.similaridade * 100)}%): "${r.trechoAtual.slice(0, 90)}" ≈ "${r.trechoAnterior.slice(0, 90)}"`
+    ),
+  ];
+  const passou = evidencias.length === 0;
   return {
     gate: "repeticao_quase_literal",
     passou,
-    evidencia: passou ? undefined : reps.slice(0, 3).map((r) => `cap ${r.capituloAnterior}: "${r.trecho}"`).join(" · "),
+    evidencia: passou ? undefined : evidencias.join(" · "),
   };
 }
 
