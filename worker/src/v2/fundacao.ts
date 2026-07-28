@@ -22,6 +22,7 @@ import {
 } from "./portao-fundacao.js";
 import type { ProvedorModelo } from "./provedor.js";
 import { tarefaArquitetoEnredoMacro, tarefaArquitetoEnredoMicro } from "./tarefas.js";
+import { chaveStorage, documentosDaFundacao, hashesDosDocumentos, indiceDeDocumentos } from "./documentos.js";
 import { ErroEngine, type ArcoFundacao, type ContratoCompilado, type MapaModelos } from "./tipos.js";
 
 export interface PersonagemMapa {
@@ -134,6 +135,9 @@ export interface DepsFundacao {
   contrato: ContratoCompilado;
   dirProjeto: string;
   jobId?: string | null;
+  /** Dono e projeto: necessários para publicar os documentos no Storage (D7). */
+  ownerId?: string | null;
+  projectId?: string | null;
 }
 
 export interface ResultadoPortao {
@@ -323,34 +327,29 @@ export async function materializarFundacao(
   totalCaps: number,
   portao?: ResultadoPortao
 ): Promise<void> {
+  // Lista CANÔNICA (documentos.ts): a mesma que alimenta disco, Storage, hashes
+  // do estado e a lista que a interface abre. Antes, cada um desses tinha a sua.
+  const docs = documentosDaFundacao(fundacao);
   await fs.mkdir(path.join(deps.dirProjeto, "fundacao"), { recursive: true });
-  await fs.writeFile(path.join(deps.dirProjeto, "perfil-de-voz.md"), fundacao.perfil_voz, "utf8");
-  await fs.writeFile(path.join(deps.dirProjeto, "fundacao", "biblia-da-obra.md"), fundacao.biblia, "utf8");
-  const mapaJson = JSON.stringify({ personagens: fundacao.mapa_personagens }, null, 2);
-  await fs.writeFile(path.join(deps.dirProjeto, "fundacao", "mapa-personagens.json"), mapaJson, "utf8");
-  await fs.writeFile(
-    path.join(deps.dirProjeto, "estrutura.json"),
-    JSON.stringify(
-      {
-        estrutura: fundacao.estrutura,
-        fios: fundacao.fios,
-        promessa: fundacao.promessa_editorial,
-        // `arco` só aparece no arquivo quando existe: estrutura.json de fundação
-        // v2 permanece byte-compatível com o que já está no disco.
-        ...(fundacao.arco ? { arco: fundacao.arco } : {}),
-      },
-      null,
-      2
-    ),
-    "utf8"
-  );
-  // Docs que o contrato exige (dossiê factual, matriz de relógios…): vão para
-  // fundacao/, que é onde prepararProjetoV2 os procura para o revisor e o auditor.
-  for (const [nome, conteudo] of Object.entries(fundacao.docs_exigidos ?? {})) {
-    // Nome vem do modelo: só o basename, e só dentro de fundacao/ (path traversal).
-    const seguro = path.basename(nome);
-    if (!seguro || seguro.startsWith(".")) continue;
-    await fs.writeFile(path.join(deps.dirProjeto, "fundacao", seguro), conteudo, "utf8");
+  for (const doc of docs) {
+    const destino = path.join(deps.dirProjeto, doc.caminho);
+    await fs.mkdir(path.dirname(destino), { recursive: true });
+    await fs.writeFile(destino, doc.conteudo, "utf8");
+  }
+
+  // Storage: sem isto os documentos existem só no PC do worker e a tela do
+  // projeto não abre nenhum deles (defeito D7). Falha de upload é registrada,
+  // nunca engolida — o disco continua sendo a verdade da engine.
+  const falhasUpload: string[] = [];
+  if (deps.ownerId && deps.projectId) {
+    const { uploadFile } = await import("../lib.js");
+    for (const doc of docs) {
+      try {
+        await uploadFile("manuscritos", chaveStorage(deps.ownerId, deps.projectId, doc.caminho), path.join(deps.dirProjeto, doc.caminho));
+      } catch (e) {
+        falhasUpload.push(`${doc.caminho}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
   }
 
   const estado = await deps.gravador.carregarEstado();
@@ -359,12 +358,12 @@ export async function materializarFundacao(
     // v3 = fundação com grade de arco verificável; v2 = fundação anterior.
     versao: fundacao.arco ? "3" : "2",
     hash: hashJsonCanonico(fundacao),
-    docs: {
-      "perfil-de-voz.md": createHash("sha256").update(fundacao.perfil_voz, "utf8").digest("hex"),
-      "fundacao/biblia-da-obra.md": createHash("sha256").update(fundacao.biblia, "utf8").digest("hex"),
-      "fundacao/mapa-personagens.json": hashJsonCanonico(fundacao.mapa_personagens),
-      "estrutura.json": hashJsonCanonico(fundacao.estrutura),
-    },
+    // TODOS os documentos, inclusive os exigidos pelo contrato — antes só quatro
+    // entravam, e a substituição de um dossiê factual passava despercebida.
+    docs: hashesDosDocumentos(docs),
+    // Índice que a interface consome para saber o que existe e o que abrir.
+    indice: indiceDeDocumentos(docs, new Date().toISOString()),
+    ...(falhasUpload.length ? { storage_falhas: falhasUpload } : {}),
   };
   estado.doc.total_capitulos = totalCaps;
   // Adendo do autor ao §5: quantos retries o portão consumiu fica registrado.

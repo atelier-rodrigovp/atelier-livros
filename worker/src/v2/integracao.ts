@@ -18,6 +18,7 @@ import { compilarPacote, type SecaoContexto } from "./compilador.js";
 import { executarPapel } from "./papeis.js";
 import { tarefaCanarioVoz, tarefaEditorEstrutural, tarefaRevisorCanario } from "./tarefas.js";
 import { gerarFundacaoV2, materializarFundacao } from "./fundacao.js";
+import { documentosDaFundacao } from "./documentos.js";
 import { parsearArco } from "./arco.js";
 import { avaliarFechamentoLivro } from "./fechamento.js";
 import { escreverCapituloComEscada } from "./correcao.js";
@@ -1015,6 +1016,10 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
     contrato,
     dirProjeto,
     jobId: job.id,
+    // D7: sem estes, os documentos ficam só no disco do worker e a interface
+    // não abre nenhum deles.
+    ownerId: OWNER,
+    projectId,
   };
   await atualizarProgresso(job.id, {
     engine: "v2",
@@ -1031,6 +1036,9 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
     fios: fundacao.fios,
     fundacao_run: runId,
     fundacao_schema: fundacao.arco ? "v3" : "v2",
+    // D7 — índice dos documentos materializados: é o que a tela do projeto usa
+    // para saber o que existe e o que abrir (antes ela adivinhava nomes da V1).
+    documentos: documentosDaFundacao(fundacao).map((d) => ({ titulo: d.titulo, caminho: d.caminho, origem: d.origem })),
     portao_retries: portao.retries,
     ...(portao.reprovacoes.length ? { portao_reprovacoes: portao.reprovacoes } : {}),
     ...(portao.avisos.length ? { portao_avisos: portao.avisos } : {}),
@@ -1111,6 +1119,10 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
     contrato,
     dirProjeto,
     jobId: job.id,
+    // D7: sem estes, os documentos ficam só no disco do worker e a interface
+    // não abre nenhum deles.
+    ownerId: OWNER,
+    projectId,
   };
   await atualizarProgresso(job.id, {
     engine: "v2",
@@ -1125,6 +1137,9 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
     etapa: "fundação refinada e materializada",
     fundacao_run: runId,
     fundacao_schema: fundacao.arco ? "v3" : "v2",
+    // D7 — índice dos documentos materializados: é o que a tela do projeto usa
+    // para saber o que existe e o que abrir (antes ela adivinhava nomes da V1).
+    documentos: documentosDaFundacao(fundacao).map((d) => ({ titulo: d.titulo, caminho: d.caminho, origem: d.origem })),
     portao_retries: portao.retries,
   });
 }

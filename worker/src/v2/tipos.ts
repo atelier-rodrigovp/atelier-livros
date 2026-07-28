@@ -409,7 +409,22 @@ export interface EstadoCanonicoDoc {
     | "concluido"
     | "bloqueado";
   skill?: { id: string; versao: string; hash: string };
-  fundacao?: { versao: string; hash: string; docs: Record<string, string> }; // doc → sha256
+  fundacao?: {
+    versao: string;
+    hash: string;
+    docs: Record<string, string>; // doc → sha256
+    /**
+     * Índice dos documentos materializados (D7): é o que a interface consome
+     * para saber o QUE existe e o QUE abrir. Sem ele, a tela adivinhava nomes —
+     * e tentava baixar arquivos que a V2 nunca escreveu.
+     */
+    indice?: {
+      gerado_em: string;
+      documentos: { titulo: string; caminho: string; origem: "nucleo" | "contrato"; hash: string }[];
+    };
+    /** Uploads que falharam. Registrado, nunca engolido. */
+    storage_falhas?: string[];
+  };
   total_capitulos?: number;
   // Edição estrutural (editor propõe; o pipeline aplica cortes/fusões/reordenações).
   edicao_estrutural?: { run_id?: string; propostas: number; aplicadas: number; detalhe: string[]; em: string };

@@ -34,6 +34,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ReviewReport } from "@/components/ReviewReport";
 import { EngineV2Panel } from "@/components/EngineV2Panel";
+import { chaveStorageDocumento, documentosParaExibir } from "@/lib/documentosFundacao";
 
 interface Edition { id: string; idioma: string; status: string; is_origem: boolean; nota_review: number | null; }
 interface Artifact { id: string; edition_id: string | null; tipo: string; storage_path: string; url_publica: string | null; created_at?: string; meta?: any; }
@@ -672,15 +673,23 @@ export default function Projeto() {
                     <div className="space-y-2">
                       <p className="text-xs font-medium text-muted-foreground">Documentos</p>
                       <div className="flex flex-wrap gap-2">
-                        {["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md"].map((f) => (
-                          <Button key={f} variant="outline" size="sm" onClick={async () => {
-                            const url = await signedUrl("manuscritos", `${proj.owner}/${proj.id}/fundacao/${f}`);
-                            if (url) window.open(url, "_blank"); else toast.error("Arquivo não encontrado no Storage.");
+                        {documentosParaExibir(pg).map((d) => (
+                          <Button key={d.caminho} variant="outline" size="sm" onClick={async () => {
+                            const url = await signedUrl("manuscritos", chaveStorageDocumento(proj.owner, proj.id, d.caminho));
+                            if (url) window.open(url, "_blank"); else toast.error(`Documento não encontrado no Storage: ${d.caminho}`);
                           }}>
-                            <FileText className="h-4 w-4" /> {f}
+                            <FileText className="h-4 w-4" /> {d.titulo}
+                            {d.origem === "contrato" && (
+                              <span className="ml-1 rounded bg-muted px-1 text-[10px] text-muted-foreground">contrato</span>
+                            )}
                           </Button>
                         ))}
                       </div>
+                      {Array.isArray(pg?.storage_falhas) && pg.storage_falhas.length > 0 && (
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          {pg.storage_falhas.length} documento(s) não subiram para o Storage e não abrem aqui — o worker registrou o motivo.
+                        </p>
+                      )}
                     </div>
 
                     <div className="space-y-2 rounded-lg border p-4">
