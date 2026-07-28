@@ -12,12 +12,14 @@
 //      npm run prontidao -- --ciclo (inclui o nível 3)
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { analisarCalibracao } from "../src/v2/calibracao.js";
 import { CAMPOS_DECISORIOS, EXCECOES_NAO_DECISORIAS } from "../src/v2/campos-decisorios.js";
 import { conferirDod, resumoConferencia, type ConferenciaDod, type ResultadoTesteDod } from "../src/v2/dod-conferencia.js";
+import { validarEvidencia, type DependenciasEvidencia, type TipoEvidencia } from "../src/v2/evidencia-externa.js";
 import { fatiasDoInventario, INVENTARIO_DOD } from "../src/v2/inventario-dod.js";
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
@@ -28,14 +30,22 @@ const DIR_WORKER = path.resolve(AQUI, "..");
 // Estados formais
 // ---------------------------------------------------------------------------
 
+// Saúde LOCAL e prontidão de PRODUÇÃO são estados distintos. Misturá-los num
+// único `RELEASE_CERTIFICADO` fazia a suíte verde da máquina do autor parecer
+// certificado de produção — sem nunca ter tocado o banco, o Storage ou o
+// provedor reais.
 type Estado =
-  | "IMPLEMENTACAO_APROVADA" | "IMPLEMENTACAO_REPROVADA"
-  | "REGRESSAO_APROVADA" | "REGRESSAO_REPROVADA"
-  | "ACURACIA_CALIBRADA" | "ACURACIA_AGUARDANDO_ROTULAGEM_HUMANA"
-  | "RELEASE_CERTIFICADO" | "RELEASE_BLOQUEADO"
+  | "IMPLEMENTACAO_LOCAL_APROVADA" | "IMPLEMENTACAO_LOCAL_REPROVADA"
+  | "REGRESSAO_LOCAL_APROVADA" | "REGRESSAO_LOCAL_REPROVADA"
+  | "INTEGRACAO_MOCK_APROVADA" | "INTEGRACAO_MOCK_REPROVADA" | "INTEGRACAO_MOCK_NAO_EXECUTADA"
+  | "ACURACIA_CALIBRADA" | "ACURACIA_AGUARDANDO_ROTULAGEM"
+  | "MIGRACOES_REMOTAS_COMPROVADAS" | "MIGRACOES_REMOTAS_NAO_COMPROVADAS"
+  | "INTEGRACAO_REAL_APROVADA" | "INTEGRACAO_REAL_NAO_COMPROVADA"
+  | "UI_AUTENTICADA_APROVADA" | "UI_AUTENTICADA_NAO_COMPROVADA"
+  | "PROVEDOR_REAL_APROVADO" | "PROVEDOR_REAL_NAO_COMPROVADO"
+  | "RELEASE_PRODUCAO_CERTIFICADO" | "RELEASE_PRODUCAO_BLOQUEADO"
   | "PROJETO_AUTORIZADO" | "PROJETO_NAO_AUTORIZADO"
   | "PROVA_LITERARIA_APROVADA" | "PROVA_LITERARIA_REPROVADA" | "PROVA_LITERARIA_NAO_EXECUTADA"
-  | "INTEGRACAO_MOCK_APROVADA" | "INTEGRACAO_MOCK_REPROVADA" | "INTEGRACAO_MOCK_NAO_EXECUTADA"
   | "BLOQUEADOS_AGUARDANDO_AUTOR";
 
 interface Item {
@@ -51,6 +61,11 @@ interface Relatorio {
   nivel1: { comando: string; itens: Item[]; dod: ConferenciaDod };
   nivel2: { itens: Item[] };
   nivel3: { executado: boolean; itens: Item[] };
+  regressao: { itens: Item[] };
+  externas: { itens: Item[] };
+  /** Dívida reportada mas não bloqueante (bundle, lint warning). */
+  avisos: string[];
+  bloqueios_producao: string[];
   bloqueios: string[];
   nao_comprovados: string[];
 }
@@ -83,37 +98,6 @@ const SUITES_MUTACAO = [
   { arquivo: "src/v2/integracao-mock.test.ts", prova: "ciclo interface → worker → Storage → Leitor" },
 ];
 
-function rodarVitest(alvos: string[]): { ok: boolean; saida: string } {
-  try {
-    const saida = execFileSync(
-      process.platform === "win32" ? "npx.cmd" : "npx",
-      ["vitest", "run", ...alvos, "--reporter=basic"],
-      // shell: true — no Windows, `npx`/`npm` são .cmd e execFile sem shell falha
-      // silenciosamente (o comando "roda" em 0,2s e reporta zero teste).
-      { cwd: DIR_WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 32 * 1024 * 1024, shell: true }
-    );
-    return { ok: true, saida };
-  } catch (e) {
-    const err = e as { stdout?: string; stderr?: string };
-    return { ok: false, saida: `${err.stdout ?? ""}\n${err.stderr ?? ""}` };
-  }
-}
-
-/** O vitest colore a saída; sem tirar o ANSI, "Tests 908 passed" não casa. */
-function semAnsi(texto: string): string {
-  return texto.replace(/\[[0-9;]*m/g, "");
-}
-
-function contarTestes(saida: string): { passaram: number; falharam: number; pulados: number } {
-  const limpo = semAnsi(saida);
-  // A linha "Tests" (não "Test Files") é a que conta testes, não arquivos.
-  const linha = /^\s*Tests\s+.*$/m.exec(limpo)?.[0] ?? limpo;
-  const passaram = Number(/(\d+) passed/.exec(linha)?.[1] ?? 0);
-  const falharam = Number(/(\d+) failed/.exec(linha)?.[1] ?? 0);
-  const pulados = Number(/(\d+) skipped/.exec(linha)?.[1] ?? 0);
-  return { passaram, falharam, pulados };
-}
-
 // ---------------------------------------------------------------------------
 // Coleta estruturada da DoD (defeito D1)
 //
@@ -127,62 +111,118 @@ function caminhoDaRaiz(teste: string): string {
   return path.relative(RAIZ, path.resolve(DIR_WORKER, teste)).replace(/\\/g, "/");
 }
 
-function coletarDod(): { conferencia: ConferenciaDod; comando: string; erro?: string } {
-  const alvos = [...new Set(INVENTARIO_DOD.flatMap((g) => g.testes.map(caminhoDaRaiz)))]
-    .filter((a) => existsSync(path.join(RAIZ, a)))
-    .sort();
+interface ExecucaoJson {
+  ok: boolean;
+  erro?: string;
+  passaram: number;
+  falharam: number;
+  pulados: number;
+  total: number;
+  resultados: ResultadoTesteDod[];
+}
+
+/**
+ * Roda a suíte e devolve o resultado ESTRUTURADO. Uma execução só — a da raiz,
+ * que é a config capaz de enxergar worker e interface — alimenta a regressão, a
+ * coleta global de IDs da DoD e os recortes (SQL/RLS, ciclo mock, interface).
+ * Rodar tudo de novo por recorte seria desperdício sem ganho de garantia.
+ */
+function rodarVitestJson(cwd: string, alvos: string[], saidaRel: string): ExecucaoJson {
   // RELATIVO de propósito: com `shell: true` (obrigatório no Windows para achar
   // o `npx.cmd`), um caminho absoluto contendo espaço — "…/Rodrigo Paiva/…" — é
   // re-dividido pelo shell e o vitest grava o relatório em outro lugar. O sintoma
   // é o pior possível: a DoD reprova inteira por falta de dados, não por defeito.
-  const saidaRel = ".prontidao/dod-resultados.json";
-  const saidaJson = path.join(RAIZ, saidaRel);
+  const saidaJson = path.join(cwd, saidaRel);
   mkdirSync(path.dirname(saidaJson), { recursive: true });
   rmSync(saidaJson, { force: true });
 
-  const comando = `npx vitest run <${alvos.length} suítes da DoD> --reporter=json`;
+  let erroExec: string | undefined;
   try {
     execFileSync(
       process.platform === "win32" ? "npx.cmd" : "npx",
       ["vitest", "run", ...alvos, "--reporter=json", `--outputFile=${saidaRel}`],
-      { cwd: RAIZ, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, shell: true }
+      { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 128 * 1024 * 1024, shell: true }
     );
-  } catch {
+  } catch (e) {
     // Teste vermelho faz o vitest sair != 0. O relatório JSON ainda é escrito, e
     // é ele que diz QUAL garantia caiu — engolir aqui seria repetir o defeito.
+    // Guardamos o erro mesmo assim: se o JSON não vier, ele é a única pista.
+    erroExec = String((e as { stderr?: string })?.stderr ?? e).slice(-400);
   }
 
+  const vazio: ExecucaoJson = { ok: false, passaram: 0, falharam: 0, pulados: 0, total: 0, resultados: [] };
   if (!existsSync(saidaJson)) {
-    return {
-      comando,
-      erro: "o vitest não produziu o relatório JSON da DoD",
-      conferencia: conferirDod(INVENTARIO_DOD, []),
-    };
+    return { ...vazio, erro: `o vitest não produziu ${saidaRel}${erroExec ? ` — ${erroExec}` : ""}` };
   }
-
-  const bruto = JSON.parse(readFileSync(saidaJson, "utf8")) as {
+  let bruto: {
+    numTotalTests?: number;
     testResults?: { name?: string; assertionResults?: { fullName?: string; title?: string; status?: string }[] }[];
   };
+  try {
+    bruto = JSON.parse(readFileSync(saidaJson, "utf8"));
+  } catch (e) {
+    return { ...vazio, erro: `relatório JSON ilegível: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  if (!Array.isArray(bruto.testResults)) {
+    return { ...vazio, erro: "relatório JSON incompleto: sem `testResults`" };
+  }
+
   const resultados: ResultadoTesteDod[] = [];
-  for (const arquivo of bruto.testResults ?? []) {
+  let passaram = 0;
+  let falharam = 0;
+  let pulados = 0;
+  for (const arquivo of bruto.testResults) {
     const rel = arquivo.name ? path.relative(RAIZ, arquivo.name).replace(/\\/g, "/") : "?";
     for (const t of arquivo.assertionResults ?? []) {
-      resultados.push({
-        arquivo: rel,
-        nome: t.fullName ?? t.title ?? "",
-        // Só `passed` aprova. `pending`, `todo` e `skipped` são não-execução.
-        estado: t.status === "passed" ? "passou" : t.status === "failed" ? "falhou" : "pulado",
-      });
+      // Só `passed` aprova. `pending`, `todo` e `skipped` são não-execução.
+      const estado = t.status === "passed" ? "passou" : t.status === "failed" ? "falhou" : "pulado";
+      if (estado === "passou") passaram++;
+      else if (estado === "falhou") falharam++;
+      else pulados++;
+      resultados.push({ arquivo: rel, nome: t.fullName ?? t.title ?? "", estado });
     }
   }
-  return { comando, conferencia: conferirDod(INVENTARIO_DOD, resultados) };
+  const total = resultados.length;
+  return { ok: falharam === 0 && total > 0, passaram, falharam, pulados, total, resultados };
+}
+
+/**
+ * Recorte de uma execução já feita. O casamento é por SUBSTRING, não por sufixo:
+ * um recorte de diretório (`src/lib/`) precisa casar, e sufixo nunca casaria.
+ * Como os testes do worker vivem sob `worker/src/`, `src/lib/` não os apanha.
+ */
+function recorte(exec: ExecucaoJson, arquivos: string[]): { passaram: number; falharam: number; pulados: number } {
+  const alvo = exec.resultados.filter((r) => arquivos.some((a) => r.arquivo.includes(a)));
+  return {
+    passaram: alvo.filter((r) => r.estado === "passou").length,
+    falharam: alvo.filter((r) => r.estado === "falhou").length,
+    pulados: alvo.filter((r) => r.estado === "pulado").length,
+  };
+}
+
+/**
+ * A conferência da DoD roda sobre a suíte INTEIRA, não sobre os arquivos que o
+ * inventário cita. Coletar só o que o inventário aponta é circular: um arquivo
+ * novo com `[DOD:X]` esquecido fora do inventário jamais apareceria.
+ */
+function coletarDod(suite: ExecucaoJson): ConferenciaDod {
+  const ausentes = [...new Set(
+    INVENTARIO_DOD.filter((g) => g.escopo === "local").flatMap((g) => g.testes.map(caminhoDaRaiz))
+  )]
+    .filter((a) => !existsSync(path.join(RAIZ, a)))
+    .sort();
+  return conferirDod(INVENTARIO_DOD, suite.resultados, {
+    erro: suite.erro,
+    arquivosAusentes: ausentes,
+    totalTestesColetados: suite.total,
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Nível 1 — fiação e mutação
 // ---------------------------------------------------------------------------
 
-function nivel1(): { itens: Item[]; comando: string; ok: boolean; garantiasFaltando: string[]; dod: ConferenciaDod } {
+function nivel1(suiteRaiz: ExecucaoJson): { itens: Item[]; comando: string; ok: boolean; garantiasFaltando: string[]; dod: ConferenciaDod } {
   const itens: Item[] = [];
   const alvos = SUITES_MUTACAO.map((s) => s.arquivo).filter((a) => existsSync(path.join(DIR_WORKER, a)));
   const ausentes = SUITES_MUTACAO.filter((s) => !existsSync(path.join(DIR_WORKER, s.arquivo)));
@@ -190,12 +230,13 @@ function nivel1(): { itens: Item[]; comando: string; ok: boolean; garantiasFalta
     itens.push({ item: `suíte de mutação ${a.arquivo}`, ok: false, evidencia: "arquivo não existe" });
   }
 
-  const comando = `npx vitest run ${alvos.join(" ")}`;
-  const r = rodarVitest(alvos);
-  const c = contarTestes(r.saida);
+  // Recorte da execução única da raiz — estas suítes já rodaram lá. Rodá-las de
+  // novo custaria um minuto e não acrescentaria garantia nenhuma.
+  const comando = `recorte de ${alvos.length} suíte(s) de mutação da execução da raiz`;
+  const c = recorte(suiteRaiz, alvos.map((a) => a.replace(/^src\//, "src/")));
   itens.push({
     item: "suítes de mutação",
-    ok: r.ok && c.falharam === 0,
+    ok: c.falharam === 0 && c.passaram > 0,
     evidencia: `${c.passaram} passaram, ${c.falharam} falharam, ${c.pulados} pulados em ${alvos.length} arquivo(s)`,
   });
 
@@ -224,10 +265,9 @@ function nivel1(): { itens: Item[]; comando: string; ok: boolean; garantiasFalta
   // marcá-lo `skip`) para a garantia sumir e o estado continuar verde. Agora cada
   // garantia tem um ID que o teste declara no título, e só aprova o ID que foi
   // encontrado, executado e passou.
-  const dod = coletarDod();
-  const conf = dod.conferencia;
+  const conf = coletarDod(suiteRaiz);
   const faltando = conf.problemas;
-  if (dod.erro) itens.push({ item: "coleta estruturada da DoD", ok: false, evidencia: dod.erro });
+  for (const f of conf.falhasDeColeta) itens.push({ item: "coleta estruturada da DoD", ok: false, evidencia: f });
   itens.push({
     item: `DoD: ${conf.inventariadas} garantias obrigatórias (por execução)`,
     ok: conf.ok,
@@ -296,14 +336,13 @@ function nivel2(): { itens: Item[]; calibrada: boolean } {
 // Nível 3 — ciclo real (opt-in; nunca inferido)
 // ---------------------------------------------------------------------------
 
-function nivel3(executar: boolean): { itens: Item[]; executado: boolean; mockOk: boolean } {
+function nivel3(executar: boolean, suiteRaiz: ExecucaoJson): { itens: Item[]; executado: boolean; mockOk: boolean } {
   // O ciclo com MOCK é obrigatório: ele não gasta cota nem chama modelo de prosa,
   // então não há razão para ficar atrás de uma flag. `--ciclo` acrescenta as
-  // suítes mais lentas de ponta a ponta.
+  // suítes mais lentas de ponta a ponta. Ambos saem do recorte da execução única.
   const alvosMock = ["src/v2/integracao-mock.test.ts"].filter((a) => existsSync(path.join(DIR_WORKER, a)));
-  const rMock = alvosMock.length ? rodarVitest(alvosMock) : { ok: false, saida: "" };
-  const cMock = contarTestes(rMock.saida);
-  const mockOk = alvosMock.length > 0 && rMock.ok && cMock.falharam === 0 && cMock.passaram > 0;
+  const cMock = recorte(suiteRaiz, ["v2/integracao-mock.test.ts"]);
+  const mockOk = alvosMock.length > 0 && cMock.falharam === 0 && cMock.passaram > 0;
   const itensMock: Item[] = [
     {
       item: "ciclo interface → worker → gates → Storage → Leitor (mock)",
@@ -329,8 +368,7 @@ function nivel3(executar: boolean): { itens: Item[]; executado: boolean; mockOk:
   }
   const alvos = ["src/v2/pipeline.test.ts", "src/v2/integracao-estrutural.test.ts", "src/v2/lab/lab.test.ts"]
     .filter((a) => existsSync(path.join(DIR_WORKER, a)));
-  const r = rodarVitest(alvos);
-  const c = contarTestes(r.saida);
+  const c = recorte(suiteRaiz, ["v2/pipeline.test.ts", "v2/integracao-estrutural.test.ts", "v2/lab/lab.test.ts"]);
   return {
     executado: true,
     mockOk,
@@ -338,7 +376,7 @@ function nivel3(executar: boolean): { itens: Item[]; executado: boolean; mockOk:
       ...itensMock,
       {
         item: "ciclo ponta a ponta com provedor determinístico (ProvedorMock, zero cota)",
-        ok: r.ok && c.falharam === 0,
+        ok: c.falharam === 0 && c.passaram > 0,
         evidencia: `${c.passaram} passaram, ${c.falharam} falharam (${alvos.join(", ")})`,
       },
       {
@@ -359,25 +397,204 @@ function nivel3(executar: boolean): { itens: Item[]; executado: boolean; mockOk:
 // Regressão
 // ---------------------------------------------------------------------------
 
-function regressao(): { itens: Item[]; ok: boolean } {
-  const itens: Item[] = [];
-  const r = rodarVitest([]);
-  const c = contarTestes(r.saida);
-  itens.push({
-    item: "suíte completa do worker",
-    ok: r.ok && c.falharam === 0,
-    evidencia: `${c.passaram} passaram, ${c.falharam} falharam, ${c.pulados} pulados`,
-  });
+/** Roda um comando e devolve saída; usado por typecheck, build e lint. */
+function rodarComando(cwd: string, exe: string, args: string[]): { ok: boolean; saida: string } {
   try {
-    execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "typecheck"], {
-      cwd: DIR_WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], shell: true,
+    const saida = execFileSync(process.platform === "win32" ? `${exe}.cmd` : exe, args, {
+      cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 32 * 1024 * 1024, shell: true,
     });
-    itens.push({ item: "typecheck (worker)", ok: true, evidencia: "tsc --noEmit sem erros" });
+    return { ok: true, saida };
   } catch (e) {
-    const err = e as { stdout?: string };
-    itens.push({ item: "typecheck (worker)", ok: false, evidencia: (err.stdout ?? "").slice(-500) });
+    const err = e as { stdout?: string; stderr?: string };
+    return { ok: false, saida: `${err.stdout ?? ""}\n${err.stderr ?? ""}` };
   }
-  return { itens, ok: itens.every((i) => i.ok !== false) };
+}
+
+/**
+ * REGRESSAO_LOCAL só é aprovada com a Definition of Done local INTEIRA. Antes,
+ * ela olhava a suíte do worker e o typecheck do worker — e dizia "aprovada" com
+ * build quebrado, lint vermelho ou a interface sem rodar. Isso é pior que não
+ * medir: dá nome de garantia a uma amostra.
+ *
+ * A suíte da raiz vem pronta (execução única compartilhada com a DoD); a do
+ * worker roda à parte de propósito, porque provar independência de diretório
+ * corrente exige rodar dos DOIS lugares.
+ */
+function regressao(suiteRaiz: ExecucaoJson): { itens: Item[]; ok: boolean; avisos: string[] } {
+  const itens: Item[] = [];
+  const avisos: string[] = [];
+
+  itens.push({
+    item: "suíte completa a partir da RAIZ (inclui interface)",
+    ok: suiteRaiz.ok,
+    evidencia: suiteRaiz.erro
+      ? suiteRaiz.erro
+      : `${suiteRaiz.passaram} passaram, ${suiteRaiz.falharam} falharam, ${suiteRaiz.pulados} pulados (${suiteRaiz.total} testes)`,
+  });
+
+  const suiteWorker = rodarVitestJson(DIR_WORKER, [], ".prontidao/suite-worker.json");
+  itens.push({
+    item: "suíte completa a partir de `worker/` (independência de cwd)",
+    ok: suiteWorker.ok,
+    evidencia: suiteWorker.erro
+      ? suiteWorker.erro
+      : `${suiteWorker.passaram} passaram, ${suiteWorker.falharam} falharam, ${suiteWorker.pulados} pulados`,
+  });
+
+  const tcRaiz = rodarComando(RAIZ, "npx", ["tsc", "-b", "--force"]);
+  itens.push({
+    item: "typecheck (raiz)",
+    ok: tcRaiz.ok,
+    evidencia: tcRaiz.ok ? "tsc -b sem erros" : tcRaiz.saida.slice(-500),
+  });
+
+  const tcWorker = rodarComando(DIR_WORKER, "npm", ["run", "typecheck"]);
+  itens.push({
+    item: "typecheck (worker)",
+    ok: tcWorker.ok,
+    evidencia: tcWorker.ok ? "tsc --noEmit sem erros" : tcWorker.saida.slice(-500),
+  });
+
+  const build = rodarComando(RAIZ, "npm", ["run", "build"]);
+  const avisoBundle = /chunks are larger than/i.test(build.saida);
+  itens.push({
+    item: "build de produção",
+    ok: build.ok,
+    evidencia: build.ok ? "tsc -b && vite build concluído" : build.saida.slice(-500),
+  });
+  if (avisoBundle) {
+    // Aviso de tamanho de bundle é dívida de performance, não defeito editorial.
+    // Aparece separado: nem vira bloqueio, nem some do relatório.
+    avisos.push("build: bundle acima de 500 kB (aviso de performance do vite, não bloqueia)");
+  }
+
+  const lint = rodarComando(RAIZ, "npm", ["run", "lint"]);
+  const mErros = /(\d+) errors?/.exec(lint.saida);
+  const mAvisos = /(\d+) warnings?/.exec(lint.saida);
+  const nErros = Number(mErros?.[1] ?? (lint.ok ? 0 : 1));
+  const nAvisos = Number(mAvisos?.[1] ?? 0);
+  itens.push({
+    item: "lint (zero erros)",
+    ok: nErros === 0,
+    evidencia: `${nErros} erro(s), ${nAvisos} aviso(s)`,
+  });
+  if (nAvisos > 0) avisos.push(`lint: ${nAvisos} aviso(s) — reportados, não escondidos`);
+
+  const sql = recorte(suiteRaiz, [
+    "v2/historico.test.ts",
+    "v2/autorizacao-politica.test.ts",
+    "reliability-sql.test.ts",
+    "owner-scope.test.ts",
+    "v2/release-allowlist.test.ts",
+  ]);
+  itens.push({
+    item: "SQL/RLS local (política espelhada e contrato sobre o texto do SQL)",
+    ok: sql.falharam === 0 && sql.passaram > 0,
+    evidencia: `${sql.passaram} passaram, ${sql.falharam} falharam`,
+  });
+
+  const mock = recorte(suiteRaiz, ["v2/integracao-mock.test.ts", "v2/pipeline.test.ts", "v2/integracao-estrutural.test.ts"]);
+  itens.push({
+    item: "ciclo determinístico com ProvedorMock",
+    ok: mock.falharam === 0 && mock.passaram > 0,
+    evidencia: `${mock.passaram} passaram, ${mock.falharam} falharam`,
+  });
+
+  const ui = recorte(suiteRaiz, ["src/lib/", "src/pages/", "src/components/"]);
+  itens.push({
+    item: "testes da interface",
+    ok: ui.falharam === 0 && ui.passaram > 0,
+    evidencia: `${ui.passaram} passaram, ${ui.falharam} falharam`,
+  });
+
+  return { itens, ok: itens.every((i) => i.ok !== false), avisos };
+}
+
+// ---------------------------------------------------------------------------
+// Evidência externa — o que a máquina local não pode provar
+// ---------------------------------------------------------------------------
+
+/** Hash estável de um conjunto de arquivos, para carimbar a evidência. */
+function hashDe(arquivos: string[]): string {
+  const h = createHash("sha256");
+  for (const a of arquivos.sort()) {
+    h.update(a);
+    try {
+      h.update(readFileSync(a));
+    } catch {
+      h.update("<ausente>");
+    }
+  }
+  return h.digest("hex").slice(0, 16);
+}
+
+function listarArquivos(dir: string, filtro: RegExp): string[] {
+  if (!existsSync(dir)) return [];
+  const saida: string[] = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) saida.push(...listarArquivos(p, filtro));
+    else if (filtro.test(e.name)) saida.push(p);
+  }
+  return saida;
+}
+
+function dependenciasAtuais(): DependenciasEvidencia {
+  const commit = rodarComando(RAIZ, "git", ["rev-parse", "HEAD"]).saida.trim().slice(0, 40) || "desconhecido";
+  const migracoes = listarArquivos(path.join(RAIZ, "supabase"), /\.sql$/);
+  return {
+    commit,
+    migrations_versao: migracoes.map((m) => path.basename(m)).sort().join(","),
+    schema_hash: hashDe(migracoes),
+    contratos_hash: hashDe(listarArquivos(path.join(DIR_WORKER, "skills-v2"), /contrato\.json$/)),
+    worker_hash: hashDe(listarArquivos(path.join(DIR_WORKER, "src"), /\.ts$/).filter((f) => !/\.test\.ts$/.test(f))),
+    interface_hash: hashDe(listarArquivos(path.join(RAIZ, "src"), /\.tsx?$/).filter((f) => !/\.test\.tsx?$/.test(f))),
+  };
+}
+
+const TIPOS_EXTERNOS: { tipo: TipoEvidencia; rotulo: string }[] = [
+  { tipo: "migracoes_remotas", rotulo: "migrações aplicadas e verificadas no banco real" },
+  { tipo: "integracao_real", rotulo: "fluxo real interface → worker → Storage com download conferido" },
+  { tipo: "ui_autenticada", rotulo: "interface autenticada: abertura e download dos documentos V2" },
+  { tipo: "provedor_real", rotulo: "smoke do provedor real (sem escrita literária)" },
+];
+
+/**
+ * Cada verificação externa é um documento versionado no repositório, vinculado
+ * ao commit e aos hashes do que estava valendo. Ausente ou caduca = NÃO
+ * COMPROVADA — que não é zero, não é sucesso e não certifica nada.
+ */
+function externas(): { itens: Item[]; aprovadas: Record<TipoEvidencia, boolean> } {
+  const dep = dependenciasAtuais();
+  const dir = path.join(RAIZ, "evidencias-externas");
+  const itens: Item[] = [];
+  const aprovadas = {} as Record<TipoEvidencia, boolean>;
+  for (const { tipo, rotulo } of TIPOS_EXTERNOS) {
+    const arquivo = path.join(dir, `${tipo}.json`);
+    if (!existsSync(arquivo)) {
+      aprovadas[tipo] = false;
+      itens.push({ item: rotulo, ok: null, evidencia: `sem evidência em evidencias-externas/${tipo}.json` });
+      continue;
+    }
+    let doc: unknown;
+    try {
+      doc = JSON.parse(readFileSync(arquivo, "utf8"));
+    } catch (e) {
+      aprovadas[tipo] = false;
+      itens.push({ item: rotulo, ok: false, evidencia: `evidência ilegível: ${e instanceof Error ? e.message : String(e)}` });
+      continue;
+    }
+    const v = validarEvidencia(doc, { tipo, ambiente: "producao", dependencias: dep });
+    aprovadas[tipo] = v.valida;
+    itens.push({
+      item: rotulo,
+      // Evidência presente e INVÁLIDA é bloqueio (alguém afirmou algo que não
+      // se sustenta); evidência ausente é apenas ausência de prova.
+      ok: v.valida ? true : false,
+      evidencia: v.valida ? `evidência válida para o commit ${dep.commit.slice(0, 7)}` : v.motivos.join(" · "),
+    });
+  }
+  return { itens, aprovadas };
 }
 
 // ---------------------------------------------------------------------------
@@ -388,18 +605,22 @@ const t0 = Date.now();
 const comCiclo = process.argv.includes("--ciclo");
 
 console.log("== PRONTIDÃO DA ENGINE V2 ==\n");
+console.log("Suíte completa (raiz) — base da regressão e da coleta da DoD…");
+const suiteRaiz = rodarVitestJson(RAIZ, [], ".prontidao/suite-raiz.json");
 console.log("Nível 1 — fiação e mutação…");
-const n1 = nivel1();
+const n1 = nivel1(suiteRaiz);
 console.log("Nível 2 — acurácia…");
 const n2 = nivel2();
 console.log(`Nível 3 — ciclo real${comCiclo ? "…" : " (pulado)"}`);
-const n3 = nivel3(comCiclo);
-console.log("Regressão…\n");
-const reg = regressao();
+const n3 = nivel3(comCiclo, suiteRaiz);
+console.log("Regressão local completa…");
+const reg = regressao(suiteRaiz);
+console.log("Evidências externas…\n");
+const ext = externas();
 
 const bloqueios: string[] = [];
 const naoComprovados: string[] = [];
-for (const i of [...n1.itens, ...n2.itens, ...n3.itens, ...reg.itens]) {
+for (const i of [...n1.itens, ...n2.itens, ...n3.itens, ...reg.itens, ...ext.itens]) {
   if (i.ok === false) bloqueios.push(`${i.item}: ${i.evidencia}`);
   if (i.ok === null) naoComprovados.push(`${i.item}: ${i.evidencia}`);
 }
@@ -408,31 +629,49 @@ for (const i of [...n1.itens, ...n2.itens, ...n3.itens, ...reg.itens]) {
 // POR EXECUÇÃO: ID encontrado, teste executado e passando. Arquivo presente não
 // aprova mais nada — era exatamente por ali que uma garantia sumia sem alarme.
 const dodOk = n1.dod.ok;
-const implementacao: Estado = n1.ok && dodOk ? "IMPLEMENTACAO_APROVADA" : "IMPLEMENTACAO_REPROVADA";
-const regressaoEstado: Estado = reg.ok ? "REGRESSAO_APROVADA" : "REGRESSAO_REPROVADA";
-const acuracia: Estado = n2.calibrada ? "ACURACIA_CALIBRADA" : "ACURACIA_AGUARDANDO_ROTULAGEM_HUMANA";
-// Certificado exige TUDO: implementação, regressão e calibração humana.
-const releaseOk = n1.ok && dodOk && reg.ok && n2.calibrada;
-const release = releaseOk ? "RELEASE_CERTIFICADO" : "RELEASE_BLOQUEADO";
-const motivoRelease = releaseOk
-  ? ""
-  : !n2.calibrada
-    ? "CALIBRACAO_HUMANA"
-    : !n1.ok
-      ? "IMPLEMENTACAO"
-      : "REGRESSAO";
 
+// LOCAL e PRODUÇÃO são coisas diferentes e ganham nomes diferentes. O nome
+// antigo (RELEASE_CERTIFICADO para saúde local) prometia produção certificada
+// com prova que nunca saiu desta máquina.
+const implementacao: Estado = n1.ok && dodOk ? "IMPLEMENTACAO_LOCAL_APROVADA" : "IMPLEMENTACAO_LOCAL_REPROVADA";
+const regressaoEstado: Estado = reg.ok ? "REGRESSAO_LOCAL_APROVADA" : "REGRESSAO_LOCAL_REPROVADA";
+const acuracia: Estado = n2.calibrada ? "ACURACIA_CALIBRADA" : "ACURACIA_AGUARDANDO_ROTULAGEM";
 const integracaoMock: Estado = n3.mockOk ? "INTEGRACAO_MOCK_APROVADA" : "INTEGRACAO_MOCK_REPROVADA";
+
+const migracoes: Estado = ext.aprovadas.migracoes_remotas ? "MIGRACOES_REMOTAS_COMPROVADAS" : "MIGRACOES_REMOTAS_NAO_COMPROVADAS";
+const integracaoReal: Estado = ext.aprovadas.integracao_real ? "INTEGRACAO_REAL_APROVADA" : "INTEGRACAO_REAL_NAO_COMPROVADA";
+const uiAutenticada: Estado = ext.aprovadas.ui_autenticada ? "UI_AUTENTICADA_APROVADA" : "UI_AUTENTICADA_NAO_COMPROVADA";
+const provedorReal: Estado = ext.aprovadas.provedor_real ? "PROVEDOR_REAL_APROVADO" : "PROVEDOR_REAL_NAO_COMPROVADO";
+
+// TODOS os bloqueios de produção de uma vez. Reportar só o primeiro fazia o
+// autor consertar um item e descobrir o seguinte na rodada seguinte.
+const bloqueiosProducao: string[] = [];
+if (!(n1.ok && dodOk)) bloqueiosProducao.push("IMPLEMENTACAO_LOCAL");
+if (!reg.ok) bloqueiosProducao.push("REGRESSAO_LOCAL");
+if (!n3.mockOk) bloqueiosProducao.push("INTEGRACAO_MOCK");
+if (!n2.calibrada) bloqueiosProducao.push("CALIBRACAO_HUMANA");
+if (!ext.aprovadas.migracoes_remotas) bloqueiosProducao.push("MIGRACOES_REMOTAS");
+if (!ext.aprovadas.integracao_real) bloqueiosProducao.push("INTEGRACAO_REAL");
+if (!ext.aprovadas.ui_autenticada) bloqueiosProducao.push("DOWNLOAD_AUTENTICADO");
+if (!ext.aprovadas.provedor_real) bloqueiosProducao.push("PROVEDOR_REAL");
+
+const releaseProducao = bloqueiosProducao.length === 0 ? "RELEASE_PRODUCAO_CERTIFICADO" : "RELEASE_PRODUCAO_BLOQUEADO";
 
 const relatorio: Relatorio = {
   gerado_em: new Date().toISOString(),
   duracao_ms: Date.now() - t0,
   estados: {
-    implementacao,
-    regressao: regressaoEstado,
+    implementacao_local: implementacao,
+    regressao_local: regressaoEstado,
     integracao_mock: integracaoMock,
     acuracia,
-    release: motivoRelease ? `${release}: ${motivoRelease}` : release,
+    migracoes_remotas: migracoes,
+    integracao_real: integracaoReal,
+    ui_autenticada: uiAutenticada,
+    provedor_real: provedorReal,
+    release_producao: bloqueiosProducao.length
+      ? `${releaseProducao}: ${bloqueiosProducao.join(", ")}`
+      : releaseProducao,
     // Canário NOVO exige decisão do autor: a engine não gera canário sozinha, e
     // sem canário novo não há evidência nova para certificar.
     canarios_novos: "BLOQUEADOS_AGUARDANDO_AUTOR",
@@ -443,6 +682,10 @@ const relatorio: Relatorio = {
   nivel1: { comando: n1.comando, itens: n1.itens, dod: n1.dod },
   nivel2: { itens: n2.itens },
   nivel3: { executado: n3.executado, itens: n3.itens },
+  regressao: { itens: reg.itens },
+  externas: { itens: ext.itens },
+  avisos: reg.avisos,
+  bloqueios_producao: bloqueiosProducao,
   bloqueios,
   nao_comprovados: naoComprovados,
 };
@@ -456,10 +699,16 @@ const secao = (titulo: string, itens: Item[]) => {
 secao("NÍVEL 1 — fiação e mutação", n1.itens);
 secao("NÍVEL 2 — acurácia", n2.itens);
 secao("NÍVEL 3 — ciclo real", n3.itens);
-secao("REGRESSÃO", reg.itens);
+secao("REGRESSÃO LOCAL (DoD completa)", reg.itens);
+secao("VERIFICAÇÃO EXTERNA (fora do alcance desta máquina)", ext.itens);
+
+if (reg.avisos.length) {
+  console.log("\n--- AVISOS (não bloqueiam, não somem) ---");
+  for (const a of reg.avisos) console.log(`  [AVISO] ${a}`);
+}
 
 console.log("\n=== ESTADOS FORMAIS ===");
-for (const [k, v] of Object.entries(relatorio.estados)) console.log(`  ${k.padEnd(16)} ${v}`);
+for (const [k, v] of Object.entries(relatorio.estados)) console.log(`  ${k.padEnd(19)} ${v}`);
 console.log(`\nBloqueios: ${bloqueios.length} · Não comprovados: ${naoComprovados.length}`);
 console.log(`Duração: ${(relatorio.duracao_ms / 1000).toFixed(1)}s`);
 

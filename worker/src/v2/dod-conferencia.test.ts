@@ -10,8 +10,8 @@ import { conferirDod, idsDeclarados, type ResultadoTesteDod } from "./dod-confer
 import { INVENTARIO_DOD, type GarantiaDoD } from "./inventario-dod.js";
 
 const INV: GarantiaDoD[] = [
-  { fatia: "X", id: "X-01", garantia: "a coisa acontece", testes: ["src/v2/x.test.ts"] },
-  { fatia: "X", id: "X-02", garantia: "a outra coisa acontece", testes: ["src/v2/x.test.ts"] },
+  { fatia: "X", escopo: "local", id: "X-01", garantia: "a coisa acontece", testes: ["src/v2/x.test.ts"] },
+  { fatia: "X", escopo: "local", id: "X-02", garantia: "a outra coisa acontece", testes: ["src/v2/x.test.ts"] },
 ];
 
 const teste = (nome: string, estado: ResultadoTesteDod["estado"] = "passou"): ResultadoTesteDod => ({
@@ -131,7 +131,10 @@ describe("caso negativo: o teste falhou", () => {
 
 describe("caso negativo: inventário incoerente", () => {
   it("ID DUPLICADO no inventário reprova", () => {
-    const dup: GarantiaDoD[] = [...INV, { fatia: "X", id: "X-01", garantia: "repetida", testes: ["src/v2/x.test.ts"] }];
+    const dup: GarantiaDoD[] = [
+      ...INV,
+      { fatia: "X", escopo: "local", id: "X-01", garantia: "repetida", testes: ["src/v2/x.test.ts"] },
+    ];
     const c = conferirDod(dup, TODOS_OK);
     expect(c.ok).toBe(false);
     expect(c.duplicadosInventario).toEqual(["X-01"]);
@@ -144,13 +147,90 @@ describe("caso negativo: inventário incoerente", () => {
     expect(c.orfaos).toEqual(["X-99"]);
     expect(c.problemas.join(" ")).toContain("ausente do inventário");
   });
+
+  it("ID órfão em ARQUIVO QUE O INVENTÁRIO NÃO CITA também é pego", () => {
+    // O buraco que a coleta restrita deixava: rodar só os arquivos do inventário
+    // nunca enxergaria um `[DOD:]` esquecido num arquivo novo. Por isso a coleta
+    // varre a suíte inteira, e é essa varredura que este caso representa.
+    const c = conferirDod(INV, [
+      ...TODOS_OK,
+      { arquivo: "src/v2/suite-nova-fora-do-inventario.test.ts", nome: "[DOD:Z-01] garantia solta", estado: "passou" },
+    ]);
+    expect(c.ok).toBe(false);
+    expect(c.orfaos).toEqual(["Z-01"]);
+  });
+
+  it("arquivo citado pelo inventário e AUSENTE do disco reprova", () => {
+    const c = conferirDod(INV, TODOS_OK, { arquivosAusentes: ["src/v2/sumiu.test.ts"] });
+    expect(c.ok).toBe(false);
+    expect(c.arquivosAusentes).toEqual(["src/v2/sumiu.test.ts"]);
+    expect(c.problemas.join(" ")).toContain("não existe");
+  });
+});
+
+describe("caso negativo: a própria coleta falhou", () => {
+  it("erro de execução ou JSON incompleto REPROVA", () => {
+    const c = conferirDod(INV, TODOS_OK, { erro: "o vitest não produziu o relatório JSON" });
+    expect(c.ok).toBe(false);
+    expect(c.falhasDeColeta.join(" ")).toContain("coleta falhou");
+  });
+
+  it("ZERO testes coletados nunca é sucesso", () => {
+    // Suíte que não rodou não tem garantia reprovada nem aprovada — e era assim
+    // que um comando quebrado poderia sair verde por vacuidade.
+    const c = conferirDod([], []);
+    expect(c.ok).toBe(false);
+    expect(c.falhasDeColeta.join(" ")).toContain("não rodou");
+  });
+
+  it("execução que reporta zero testes reprova mesmo com resultados no array", () => {
+    const c = conferirDod(INV, TODOS_OK, { totalTestesColetados: 0 });
+    expect(c.ok).toBe(false);
+    expect(c.falhasDeColeta.join(" ")).toContain("zero testes");
+  });
+});
+
+describe("garantia de escopo externo", () => {
+  const comExterna: GarantiaDoD[] = [
+    ...INV,
+    { fatia: "X", escopo: "externo", id: "X-90", garantia: "sobe ao serviço real", testes: [] },
+  ];
+
+  it("não é aprovada pela suíte local e não conta como local faltando", () => {
+    const c = conferirDod(comExterna, TODOS_OK);
+    expect(c.ok).toBe(true); // as locais estão todas provadas
+    expect(c.externas).toEqual(["X-90"]);
+    expect(c.locais).toBe(2);
+    expect(c.aprovadas).toBe(2);
+    expect(c.semTeste).toEqual([]);
+  });
+
+  it("teste local que tenta aprovar garantia externa é denunciado", () => {
+    // Mock não é integração real: se alguém marcar `[DOD:X-90]` num teste local,
+    // o relatório precisa dizer que aquilo não prova o que promete.
+    const c = conferirDod(comExterna, [...TODOS_OK, teste("[DOD:X-90] finge que subiu ao Storage")]);
+    expect(c.problemas.join(" ")).toContain("não pode ser aprovada por teste local");
+  });
 });
 
 describe("o inventário real", () => {
-  it("tem 46 garantias, todas com ID único", () => {
-    expect(INVENTARIO_DOD).toHaveLength(46);
+  it("tem 47 garantias, todas com ID único", () => {
+    expect(INVENTARIO_DOD).toHaveLength(47);
     const ids = INVENTARIO_DOD.map((g) => g.id);
-    expect(new Set(ids).size).toBe(46);
+    expect(new Set(ids).size).toBe(47);
+  });
+
+  it("garantia externa não declara teste local (mock não prova integração real)", () => {
+    for (const g of INVENTARIO_DOD.filter((x) => x.escopo === "externo")) {
+      expect(g.testes, `${g.id} não pode apontar teste local`).toEqual([]);
+    }
+    expect(INVENTARIO_DOD.some((g) => g.escopo === "externo")).toBe(true);
+  });
+
+  it("toda garantia local aponta ao menos um arquivo de teste", () => {
+    for (const g of INVENTARIO_DOD.filter((x) => x.escopo === "local")) {
+      expect(g.testes.length, `${g.id} sem arquivo de teste`).toBeGreaterThan(0);
+    }
   });
 
   it("todo ID segue o formato <fatia>-<n> e casa com a fatia declarada", () => {

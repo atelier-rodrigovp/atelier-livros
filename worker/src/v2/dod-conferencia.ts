@@ -9,6 +9,10 @@
 // título (`[DOD:<id>]`), e a conferência trabalha sobre o RESULTADO da execução:
 // o ID foi encontrado, rodou e passou — ou a implementação reprova.
 //
+// A coleta é GLOBAL (toda a suíte da raiz), não apenas os arquivos que o
+// inventário cita. Coletar só o que o inventário aponta seria circular: um
+// arquivo novo com `[DOD:X]` esquecido fora do inventário nunca apareceria.
+//
 // Esta camada é pura de propósito: recebe o inventário e os resultados já
 // coletados. É o que permite aos meta-testes provarem que ela REPROVA nos casos
 // negativos sem precisar mutilar o repositório.
@@ -31,9 +35,21 @@ export interface PendenciaDod {
   motivo: string;
 }
 
+/** Contexto da coleta. Falha de coleta REPROVA — nunca vira silêncio. */
+export interface ColetaDod {
+  /** Mensagem de erro se a execução/parse falhou. */
+  erro?: string;
+  /** Arquivos citados pelo inventário que não existem no disco. */
+  arquivosAusentes?: string[];
+  /** Total de testes que a execução reportou, para pegar coleta vazia. */
+  totalTestesColetados?: number;
+}
+
 export interface ConferenciaDod {
   ok: boolean;
   inventariadas: number;
+  /** Garantias de escopo local — as únicas que a execução local pode aprovar. */
+  locais: number;
   encontradas: number;
   executadas: number;
   aprovadas: number;
@@ -47,6 +63,12 @@ export interface ConferenciaDod {
   duplicadosInventario: string[];
   /** ID declarado por teste e ausente do inventário — também é denunciado. */
   orfaos: string[];
+  /** Arquivos que o inventário cita e não existem. */
+  arquivosAusentes: string[];
+  /** Garantias que só evidência externa pode aprovar (nunca a suíte local). */
+  externas: string[];
+  /** Falhas da própria coleta: execução quebrada, JSON incompleto, zero testes. */
+  falhasDeColeta: string[];
   /** Mensagens legíveis, na ordem em que devem ser lidas. */
   problemas: string[];
 }
@@ -59,8 +81,23 @@ export function idsDeclarados(nome: string): string[] {
   return [...nome.matchAll(/\[DOD:([A-Za-z0-9_-]+)\]/g)].map((m) => m[1]);
 }
 
-export function conferirDod(inventario: GarantiaDoD[], resultados: ResultadoTesteDod[]): ConferenciaDod {
+export function conferirDod(
+  inventario: GarantiaDoD[],
+  resultados: ResultadoTesteDod[],
+  coleta: ColetaDod = {}
+): ConferenciaDod {
   const problemas: string[] = [];
+  const falhasDeColeta: string[] = [];
+
+  // A coleta precisa se provar antes de julgar qualquer garantia. Execução que
+  // quebrou, JSON truncado ou zero testes NUNCA podem passar por "tudo certo":
+  // era assim que uma suíte que nem rodou sairia verde.
+  if (coleta.erro) falhasDeColeta.push(`coleta falhou: ${coleta.erro}`);
+  if (resultados.length === 0) falhasDeColeta.push("nenhum resultado de teste coletado — a suíte não rodou");
+  if (coleta.totalTestesColetados === 0) falhasDeColeta.push("a execução reportou zero testes");
+  const arquivosAusentes = coleta.arquivosAusentes ?? [];
+  for (const a of arquivosAusentes) falhasDeColeta.push(`arquivo de teste citado pelo inventário não existe: ${a}`);
+  problemas.push(...falhasDeColeta);
 
   // Duplicidade no inventário: dois IDs iguais tornam a contagem mentirosa.
   const vistos = new Set<string>();
@@ -85,11 +122,25 @@ export function conferirDod(inventario: GarantiaDoD[], resultados: ResultadoTest
   const semTeste: string[] = [];
   const naoExecutadas: PendenciaDod[] = [];
   const reprovadas: PendenciaDod[] = [];
+  const externas: string[] = [];
   let encontradas = 0;
   let executadas = 0;
   let aprovadas = 0;
+  let locais = 0;
 
   for (const g of inventario) {
+    // Garantia de escopo externo não é aprovável pela suíte local por definição.
+    // Ela vive no relatório como NÃO COMPROVADA e bloqueia produção — o que não
+    // se pode fazer é deixá-la aprovar junto com as locais.
+    if (g.escopo === "externo") {
+      externas.push(g.id);
+      if ((porId.get(g.id) ?? []).length > 0) {
+        problemas.push(`[${g.id}] garantia externa não pode ser aprovada por teste local`);
+      }
+      continue;
+    }
+    locais++;
+
     const testes = porId.get(g.id) ?? [];
     if (testes.length === 0) {
       semTeste.push(g.id);
@@ -124,18 +175,21 @@ export function conferirDod(inventario: GarantiaDoD[], resultados: ResultadoTest
   }
 
   // ID que os testes declaram e o inventário não conhece: ou a DoD está
-  // desatualizada, ou alguém errou o ID. Nos dois casos é defeito.
+  // desatualizada, ou alguém errou o ID. Nos dois casos é defeito. Só é possível
+  // detectar porque a coleta varre a suíte INTEIRA, não os arquivos do inventário.
   const orfaos = [...porId.keys()].filter((id) => !vistos.has(id)).sort();
   for (const id of orfaos) problemas.push(`ID declarado em teste e ausente do inventário: ${id}`);
 
   return {
     ok:
+      falhasDeColeta.length === 0 &&
       duplicadosInventario.length === 0 &&
       semTeste.length === 0 &&
       naoExecutadas.length === 0 &&
       reprovadas.length === 0 &&
       orfaos.length === 0,
     inventariadas: inventario.length,
+    locais,
     encontradas,
     executadas,
     aprovadas,
@@ -144,11 +198,18 @@ export function conferirDod(inventario: GarantiaDoD[], resultados: ResultadoTest
     reprovadas,
     duplicadosInventario: [...new Set(duplicadosInventario)],
     orfaos,
+    arquivosAusentes,
+    externas,
+    falhasDeColeta,
     problemas,
   };
 }
 
 /** Uma linha para o relatório do prontidão. */
 export function resumoConferencia(c: ConferenciaDod): string {
-  return `${c.aprovadas}/${c.inventariadas} garantias aprovadas (encontradas ${c.encontradas}, executadas ${c.executadas})`;
+  return (
+    `${c.aprovadas}/${c.locais} garantias locais aprovadas ` +
+    `(encontradas ${c.encontradas}, executadas ${c.executadas}` +
+    `${c.externas.length ? `; ${c.externas.length} externa(s) fora do alcance local` : ""})`
+  );
 }
