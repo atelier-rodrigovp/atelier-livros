@@ -327,3 +327,29 @@ export function tarefaConformidade(capitulo: number, ficha: SceneSpec, sinais: s
     `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
   ].join("\n");
 }
+
+/**
+ * Extrator de memória da PROSA APROVADA (fatia H). Roda DEPOIS da aprovação: o
+ * que ele registra é o que o livro passou a ter como verdade — inclusive o que a
+ * ficha não previa.
+ */
+export function tarefaExtratorMemoria(capitulo: number, ficha: SceneSpec): string {
+  return [
+    `O capítulo ${capitulo} foi APROVADO. Extraia o que ele estabeleceu para o livro.`,
+    `Você NÃO julga qualidade e NÃO escreve prosa: registra o que passou a ser verdade, com a citação que prova.`,
+    ``,
+    `Responda APENAS JSON: { "entradas": [{"tipo": string, "enunciado": string, "trecho": string, "quem": string?, "confianca": "alta"|"media"|"baixa", "origem": "ficha"|"prosa"}], "divergencias": [{"campo": string, "ficha": string, "prosa": string, "trecho": string}] }.`,
+    ``,
+    `"tipo" ∈ fato, revelacao, pista, objeto, promessa, pergunta_aberta, mudanca_estado, mudanca_relacao, condicao_fisica, localizacao, conhecimento.`,
+    `- "enunciado": ≤25 palavras, seco, verificável. Não é resumo do capítulo: é UM fato por entrada.`,
+    `- "trecho": CITAÇÃO LITERAL do capítulo (≥12 caracteres). Entrada sem trecho localizável é descartada.`,
+    `- "origem": "ficha" se o item já estava previsto na FICHA DA CENA; "prosa" se surgiu só na escrita.`,
+    `- "quem": o personagem, quando a entrada for conhecimento, condição física, localização ou relação.`,
+    ``,
+    `ATENÇÃO ESPECIAL ao que a ficha NÃO previa: pista plantada de improviso, objeto que ganhou peso, promessa que o texto abriu, pergunta que ficou no ar. É exatamente isso que ninguém mais registra — e que o fechamento do livro vai cobrar.`,
+    ``,
+    `"divergencias": onde a PÁGINA contradiz a ficha (o objetivo mudou, a virada foi outra, o gancho é de outro tipo). Cite o trecho. Não "conserte" a ficha: reporte.`,
+    `A ficha planejada era: ${JSON.stringify({ objetivo: ficha.objetivo, virada: ficha.virada, gancho: ficha.gancho, informacao_nova: ficha.informacao_nova })}.`,
+    `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
+  ].join("\n");
+}

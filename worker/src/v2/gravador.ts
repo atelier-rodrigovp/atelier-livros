@@ -3,6 +3,7 @@
 // registra runs e mantém o estado canônico com lock otimista (retry com releitura).
 import { hashArquivo } from "./hash.js";
 import { fundirNoLedger } from "./ledger.js";
+import type { ConflitoFichaProsa, EntradaMemoria } from "./memoria-prosa.js";
 import { ErroConcorrencia, type PersistenciaV2 } from "./persistencia.js";
 import {
   ENGINE_V2_VERSION,
@@ -377,6 +378,39 @@ export class Gravador {
       if (aberta >= 0) lista[aberta] = tentativa;
       else lista.push(tentativa);
       doc.correcoes[chave] = lista;
+    });
+  }
+
+  /**
+   * Memória derivada da PROSA APROVADA (fatia H). Append por capítulo: reprocessar
+   * um capítulo substitui as entradas DELE, nunca as dos outros.
+   */
+  async registrarMemoriaDaProsa(
+    capitulo: number,
+    entradas: EntradaMemoria[],
+    conflitos: ConflitoFichaProsa[]
+  ): Promise<void> {
+    await this.mutarEstado((doc) => {
+      const outros = (doc.memoria_prosa ?? []).filter((m) => m.capitulo !== capitulo);
+      doc.memoria_prosa = [...outros, ...entradas].sort((a, b) => a.capitulo - b.capitulo);
+      if (conflitos.length) {
+        const anteriores = (doc.conflitos_ficha_prosa ?? []).filter((c) => c.capitulo !== capitulo);
+        doc.conflitos_ficha_prosa = [...anteriores, ...conflitos];
+      }
+    });
+  }
+
+  /** O extrator falhou: o capítulo segue aprovado, mas a memória dele está incompleta. */
+  async registrarMemoriaIncompleta(capitulo: number): Promise<void> {
+    await this.mutarEstado((doc) => {
+      const outros = (doc.memoria_prosa ?? []).filter((m) => m.capitulo !== capitulo);
+      doc.memoria_prosa = outros;
+      doc.bloqueios.push({
+        codigo: "MEMORIA_PROSA_INCOMPLETA",
+        alvo: `capitulo:${capitulo}`,
+        detalhe: "o extrator de memória falhou; o fechamento não pode cobrar pistas deste capítulo",
+        desde: this.agora(),
+      });
     });
   }
 

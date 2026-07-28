@@ -15,7 +15,8 @@ export type Papel =
   | "revisor_literario"     // voz, transparência, emoção, propulsão, aderência
   | "auditor_factual"       // nomes, datas, geografia, continuidade, conhecimento
   | "editor_estrutural"     // cortes, fusões, ordem, macro-ritmo (propõe; worker aplica)
-  | "conformidade_ficha";   // a prosa cumpriu a ficha? (fatia G) — evidência localizada
+  | "conformidade_ficha"     // a prosa cumpriu a ficha? (fatia G) — evidência localizada
+  | "extrator_memoria";      // o que a PROSA APROVADA estabeleceu (fatia H)
 // O "gravador de estado" NÃO é um papel: é código determinístico (gravador.ts).
 
 export type ClasseCapacidade = "raciocinio" | "fatos" | "prosa" | "julgamento";
@@ -30,6 +31,7 @@ export const CLASSE_POR_PAPEL: Record<Papel, ClasseCapacidade> = {
   auditor_factual: "fatos",
   editor_estrutural: "raciocinio",
   conformidade_ficha: "julgamento",
+  extrator_memoria: "fatos",
 };
 
 export interface MapaModelos {
@@ -398,6 +400,8 @@ export interface TentativaCorrecao {
   criado_em: string;
 }
 
+import type { ConflitoFichaProsa, EntradaMemoria } from "./memoria-prosa.js";
+
 export interface EstadoCanonicoDoc {
   schema: "engine-state/v1";
   // Ordem lógica: escrita → revisao_final → consolidacao → avaliacao → concluido.
@@ -469,6 +473,14 @@ export interface EstadoCanonicoDoc {
   correcoes?: Record<string, TentativaCorrecao[]>;
   /** Capítulos em que a escada parou e aguardam decisão do autor. */
   circuit_breaker?: { capitulo: number; motivo: string; tentativas: number; em: string }[];
+  /**
+   * Memória derivada da PROSA APROVADA (fatia H). O ledger de revelações vem da
+   * FICHA (o plano); isto vem da página. Uma pista plantada só na escrita existe
+   * aqui — e é aqui que o fechamento a cobra.
+   */
+  memoria_prosa?: EntradaMemoria[];
+  /** Divergências ficha × prosa: evento explícito, nunca sobrescrita silenciosa. */
+  conflitos_ficha_prosa?: ConflitoFichaProsa[];
   // status_anterior: guarda o status do capítulo antes do bloqueio, para restauração fiel
   bloqueios: { codigo: string; alvo: string; detalhe: string; desde: string; status_anterior?: CapituloStatusV2 }[];
   migracao?: {

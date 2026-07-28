@@ -21,6 +21,7 @@ import {
   type ParecerConformidade,
 } from "./conformidade.js";
 import { entradasDaFicha, gateRevelacaoRepetida, renderizarLedger } from "./ledger.js";
+import { derivarMemoriaDaProsa, validarExtracaoProsa, type ExtracaoProsa } from "./memoria-prosa.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
@@ -33,6 +34,7 @@ import {
   tarefaContextualizador,
   tarefaEscritor,
   tarefaConformidade,
+  tarefaExtratorMemoria,
   tarefaEscritorCorrecao,
   tarefaRevisor,
   type ModoCorrecao,
@@ -735,6 +737,43 @@ export async function escreverCapitulo(
         caminho,
         entradasDaFicha(capitulo, ficha)
       );
+
+      // MEMÓRIA DERIVADA DA PROSA (fatia H). Roda DEPOIS da aprovação, sobre o
+      // texto que ficou. O ledger de revelações vem da FICHA — o plano; isto vem
+      // da PÁGINA. Uma pista plantada de improviso só existe para a engine aqui.
+      // Falha do extrator NUNCA desfaz a aprovação: o capítulo está aprovado e
+      // hash-bound; a memória é registrada como incompleta e o fechamento avisa.
+      try {
+        const compMem = compilar("extrator_memoria", alvoCap, { ficha, fatos: [secaoTexto] });
+        if (compMem.ok) {
+          const rMem = await executarPapel<ExtracaoProsa>({
+            ...base,
+            papel: "extrator_memoria",
+            alvo: alvoCap,
+            pacote: compMem.pacote!,
+            tarefa: tarefaExtratorMemoria(capitulo, ficha),
+            parse: (t) => validarExtracaoProsa(extrairJson(t)),
+          });
+          runs.push(rMem.runId);
+          const derivada = derivarMemoriaDaProsa({
+            capitulo,
+            texto,
+            ficha,
+            extracao: rMem.valor,
+            em: new Date().toISOString(),
+          });
+          await deps.gravador.registrarMemoriaDaProsa(capitulo, derivada.entradas, derivada.conflitos);
+          for (const c of derivada.conflitos) {
+            problemas.push(`divergência ficha × prosa em "${c.campo}": ficha "${c.valorFicha}" vs página "${c.valorProsa}"`);
+          }
+        }
+      } catch (e) {
+        problemas.push(
+          `memória da prosa não extraída no capítulo ${capitulo} (${e instanceof Error ? e.message.slice(0, 120) : String(e)})`
+        );
+        await deps.gravador.registrarMemoriaIncompleta(capitulo);
+      }
+
       return { capitulo, status: verdictEfetivo, textHash, reviewId, gatesFalhos: [], problemas, runs };
     }
 

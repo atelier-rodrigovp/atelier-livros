@@ -7,6 +7,7 @@
 // no fechamento — e não entre os gates universais de capítulo.
 
 import { gatePromessaNaoPaga } from "./arco.js";
+import { pendenciasDeFechamento } from "./memoria-prosa.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ArcoFundacao, EstadoCanonico, ResultadoGate, SceneSpec } from "./tipos.js";
 
@@ -51,13 +52,42 @@ export async function fichasAprovadasDoLivro(entrada: {
  * (`naoAplicavel`), nunca uma aprovação silenciosa.
  */
 export async function avaliarFechamentoLivro(entrada: EntradaFechamento): Promise<ResultadoFechamento> {
-  if (!entrada.arco) {
-    return { passou: true, gates: [], naoAplicavel: "fundação sem grade de arco (v2): gates de fechamento não aplicáveis" };
-  }
-  if (entrada.arco.promessas.length === 0) {
-    return { passou: true, gates: [], naoAplicavel: "fundação sem promessas declaradas" };
-  }
   const fichas = await fichasAprovadasDoLivro(entrada);
-  const gates = [gatePromessaNaoPaga(entrada.arco.promessas, fichas)];
+  const memoria = entrada.estado.doc.memoria_prosa ?? [];
+
+  // CRUZAMENTO DAS TRÊS FONTES (fatia H). A fundação declara; as fichas marcam;
+  // a PROSA planta. Silêncio de uma nunca vale como conformidade das outras: uma
+  // pista aberta só na página continua exigindo payoff.
+  const cruzadas = pendenciasDeFechamento({
+    promessasFundacao: entrada.arco?.promessas ?? [],
+    promessasFichas: fichas.flatMap(({ capitulo, ficha }) =>
+      (ficha.promessas_tocadas ?? []).map((p) => ({ capitulo, id: p.id, acao: p.acao }))
+    ),
+    memoria,
+  });
+  const gateCruzado: ResultadoGate = {
+    gate: "promessa_nao_paga",
+    passou: cruzadas.length === 0,
+    evidencia: cruzadas.length
+      ? cruzadas
+          .map((p) => `[${p.fonte}] ${p.id} ("${p.enunciado}", capítulo ${p.plantada_em}): ${p.motivo}`)
+          .join(" · ")
+      : undefined,
+  };
+
+  if (!entrada.arco) {
+    // Sem grade de arco os gates de arco são no-op — mas a memória derivada da
+    // PROSA continua valendo: ela não depende da fundação v3.
+    if (cruzadas.length) return { passou: false, gates: [gateCruzado] };
+    return {
+      passou: true,
+      gates: [],
+      naoAplicavel: "fundação sem grade de arco (v2): gates de arco não aplicáveis; nenhuma pendência na memória da prosa",
+    };
+  }
+  if (entrada.arco.promessas.length === 0 && memoria.length === 0) {
+    return { passou: true, gates: [], naoAplicavel: "fundação sem promessas declaradas e sem memória derivada da prosa" };
+  }
+  const gates = [gatePromessaNaoPaga(entrada.arco.promessas, fichas), gateCruzado];
   return { passou: gates.every((g) => g.passou), gates };
 }

@@ -228,6 +228,10 @@ export class ProvedorMock implements ProvedorModelo {
  * conformidade enfileira a sua resposta e essa aqui nem roda.
  */
 function respostaAutomatica(c: ChamadaModelo): string | null {
+  // Extrator de memória: "nada além do que a ficha já previa" é a resposta
+  // honesta quando a suíte não está exercitando a extração. Quem testa a
+  // memória derivada da prosa enfileira a sua e esta nem roda.
+  if (c.papel === "extrator_memoria") return JSON.stringify({ entradas: [], divergencias: [] });
   if (c.papel !== "conformidade_ficha") return null;
   const prompt = `${c.prompt ?? ""}`;
   // Só a lista "Itens a verificar" — as REGRAS DURAS da tarefa também começam
