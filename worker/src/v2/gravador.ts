@@ -2,6 +2,7 @@
 // NÃO é um papel/agente: é código. Verifica artefatos no disco (verdade no disco),
 // registra runs e mantém o estado canônico com lock otimista (retry com releitura).
 import { hashArquivo } from "./hash.js";
+import { fundirNoLedger } from "./ledger.js";
 import { ErroConcorrencia, type PersistenciaV2 } from "./persistencia.js";
 import {
   ENGINE_V2_VERSION,
@@ -12,6 +13,7 @@ import {
   type EstadoCanonicoDoc,
   type Evidencia,
   type Parecer,
+  type RevelacaoLedger,
   type RunRegistro,
   type Verdict,
 } from "./tipos.js";
@@ -203,7 +205,13 @@ export class Gravador {
   async aprovarCapitulo(
     cap: number,
     review: { id: string; text_hash: string; verdict: Verdict; parecer: Parecer },
-    caminhoArquivo: string
+    caminhoArquivo: string,
+    /**
+     * Revelações da ficha aprovada (ledger.entradasDaFicha). Alimentam o ledger
+     * de revelações deterministicamente — sem chamada de modelo. Omitir mantém o
+     * ledger intacto (retrocompatível com chamadores anteriores).
+     */
+    revelacoes?: RevelacaoLedger[]
   ): Promise<void> {
     if (review.verdict !== "aprovado" && review.verdict !== "aprovado_com_excecao") {
       throw new ErroEngine({
@@ -251,6 +259,8 @@ export class Gravador {
       };
       // Aprovação com evidência supera bloqueios anteriores DESTE capítulo (retomada limpa).
       doc.bloqueios = doc.bloqueios.filter((b) => b.alvo !== `capitulo:${cap}`);
+      // Ledger de revelações: fusão idempotente (reaprovar substitui, nunca duplica).
+      if (revelacoes) doc.ledger_revelacoes = fundirNoLedger(doc.ledger_revelacoes ?? [], revelacoes);
     });
   }
 

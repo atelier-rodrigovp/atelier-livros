@@ -12,6 +12,7 @@ import { compilarPacote, type Instrucao, type SecaoContexto } from "./compilador
 import { rodarGatesCapitulo } from "./gates.js";
 import type { Gravador } from "./gravador.js";
 import { hashJsonCanonico } from "./hash.js";
+import { entradasDaFicha, gateRevelacaoRepetida, renderizarLedger } from "./ledger.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
@@ -160,6 +161,22 @@ function validarSaidaAuditor(obj: unknown): SaidaAuditor {
   return { contradicoes, conhecimento_indevido: conhecimento, pov_violado: { ha: pov.ha, detalhe: pov.detalhe } };
 }
 
+/**
+ * Uma linha por capítulo anterior: o mínimo para planejar sem reinventar o passado
+ * (fio/POV, quando, onde, o que mudou, como fechou). Sem prosa — é ficha, não texto.
+ */
+function resumirFicha(capitulo: number, f: SceneSpec): string {
+  const partes = [
+    `Cap ${capitulo} [${f.pov}]`,
+    f.tempo ? `${f.tempo}` : "",
+    f.local ? `${f.local}` : "",
+    f.virada ? `virada: ${f.virada}` : "",
+    f.mudanca_estado ? `mudança: ${f.mudanca_estado}` : "",
+    f.gancho?.tipo ? `gancho: ${f.gancho.tipo}` : "",
+  ].filter(Boolean);
+  return `- ${partes.join(" · ")}`;
+}
+
 /** Prosa do escritor: só valida presença — o conteúdo é julgado por gates/revisor. */
 function parseProsa(t: string): string {
   const limpo = t.trim();
@@ -296,6 +313,34 @@ export async function escreverCapitulo(
     estadoParaSpec.doc.capitulos[String(capitulo)]?.spec_versao ?? 0,
     await deps.persistencia.maiorVersaoSpec(deps.projectId, capitulo)
   );
+  // Ledger de revelações: o que o LEITOR já sabe. Entra no pacote de quem PLANEJA
+  // e de quem JULGA; o gate roda contra o ledger inteiro, mesmo que o pacote tenha
+  // degradado para janela.
+  const ledger = estadoParaSpec.doc.ledger_revelacoes ?? [];
+  const ledgerRender = renderizarLedger(ledger, opts?.fichaExistente);
+  const secLedger: SecaoContexto[] = [
+    {
+      titulo: "LEDGER DE REVELAÇÕES (o que o leitor JÁ SABE — não revele de novo)",
+      texto: ledgerRender.texto,
+      fonte: "engine_state.ledger_revelacoes",
+    },
+  ];
+
+  // Passado condensado: uma linha por capítulo anterior, das fichas persistidas
+  // (leitura em LOTE). Antes, quem planejava e quem contextualizava recebia ZERO
+  // capítulo anterior e inventava a continuidade — raiz do diagnóstico.
+  const fichasAnteriores = (await deps.persistencia.lerFichasMaisRecentes(deps.projectId))
+    .filter((f) => f.capitulo < capitulo)
+    .sort((a, b) => a.capitulo - b.capitulo);
+  const secPassado: SecaoContexto[] = fichasAnteriores.length
+    ? [{
+        titulo: "CAPÍTULOS ANTERIORES (fichas condensadas)",
+        texto: fichasAnteriores
+          .map((f) => resumirFicha(f.capitulo, f.ficha))
+          .join("\n"),
+        fonte: "engine_scene_specs",
+      }]
+    : [];
   let specVersao: number;
   let ficha: SceneSpec;
   if (opts?.fichaExistente) {
@@ -305,7 +350,9 @@ export async function escreverCapitulo(
     ficha = opts.fichaExistente;
   } else {
     specVersao = versaoConhecida + 1;
-    const comp = compilar("arquiteto_cena", `spec:${capitulo}`, { fatos: secoesPlanejamento });
+    const comp = compilar("arquiteto_cena", `spec:${capitulo}`, {
+      fatos: [...secoesPlanejamento, ...secLedger, ...secPassado],
+    });
     if (!comp.ok) return bloquearPorCompilacao(comp.bloqueios);
     const r = await executarPapel<SceneSpec>({
       ...base,
@@ -325,6 +372,17 @@ export async function escreverCapitulo(
         }
         const v = validarSpec(spec, deps.contrato.contrato);
         if (!v.ok) throw new Error(`ficha inválida: ${v.erros.join("; ")}`);
+        // Gate de repetição de revelação, contra o ledger INTEIRO (nunca a janela).
+        // A mensagem carrega a entrada anterior LITERAL: executarPapel a reinjeta
+        // no prompt do retry (papeis.ts), então o arquiteto não retenta cego mesmo
+        // quando a entrada ficou fora da janela do pacote — adendo §1 do autor.
+        const gRev = gateRevelacaoRepetida(capitulo, spec, ledger);
+        if (!gRev.passou) {
+          throw new Error(
+            `revelação já entregue ao leitor: ${gRev.evidencia}. ` +
+              `Escolha uma informação nova que ainda NÃO esteja no ledger, ou avance a que já existe (aprofunde/complique), sem reapresentá-la como novidade.`
+          );
+        }
         return spec;
       },
     });
@@ -346,7 +404,10 @@ export async function escreverCapitulo(
   // -------------------------------------------------------------------------
   // 2. CONTEXTO (contextualizador) — fatos e continuidade, nunca prosa
   // -------------------------------------------------------------------------
-  const compCtx = compilar("contextualizador", alvoCap, { ficha, fatos: secoesPlanejamento });
+  const compCtx = compilar("contextualizador", alvoCap, {
+    ficha,
+    fatos: [...secoesPlanejamento, ...secLedger, ...secPassado],
+  });
   if (!compCtx.ok) return bloquearPorCompilacao(compCtx.bloqueios);
   const rCtx = await executarPapel<SaidaContextualizador>({
     ...base,
@@ -491,7 +552,7 @@ export async function escreverCapitulo(
 
     const compRev = compilar("revisor_literario", alvoCap, {
       ficha,
-      fatos: [...secoesJulgamento, ...docsFactuais, ...fatos, secaoTexto],
+      fatos: [...secoesJulgamento, ...secLedger, ...docsFactuais, ...fatos, secaoTexto],
       repeticoesRecentes,
     });
     if (!compRev.ok) return bloquearPorCompilacao(compRev.bloqueios);
@@ -551,7 +612,8 @@ export async function escreverCapitulo(
       await deps.gravador.aprovarCapitulo(
         capitulo,
         { id: reviewId, text_hash: textHash, verdict: verdictEfetivo, parecer },
-        caminho
+        caminho,
+        entradasDaFicha(capitulo, ficha)
       );
       return { capitulo, status: verdictEfetivo, textHash, reviewId, gatesFalhos: [], problemas, runs };
     }

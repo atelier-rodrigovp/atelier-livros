@@ -18,6 +18,7 @@ import { compilarPacote, type SecaoContexto } from "./compilador.js";
 import { executarPapel } from "./papeis.js";
 import { tarefaCanarioVoz, tarefaEditorEstrutural, tarefaRevisorCanario } from "./tarefas.js";
 import { gerarFundacaoV2, materializarFundacao } from "./fundacao.js";
+import { reconstruirLedger } from "./ledger.js";
 import {
   briefingParaFundacao,
   decisoesAvulsas,
@@ -290,6 +291,20 @@ async function prepararProjetoV2(job: Job): Promise<{
   }
 
   const estado = await gravador.carregarEstado();
+
+  // Ledger de revelações: livros começados antes desta versão têm capítulos
+  // aprovados e nenhum ledger. Reconstrói UMA vez, das fichas já persistidas
+  // (derivação pura — o resultado é o mesmo que a aprovação teria gravado).
+  if (!estado.doc.ledger_revelacoes) {
+    const fichas = await persistencia.lerFichasMaisRecentes(projectId);
+    const reconstruido = reconstruirLedger(fichas, (cap) => {
+      const s = estado.doc.capitulos[String(cap)]?.status;
+      return s === "aprovado" || s === "aprovado_com_excecao";
+    });
+    estado.doc.ledger_revelacoes = reconstruido;
+    await persistencia.gravarEstado(estado);
+    console.log(`[engine-v2] ledger de revelações reconstruído: ${reconstruido.length} entrada(s) de ${fichas.length} ficha(s)`);
+  }
 
   // Docs factuais do contrato (ex.: dossie-factual.md do dan-brown, matriz-de-relogios
   // do hoover): quando existem no projeto, entram VERBATIM no pacote do revisor e do

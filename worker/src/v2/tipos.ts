@@ -135,6 +135,17 @@ export interface SceneSpec {
   fios_ausentes: string[];        // deliberadamente fora deste capítulo
   campos_skill?: Record<string, string>; // campos extras exigidos pelo contrato (ex.: "Relógios")
   excecao_editorial?: { regra_id: string; justificativa: string };
+  // --- Arco de longo alcance (fundação v3). OPCIONAIS: fichas v2 seguem válidas. ---
+  /** Ato da grade a que este capítulo pertence (fundacao.arco.atos[].numero). */
+  ato?: number;
+  /** Tensão-alvo 1–5 declarada pela grade de atos. */
+  tensao_alvo?: number;
+  /** Revelações EXTRAS ao `informacao_nova` (≤2, ≤25 palavras cada). */
+  revelacoes?: string[];
+  /** Promessas da fundação tocadas por este capítulo. */
+  promessas_tocadas?: { id: string; acao: "planta" | "reforca" | "paga" }[];
+  /** Marcos de arco de personagem atingidos aqui. */
+  marcos_arco?: { personagem: string; marco: string }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +185,55 @@ export interface Parecer {
   evidencias: EvidenciaLocalizada[];   // aprovação exige ≥1 evidência POSITIVA
   sinais: SinalDisposto[];             // disposição de cada sinal editorial detectado
   correcoes: { local: string; problema: string; instrucao: string }[];
+}
+
+// ---------------------------------------------------------------------------
+// Ledger de revelações e arco de longo alcance (fundação v3)
+// ---------------------------------------------------------------------------
+
+/** Uma revelação = o que o LEITOR passa a saber. Declarada na ficha, entra na aprovação. */
+export interface RevelacaoLedger {
+  id: string;            // ex.: "R07.1" (capítulo + ordinal) — estável e citável
+  capitulo: number;      // onde foi revelada
+  enunciado: string;     // ≤25 palavras
+}
+
+export interface Ato {
+  numero: number;
+  cap_inicio: number;
+  cap_fim: number;
+  funcao: string;
+  tensao_alvo: number;   // 1–5
+}
+
+export interface Promessa {
+  id: string;
+  enunciado: string;
+  plantada_em: number;
+  reforcada_em: number[];
+  paga_em: number;
+}
+
+export interface FioArco {
+  id: string;
+  nome: string;
+  abre: number;
+  escalada: number[];
+  climax: number;
+  fecha: number;
+}
+
+export interface ArcoPersonagem {
+  personagem: string;
+  marcos: { capitulo: number; estado: string }[];
+}
+
+/** Seção `arco` de estrutura.json — presente só na fundação v3. */
+export interface ArcoFundacao {
+  atos: Ato[];
+  promessas: Promessa[];
+  fios: FioArco[];
+  arcos: ArcoPersonagem[];
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +394,14 @@ export interface EstadoCanonicoDoc {
     em: string;
   }[];
   capitulos: Record<string, CapituloEstado>;
+  /**
+   * Ledger de revelações: o que o LEITOR já sabe, por capítulo. Derivado
+   * deterministicamente da ficha na APROVAÇÃO do capítulo (sem chamada de modelo).
+   * Ausente = livro anterior a esta versão; `garantirLedger` reconstrói das fichas.
+   */
+  ledger_revelacoes?: RevelacaoLedger[];
+  /** Retries dirigidos que o portão da fundação consumiu (adendo do autor ao §5). */
+  fundacao_portao?: { retries: number; reprovacoes: string[]; em: string };
   // status_anterior: guarda o status do capítulo antes do bloqueio, para restauração fiel
   bloqueios: { codigo: string; alvo: string; detalhe: string; desde: string; status_anterior?: CapituloStatusV2 }[];
   migracao?: {
@@ -368,7 +436,13 @@ export type GateUniversal =
   | "estado_inconsistente"
   | "skill_ou_contexto_invalido"
   | "fora_do_schema"
-  | "aprovacao_sem_evidencia";
+  | "aprovacao_sem_evidencia"
+  // --- Memória e arco de longo alcance ---
+  | "revelacao_repetida"
+  | "rotacao_pov_violada"
+  | "promessa_nao_paga"
+  | "fundacao_estrutura_incoerente"
+  | "fundacao_arco_incompleto";
 
 export interface ResultadoGate {
   gate: GateUniversal;

@@ -18,15 +18,26 @@ export function tarefaArquitetoCena(capitulo: number, contrato: SkillContract): 
   ].filter(Boolean).join("\n");
 }
 
-/** Contextualizador: só fatos e continuidade — proibido escrever prosa. */
+/**
+ * Contextualizador: só fatos e continuidade — proibido escrever prosa.
+ *
+ * Ele SELECIONA do material do pacote; não lembra nem deduz. O pacote passou a
+ * trazer BÍBLIA, MAPA, ESTRUTURA, LEDGER DE REVELAÇÕES e as fichas condensadas dos
+ * capítulos anteriores — antes ele recebia zero capítulo e era instruído a listar
+ * "fatos com origem" e "repetições recentes", o que só podia sair de invenção
+ * (raiz do diagnóstico). Cada lista abaixo está amarrada a uma seção que existe no
+ * pacote, e a origem tem de citá-la.
+ */
 export function tarefaContextualizador(capitulo: number): string {
   return [
     `Selecione o contexto factual mínimo para escrever o capítulo ${capitulo}.`,
     `Responda APENAS JSON: { "fatos": [{"fato": string, "origem": string}], "continuidade": [{"item": string, "origem": string}], "repeticoes_recentes": [string] }.`,
     `- "fatos": fatos estabelecidos que este capítulo NÃO pode contradizer (nomes, datas, lugares, quem sabe o quê).`,
     `- "continuidade": estados abertos que este capítulo toca (objetos, ferimentos, promessas, posições).`,
-    `- "repeticoes_recentes": frases/imagens marcantes já usadas que o escritor não deve repetir.`,
-    `REGRAS DURAS: você NÃO escreve prosa, metáfora, imagem, pensamento ou frase literária. Só fato seco com origem (documento/capítulo). Máx 15 itens por lista.`,
+    `- "repeticoes_recentes": informações que o LEDGER DE REVELAÇÕES registra como já entregues ao leitor e que o escritor não pode reapresentar como novidade.`,
+    `REGRA DE PROCEDÊNCIA (dura): todo item TEM de sair de uma seção presente neste pacote — BÍBLIA DA OBRA, MAPA DE PERSONAGENS, ESTRUTURA DO LIVRO, LEDGER DE REVELAÇÕES ou CAPÍTULOS ANTERIORES (fichas condensadas). "origem" cita a seção e, quando houver, o capítulo (ex.: "ledger R07.1, cap 7"; "ficha cap 3"; "bíblia").`,
+    `Se o pacote não sustenta um item, ele NÃO existe: liste menos. É proibido inferir, completar lacuna ou supor o que "provavelmente" foi estabelecido — lista curta e verdadeira vale mais que lista longa e inventada.`,
+    `REGRAS DURAS: você NÃO escreve prosa, metáfora, imagem, pensamento ou frase literária. Só fato seco com origem. Máx 15 itens por lista.`,
   ].join("\n");
 }
 
@@ -118,6 +129,7 @@ export function tarefaRevisor(capitulo: number, resumoSinais: string, contrato: 
     `- "aprovado" exige evidência POSITIVA em "evidencias" (o que está vivo e funciona, localizado) — ausência de defeito não basta.`,
     `- Qualquer "violacao_confirmada" exige entrada correspondente em "correcoes" e veredito "reprovado".`,
     `- Capítulo competente mas MORTO (sem evento, sem avanço) reprova mesmo dentro das cotas.`,
+    `- REPETIÇÃO DE REVELAÇÃO: a seção LEDGER DE REVELAÇÕES lista o que o leitor JÁ SABE. Se este capítulo reapresenta como novidade algo que o ledger já registra — ainda que com outras palavras, outra cena ou outro personagem descobrindo —, isso é defeito: acrescente o sinal "revelacao_ja_no_ledger" com disposicao "violacao_confirmada", cite em "evidencia" o id/capítulo da entrada do ledger e o trecho do capítulo, e reprove. O detector automático só pega repetição literal; a repetição REESCRITA é sua responsabilidade. Avançar, complicar ou pagar uma revelação antiga NÃO é repetir — repetir é entregá-la de novo como se fosse nova.`,
     `- Julgue aderência à skill pelo contrato do pacote (testes positivos: ${contrato.testes_positivos.slice(0, 4).join("; ") || "—"}).`,
   ].join("\n");
 }
