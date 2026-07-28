@@ -4,6 +4,7 @@
 import { hashArquivo } from "./hash.js";
 import { fundirNoLedger } from "./ledger.js";
 import type { ConflitoFichaProsa, EntradaMemoria } from "./memoria-prosa.js";
+import type { SnapshotCanario } from "./canario-snapshot.js";
 import { ErroConcorrencia, type PersistenciaV2 } from "./persistencia.js";
 import {
   ENGINE_V2_VERSION,
@@ -438,6 +439,33 @@ export class Gravador {
           })),
         },
       ].sort((a, b) => a.origem - b.origem);
+    });
+  }
+
+  /** Grava o snapshot imutável do canário aprovado (fatia L). */
+  async registrarSnapshotCanario(snapshot: SnapshotCanario): Promise<void> {
+    await this.mutarEstado((doc) => {
+      doc.canario_snapshot = snapshot;
+    });
+  }
+
+  /** Premissas vigentes: a base contra a qual a próxima execução compara. */
+  async registrarPremissas(premissas: NonNullable<EstadoCanonicoDoc["premissas"]>): Promise<void> {
+    await this.mutarEstado((doc) => {
+      doc.premissas = premissas;
+    });
+  }
+
+  /** Artefatos invalidados por mudança de premissa — nunca silencioso. */
+  async registrarInvalidacao(inv: NonNullable<EstadoCanonicoDoc["invalidacao"]>): Promise<void> {
+    await this.mutarEstado((doc) => {
+      doc.invalidacao = inv;
+      doc.bloqueios.push({
+        codigo: "PREMISSA_ALTERADA",
+        alvo: "livro",
+        detalhe: inv.motivo,
+        desde: this.agora(),
+      });
     });
   }
 

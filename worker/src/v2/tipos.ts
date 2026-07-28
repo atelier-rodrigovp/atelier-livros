@@ -403,6 +403,7 @@ export interface TentativaCorrecao {
 }
 
 import type { ConflitoFichaProsa, EntradaMemoria } from "./memoria-prosa.js";
+import type { SnapshotCanario } from "./canario-snapshot.js";
 
 export interface EstadoCanonicoDoc {
   schema: "engine-state/v1";
@@ -483,6 +484,30 @@ export interface EstadoCanonicoDoc {
   memoria_prosa?: EntradaMemoria[];
   /** Divergências ficha × prosa: evento explícito, nunca sobrescrita silenciosa. */
   conflitos_ficha_prosa?: ConflitoFichaProsa[];
+  /**
+   * Premissas sob as quais os artefatos deste livro foram construídos (fatia L).
+   * Mudar qualquer uma invalida explicitamente o que dependia dela — antes,
+   * fundação e capítulos antigos continuavam com cara de válidos.
+   */
+  premissas?: {
+    canario_hash: string;
+    briefing_hash: string;
+    idioma: string;
+    skill_id: string;
+    skill_hash: string;
+    contrato_hash: string;
+    total_capitulos: number;
+    docs: Record<string, string>;
+  };
+  /** Snapshot imutável do canário de voz aprovado pelo autor. */
+  canario_snapshot?: SnapshotCanario;
+  /** Artefatos invalidados por mudança de premissa, aguardando decisão do autor. */
+  invalidacao?: {
+    artefatos: string[];
+    mudancas: { premissa: string; de: string; para: string }[];
+    motivo: string;
+    em: string;
+  };
   /** Ondas de revalidação transitiva (fatia K): o que uma reescrita reabriu. */
   revalidacoes?: {
     origem: number;

@@ -19,6 +19,7 @@ import { executarPapel } from "./papeis.js";
 import { tarefaCanarioVoz, tarefaEditorEstrutural, tarefaRevisorCanario } from "./tarefas.js";
 import { gerarFundacaoV2, materializarFundacao } from "./fundacao.js";
 import { autorizarFundacao, type BriefingAprovado } from "./briefing-aprovacao.js";
+import { compararPremissas, decidirComPremissaAlterada, invalidarPorPremissa } from "./canario-snapshot.js";
 import { documentosDaFundacao } from "./documentos.js";
 import { parsearArco } from "./arco.js";
 import { avaliarFechamentoLivro } from "./fechamento.js";
@@ -507,6 +508,45 @@ export async function executarEscritaV2(job: Job): Promise<ResultadoRoteado | vo
         }
       : {}),
   });
+
+  // PREMISSAS (fatia L): a base sob a qual os artefatos foram construídos. Se
+  // mudou — canário, briefing, idioma, skill, contrato, total, documentos — o
+  // que dependia dela está INVALIDADO e a execução para até o autor decidir.
+  const premissasAgora = {
+    canario_hash: estado.doc.canario_snapshot?.hash ?? "",
+    briefing_hash: hashJsonCanonico((proj as { briefing?: unknown }).briefing ?? {}),
+    idioma: deps.idioma ?? "pt-BR",
+    skill_id: contrato.contrato.id,
+    skill_hash: contrato.hash,
+    contrato_hash: contrato.contrato.versao,
+    total_capitulos: total,
+    docs: estado.doc.fundacao?.docs ?? {},
+  };
+  const invalidacao = invalidarPorPremissa(
+    estado.doc.premissas ? compararPremissas(estado.doc.premissas, premissasAgora) : []
+  );
+  const escolhaAutor = (job.payload as { premissa_alterada?: "reconstruir" | "migrar" })?.premissa_alterada;
+  const decisaoPremissa = decidirComPremissaAlterada(invalidacao, escolhaAutor);
+  if (decisaoPremissa.acao === "bloquear") {
+    await gravador.registrarInvalidacao({
+      artefatos: decisaoPremissa.invalidacao.artefatos,
+      mudancas: decisaoPremissa.invalidacao.mudancas,
+      motivo: decisaoPremissa.invalidacao.motivo,
+      em: new Date().toISOString(),
+    });
+    await atualizarProgresso(job.id, {
+      quality_status: "aguardando_decisao",
+      invalidacao: decisaoPremissa.invalidacao.artefatos,
+      resumo: decisaoPremissa.invalidacao.motivo,
+    });
+    throw new ErroEngine({
+      codigo: "PREMISSA_ALTERADA",
+      classe: "configuracao",
+      mensagem: decisaoPremissa.invalidacao.motivo,
+      detalhe: { mudancas: decisaoPremissa.invalidacao.mudancas },
+    });
+  }
+  await gravador.registrarPremissas(premissasAgora);
 
   // Retomada: capítulos já aprovados em execuções anteriores ficam duráveis
   // ANTES de escrever o próximo (idempotente; hash-bound).
