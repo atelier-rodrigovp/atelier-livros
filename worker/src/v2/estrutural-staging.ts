@@ -87,6 +87,9 @@ export class PersistenciaEstadoIsolado implements PersistenciaV2 {
   lerFichaMaisRecente(projectId: string, capitulo: number): Promise<SceneSpec | null> {
     return this.principal.lerFichaMaisRecente(projectId, capitulo);
   }
+  lerFichasMaisRecentes(projectId: string): Promise<{ capitulo: number; ficha: SceneSpec }[]> {
+    return this.principal.lerFichasMaisRecentes(projectId);
+  }
   async lerEstado(projectId: string): Promise<EstadoCanonico | null> {
     return this.estado.project_id === projectId ? structuredClone(this.estado) : null;
   }

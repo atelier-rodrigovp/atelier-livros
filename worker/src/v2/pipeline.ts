@@ -12,6 +12,17 @@ import { compilarPacote, type Instrucao, type SecaoContexto } from "./compilador
 import { rodarGatesCapitulo } from "./gates.js";
 import type { Gravador } from "./gravador.js";
 import { hashJsonCanonico } from "./hash.js";
+import { gateFichaContraArco, gateRotacaoPov, renderizarArcoParaCapitulo } from "./arco.js";
+import {
+  conferirConformidade,
+  medirConformidade,
+  resumoConformidade,
+  validarParecerConformidade,
+  type ParecerConformidade,
+} from "./conformidade.js";
+import { entradasDaFicha, gateRevelacaoRepetida, renderizarLedger } from "./ledger.js";
+import { decidirIdioma, medirIdioma, resumoIdioma, validarParecerIdioma, type ParecerIdioma } from "./idioma.js";
+import { derivarMemoriaDaProsa, validarExtracaoProsa, type ExtracaoProsa } from "./memoria-prosa.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
@@ -23,13 +34,18 @@ import {
   tarefaAuditorFactual,
   tarefaContextualizador,
   tarefaEscritor,
+  tarefaConformidade,
+  tarefaIdioma,
+  tarefaExtratorMemoria,
   tarefaEscritorCorrecao,
   tarefaRevisor,
   type ModoCorrecao,
 } from "./tarefas.js";
 import {
   ErroEngine,
+  type ArcoFundacao,
   type ContratoCompilado,
+  type EstrategiaCorrecao as Estrategia,
   type MapaModelos,
   type Parecer,
   type ResultadoGate,
@@ -56,11 +72,13 @@ export interface DepsPipeline {
   maxCorrecoes?: number; // default 2 — tentativas de correção dirigida por capítulo
   /** Docs factuais do projeto (ex.: dossie-factual.md) — entram no pacote do revisor e do auditor. */
   docsFactuais?: SecaoContexto[];
-  /** Fundação da obra (bíblia/mapa/estrutura) — seções camada 6 por papel. */
+  /** Fundação da obra (bíblia/mapa/estrutura/arco) — seções camada 6 por papel. */
   fundacao?: {
     biblia?: string;
     mapaPersonagens?: string;
     estrutura?: { capitulo: number; fio: string; resumo_estrutural: string }[];
+    /** Grade de arco (fundação v3). Ausente = fundação v2: gates de arco são no-op. */
+    arco?: ArcoFundacao;
   };
 }
 
@@ -112,7 +130,7 @@ function exigirString(valor: unknown, campo: string): string {
   return valor;
 }
 
-function validarSaidaContextualizador(obj: unknown): SaidaContextualizador {
+export function validarSaidaContextualizador(obj: unknown): SaidaContextualizador {
   if (typeof obj !== "object" || obj === null) throw new Error("saída do contextualizador não é objeto");
   const o = obj as Record<string, unknown>;
   if (!Array.isArray(o.fatos) || !Array.isArray(o.continuidade) || !Array.isArray(o.repeticoes_recentes)) {
@@ -130,7 +148,7 @@ function validarSaidaContextualizador(obj: unknown): SaidaContextualizador {
   return { fatos, continuidade, repeticoes_recentes: repeticoes };
 }
 
-function validarSaidaAuditor(obj: unknown): SaidaAuditor {
+export function validarSaidaAuditor(obj: unknown): SaidaAuditor {
   if (typeof obj !== "object" || obj === null) throw new Error("saída do auditor não é objeto");
   const o = obj as Record<string, unknown>;
   if (!Array.isArray(o.contradicoes) || !Array.isArray(o.conhecimento_indevido)) {
@@ -157,11 +175,33 @@ function validarSaidaAuditor(obj: unknown): SaidaAuditor {
   if (!pov || typeof pov.ha !== "boolean" || typeof pov.detalhe !== "string") {
     throw new Error("pov_violado inválido (esperado {ha: boolean, detalhe: string})");
   }
+  // `pov_violado` REPROVA o capítulo (decisão, não anotação). Uma violação
+  // declarada sem detalhe é protocolo violado — vira retry técnico do auditor,
+  // nunca uma reprovação sem evidência localizável.
+  if (pov.ha === true && pov.detalhe.trim().length === 0) {
+    throw new Error("pov_violado.ha=true exige `detalhe` não vazio citando o trecho que viola o POV");
+  }
   return { contradicoes, conhecimento_indevido: conhecimento, pov_violado: { ha: pov.ha, detalhe: pov.detalhe } };
 }
 
+/**
+ * Uma linha por capítulo anterior: o mínimo para planejar sem reinventar o passado
+ * (fio/POV, quando, onde, o que mudou, como fechou). Sem prosa — é ficha, não texto.
+ */
+function resumirFicha(capitulo: number, f: SceneSpec): string {
+  const partes = [
+    `Cap ${capitulo} [${f.pov}]`,
+    f.tempo ? `${f.tempo}` : "",
+    f.local ? `${f.local}` : "",
+    f.virada ? `virada: ${f.virada}` : "",
+    f.mudanca_estado ? `mudança: ${f.mudanca_estado}` : "",
+    f.gancho?.tipo ? `gancho: ${f.gancho.tipo}` : "",
+  ].filter(Boolean);
+  return `- ${partes.join(" · ")}`;
+}
+
 /** Prosa do escritor: só valida presença — o conteúdo é julgado por gates/revisor. */
-function parseProsa(t: string): string {
+export function parseProsa(t: string): string {
   const limpo = t.trim();
   if (!limpo) throw new Error("prosa vazia");
   return limpo;
@@ -198,6 +238,13 @@ export async function escreverCapitulo(
      * em modo "reescrita" como 1ª ação, seguindo depois o fluxo normal. Exige textoBase.
      */
     reescritaDirigida?: { correcoes: { local: string; problema: string; instrucao: string }[] };
+    /**
+     * Escada de correção (fatia C): a ESTRATÉGIA escolhida pelo controlador muda
+     * a AÇÃO desta execução — regenerar a ficha, reescrever a superfície,
+     * reescrever do zero ou trocar o juiz. Sem isto, "tentar de novo" seria a
+     * mesma ação repetida com outras palavras.
+     */
+    correcaoDirigida?: { estrategia: Estrategia; blockers: string[]; hipotese: string; tentativa: number };
   }
 ): Promise<ResultadoCapitulo> {
   const runs: string[] = [];
@@ -205,7 +252,11 @@ export async function escreverCapitulo(
   const alvoCap = `capitulo:${capitulo}`;
   const nn = String(capitulo).padStart(2, "0");
   const caminho = path.join(deps.dirManuscrito, `capitulo-${nn}.md`);
-  const maxCorrecoes = deps.maxCorrecoes ?? 2;
+  // `julgamento_alternativo` NÃO chama o escritor: a hipótese sob teste é que o
+  // texto está adequado e o veredito é que estava errado. Corrigir a prosa aqui
+  // mudaria o hash e destruiria justamente o que se quer rejulgar.
+  const maxCorrecoes =
+    opts?.correcaoDirigida?.estrategia === "julgamento_alternativo" ? 0 : (deps.maxCorrecoes ?? 2);
 
   if (opts?.textoBase && !opts.fichaExistente) {
     throw new ErroEngine({
@@ -222,14 +273,44 @@ export async function escreverCapitulo(
     });
   }
 
+  // Escada de correção: a estratégia da tentativa muda a AÇÃO desta execução.
+  const estrategia = opts?.correcaoDirigida?.estrategia;
+  /**
+   * `julgamento_alternativo`: mesmo texto, juiz diferente. É a única estratégia
+   * que troca modelo — a hipótese sob teste é que o veredito, não o texto, está
+   * errado. Os pins de prosa/fatos/raciocínio ficam intactos.
+   */
+  const mapaModelos =
+    estrategia === "julgamento_alternativo"
+      ? { ...deps.mapa, julgamento: deps.mapa.raciocinio }
+      : deps.mapa;
+
   // Base comum das execuções de papel (ledger completo por chamada).
   const base = {
     gravador: deps.gravador,
     provedor: deps.provedor,
-    mapa: deps.mapa,
+    mapa: mapaModelos,
     jobId: deps.jobId ?? null,
     editionId: deps.editionId ?? null,
   };
+
+  /** Diretiva da tentativa: entra no pacote de quem PLANEJA e de quem ESCREVE. */
+  const secCorrecao: SecaoContexto[] = opts?.correcaoDirigida
+    ? [
+        {
+          titulo: `CORREÇÃO DIRIGIDA — tentativa ${opts.correcaoDirigida.tentativa} (estratégia: ${opts.correcaoDirigida.estrategia})`,
+          texto: [
+            `Hipótese desta tentativa: ${opts.correcaoDirigida.hipotese}`,
+            "",
+            "A versão anterior deste capítulo foi REPROVADA pelos seguintes bloqueios:",
+            ...opts.correcaoDirigida.blockers.map((b) => `- ${b}`),
+            "",
+            "Ataque a CAUSA nomeada acima. Repetir a mesma solução da tentativa anterior não é aceitável.",
+          ].join("\n"),
+          fonte: "escada-correcao",
+        },
+      ]
+    : [];
 
   const compilar = (
     papel: Parameters<typeof compilarPacote>[0]["papel"],
@@ -272,8 +353,17 @@ export async function escreverCapitulo(
         fonte: "estrutura.json",
       }]
     : [];
-  const secoesPlanejamento = [...secBiblia, ...secMapa, ...secEstruturaLivro];
-  const secoesJulgamento = [...secBiblia, ...secMapa];
+  // Recorte do arco para ESTE capítulo (ato, promessas em aberto, fios vivos,
+  // marcos). A fundação v2 não tem arco: a seção simplesmente não existe.
+  const secArco: SecaoContexto[] = fundacao?.arco
+    ? [{
+        titulo: `ARCO DO CAPÍTULO ${capitulo}`,
+        texto: renderizarArcoParaCapitulo(fundacao.arco, capitulo),
+        fonte: "estrutura.json#arco",
+      }]
+    : [];
+  const secoesPlanejamento = [...secBiblia, ...secMapa, ...secEstruturaLivro, ...secArco];
+  const secoesJulgamento = [...secBiblia, ...secMapa, ...secArco];
 
   /** Compilação bloqueada em qualquer etapa → bloqueio registrado + status "bloqueado". */
   const bloquearPorCompilacao = async (
@@ -296,16 +386,48 @@ export async function escreverCapitulo(
     estadoParaSpec.doc.capitulos[String(capitulo)]?.spec_versao ?? 0,
     await deps.persistencia.maiorVersaoSpec(deps.projectId, capitulo)
   );
+  // Ledger de revelações: o que o LEITOR já sabe. Entra no pacote de quem PLANEJA
+  // e de quem JULGA; o gate roda contra o ledger inteiro, mesmo que o pacote tenha
+  // degradado para janela.
+  const ledger = estadoParaSpec.doc.ledger_revelacoes ?? [];
+  const ledgerRender = renderizarLedger(ledger, opts?.fichaExistente);
+  const secLedger: SecaoContexto[] = [
+    {
+      titulo: "LEDGER DE REVELAÇÕES (o que o leitor JÁ SABE — não revele de novo)",
+      texto: ledgerRender.texto,
+      fonte: "engine_state.ledger_revelacoes",
+    },
+  ];
+
+  // Passado condensado: uma linha por capítulo anterior, das fichas persistidas
+  // (leitura em LOTE). Antes, quem planejava e quem contextualizava recebia ZERO
+  // capítulo anterior e inventava a continuidade — raiz do diagnóstico.
+  const fichasAnteriores = (await deps.persistencia.lerFichasMaisRecentes(deps.projectId))
+    .filter((f) => f.capitulo < capitulo)
+    .sort((a, b) => a.capitulo - b.capitulo);
+  const secPassado: SecaoContexto[] = fichasAnteriores.length
+    ? [{
+        titulo: "CAPÍTULOS ANTERIORES (fichas condensadas)",
+        texto: fichasAnteriores
+          .map((f) => resumirFicha(f.capitulo, f.ficha))
+          .join("\n"),
+        fonte: "engine_scene_specs",
+      }]
+    : [];
   let specVersao: number;
   let ficha: SceneSpec;
-  if (opts?.fichaExistente) {
+  // `reficha`: a hipótese é que o PLANO é a causa. Descartar a ficha existente é
+  // exatamente o que distingue esta estratégia de reescrever a prosa outra vez.
+  if (opts?.fichaExistente && estrategia !== "reficha") {
     // Ficha existente já está persistida (o pipeline não re-insere); o estado
     // referencia a última versão conhecida.
     specVersao = Math.max(versaoConhecida, 1);
     ficha = opts.fichaExistente;
   } else {
     specVersao = versaoConhecida + 1;
-    const comp = compilar("arquiteto_cena", `spec:${capitulo}`, { fatos: secoesPlanejamento });
+    const comp = compilar("arquiteto_cena", `spec:${capitulo}`, {
+      fatos: [...secoesPlanejamento, ...secLedger, ...secPassado, ...secCorrecao],
+    });
     if (!comp.ok) return bloquearPorCompilacao(comp.bloqueios);
     const r = await executarPapel<SceneSpec>({
       ...base,
@@ -314,7 +436,7 @@ export async function escreverCapitulo(
       pacote: comp.pacote!,
       // Anti-ghostwriting é rígido de propósito; 3 tentativas com erro citando o trecho.
       maxTentativas: 3,
-      tarefa: tarefaArquitetoCena(capitulo, deps.contrato.contrato),
+      tarefa: tarefaArquitetoCena(capitulo, deps.contrato.contrato, Boolean(fundacao?.arco)),
       parse: (t) => {
         const spec = extrairJson(t) as SceneSpec;
         // Boilerplate é responsabilidade do código, não do modelo: normaliza
@@ -325,6 +447,36 @@ export async function escreverCapitulo(
         }
         const v = validarSpec(spec, deps.contrato.contrato);
         if (!v.ok) throw new Error(`ficha inválida: ${v.erros.join("; ")}`);
+        // Gate de repetição de revelação, contra o ledger INTEIRO (nunca a janela).
+        // A mensagem carrega a entrada anterior LITERAL: executarPapel a reinjeta
+        // no prompt do retry (papeis.ts), então o arquiteto não retenta cego mesmo
+        // quando a entrada ficou fora da janela do pacote — adendo §1 do autor.
+        const gRev = gateRevelacaoRepetida(capitulo, spec, ledger);
+        if (!gRev.passou) {
+          throw new Error(
+            `revelação já entregue ao leitor: ${gRev.evidencia}. ` +
+              `Escolha uma informação nova que ainda NÃO esteja no ledger, ou avance a que já existe (aprofunde/complique), sem reapresentá-la como novidade.`
+          );
+        }
+        // Rotação de POV do contrato: declarada no schema desde sempre e nunca
+        // aplicada. Roda aqui (planejamento) porque é onde ainda dá para trocar
+        // o fio sem jogar prosa fora.
+        const gRot = gateRotacaoPov(capitulo, spec, fichasAnteriores, deps.contrato.contrato);
+        if (!gRot.passou) {
+          throw new Error(
+            `rotação de fios violada: ${gRot.evidencia}. ` +
+              `Reveja "fios_avancados"/"fios_ausentes": alterne o fio ou retome o que está parado.`
+          );
+        }
+        // Ficha × grade de arco: `ato`, `tensao_alvo`, `promessas_tocadas` e
+        // `marcos_arco` eram pedidos ao modelo e nunca conferidos contra o plano.
+        const gArco = gateFichaContraArco(capitulo, spec, fundacao?.arco);
+        if (!gArco.passou) {
+          throw new Error(
+            `ficha contradiz a grade de arco: ${gArco.evidencia}. ` +
+              `Use a seção ARCO DO CAPÍTULO como fonte: ela diz a que ato o capítulo pertence, qual a tensão-alvo, que promessas ele toca e que marcos caem aqui.`
+          );
+        }
         return spec;
       },
     });
@@ -346,7 +498,10 @@ export async function escreverCapitulo(
   // -------------------------------------------------------------------------
   // 2. CONTEXTO (contextualizador) — fatos e continuidade, nunca prosa
   // -------------------------------------------------------------------------
-  const compCtx = compilar("contextualizador", alvoCap, { ficha, fatos: secoesPlanejamento });
+  const compCtx = compilar("contextualizador", alvoCap, {
+    ficha,
+    fatos: [...secoesPlanejamento, ...secLedger, ...secPassado],
+  });
   if (!compCtx.ok) return bloquearPorCompilacao(compCtx.bloqueios);
   const rCtx = await executarPapel<SaidaContextualizador>({
     ...base,
@@ -381,7 +536,7 @@ export async function escreverCapitulo(
   // -------------------------------------------------------------------------
   const compEsc = compilar("escritor", alvoCap, {
     ficha,
-    fatos: [...secMapa, ...secEstruturaCap, ...fatos],
+    fatos: [...secMapa, ...secEstruturaCap, ...fatos, ...secCorrecao],
     trechosAnteriores: opts?.trechosAnteriores,
     repeticoesRecentes,
   });
@@ -448,6 +603,9 @@ export async function escreverCapitulo(
   const garantirGates = async (): Promise<ResultadoGate[]> => {
     let falhos = rodarGates();
     if (falhos.length === 0) return [];
+    // Rejulgamento não toca no texto — nem para consertar gate. Devolve os gates
+    // falhos como estão: o objetivo é saber se ESTE hash passa com outro juiz.
+    if (maxCorrecoes === 0) return falhos;
     await corrigirComEscritor(
       falhos.map((g) => ({ local: g.gate, problema: g.evidencia ?? g.gate, instrucao: "elimine a causa" }))
     );
@@ -491,7 +649,7 @@ export async function escreverCapitulo(
 
     const compRev = compilar("revisor_literario", alvoCap, {
       ficha,
-      fatos: [...secoesJulgamento, ...docsFactuais, ...fatos, secaoTexto],
+      fatos: [...secoesJulgamento, ...secLedger, ...docsFactuais, ...fatos, secaoTexto],
       repeticoesRecentes,
     });
     if (!compRev.ok) return bloquearPorCompilacao(compRev.bloqueios);
@@ -525,13 +683,63 @@ export async function escreverCapitulo(
     runs.push(rAud.runId);
     const auditoria = rAud.valor;
     const contradicoesBloqueantes = auditoria.contradicoes.filter((c) => c.gravidade === "bloqueante");
-    if (contradicoesBloqueantes.length > 0 || auditoria.conhecimento_indevido.length > 0) {
+    const povViolado = auditoria.pov_violado.ha;
+    if (contradicoesBloqueantes.length > 0 || auditoria.conhecimento_indevido.length > 0 || povViolado) {
       verdictEfetivo = "reprovado";
       for (const c of contradicoesBloqueantes) {
         problemas.push(`contradição factual comprovada: ${c.fato_estabelecido} vs "${c.trecho_do_capitulo}"`);
       }
       for (const k of auditoria.conhecimento_indevido) {
         problemas.push(`conhecimento indevido: ${k.quem} sabe "${k.sabe_o_que_nao_deveria}" (${k.trecho})`);
+      }
+      if (povViolado) {
+        problemas.push(`POV violado: ${auditoria.pov_violado.detalhe}`);
+      }
+    }
+
+    // 6b. CONFORMIDADE FICHA → PROSA (fatia G). A engine julgava se o capítulo
+    // estava BEM ESCRITO e se era coerente, nunca se ENTREGOU o que a ficha
+    // planejou. Um capítulo competente que não cumpre a virada passava.
+    const sinaisConf = medirConformidade(ficha, texto);
+    const compConf = compilar("conformidade_ficha", alvoCap, { ficha, fatos: [secaoTexto] });
+    if (!compConf.ok) return bloquearPorCompilacao(compConf.bloqueios);
+    const rConf = await executarPapel<ParecerConformidade>({
+      ...base,
+      papel: "conformidade_ficha",
+      alvo: alvoCap,
+      pacote: compConf.pacote!,
+      tarefa: tarefaConformidade(capitulo, ficha, resumoConformidade(sinaisConf)),
+      parse: (t) => validarParecerConformidade(extrairJson(t)),
+    });
+    runs.push(rConf.runId);
+    const conformidade = conferirConformidade(rConf.valor, ficha, texto);
+    if (!conformidade.conforme) {
+      verdictEfetivo = "reprovado";
+      for (const p of conformidade.problemas) {
+        problemas.push(`conformidade [${p.item}] ${p.motivo}: ${p.detalhe}`);
+      }
+    }
+
+    // 6c. IDIOMA E VARIANTE (fatia J). O detector é sinal; este papel julga —
+    // ele separa narração de diálogo intencional, citação e personagem
+    // estrangeiro, que nenhum detector de marcadores sabe distinguir.
+    const sinalIdioma = medirIdioma(texto, deps.idioma ?? "pt-BR");
+    if (sinalIdioma.divergentesNarracao.length || sinalIdioma.divergentesDialogo.length) {
+      const compIdi = compilar("julgamento_idioma", alvoCap, { fatos: [secaoTexto] });
+      if (!compIdi.ok) return bloquearPorCompilacao(compIdi.bloqueios);
+      const rIdi = await executarPapel<ParecerIdioma>({
+        ...base,
+        papel: "julgamento_idioma",
+        alvo: alvoCap,
+        pacote: compIdi.pacote!,
+        tarefa: tarefaIdioma(capitulo, deps.idioma ?? "pt-BR", resumoIdioma(sinalIdioma)),
+        parse: (t) => validarParecerIdioma(extrairJson(t)),
+      });
+      runs.push(rIdi.runId);
+      const vIdioma = decidirIdioma(sinalIdioma, rIdi.valor);
+      if (!vIdioma.passou) {
+        verdictEfetivo = "reprovado";
+        problemas.push(`idioma: ${vIdioma.motivo} — ${vIdioma.evidencia}`);
       }
     }
 
@@ -551,8 +759,46 @@ export async function escreverCapitulo(
       await deps.gravador.aprovarCapitulo(
         capitulo,
         { id: reviewId, text_hash: textHash, verdict: verdictEfetivo, parecer },
-        caminho
+        caminho,
+        entradasDaFicha(capitulo, ficha)
       );
+
+      // MEMÓRIA DERIVADA DA PROSA (fatia H). Roda DEPOIS da aprovação, sobre o
+      // texto que ficou. O ledger de revelações vem da FICHA — o plano; isto vem
+      // da PÁGINA. Uma pista plantada de improviso só existe para a engine aqui.
+      // Falha do extrator NUNCA desfaz a aprovação: o capítulo está aprovado e
+      // hash-bound; a memória é registrada como incompleta e o fechamento avisa.
+      try {
+        const compMem = compilar("extrator_memoria", alvoCap, { ficha, fatos: [secaoTexto] });
+        if (compMem.ok) {
+          const rMem = await executarPapel<ExtracaoProsa>({
+            ...base,
+            papel: "extrator_memoria",
+            alvo: alvoCap,
+            pacote: compMem.pacote!,
+            tarefa: tarefaExtratorMemoria(capitulo, ficha),
+            parse: (t) => validarExtracaoProsa(extrairJson(t)),
+          });
+          runs.push(rMem.runId);
+          const derivada = derivarMemoriaDaProsa({
+            capitulo,
+            texto,
+            ficha,
+            extracao: rMem.valor,
+            em: new Date().toISOString(),
+          });
+          await deps.gravador.registrarMemoriaDaProsa(capitulo, derivada.entradas, derivada.conflitos);
+          for (const c of derivada.conflitos) {
+            problemas.push(`divergência ficha × prosa em "${c.campo}": ficha "${c.valorFicha}" vs página "${c.valorProsa}"`);
+          }
+        }
+      } catch (e) {
+        problemas.push(
+          `memória da prosa não extraída no capítulo ${capitulo} (${e instanceof Error ? e.message.slice(0, 120) : String(e)})`
+        );
+        await deps.gravador.registrarMemoriaIncompleta(capitulo);
+      }
+
       return { capitulo, status: verdictEfetivo, textHash, reviewId, gatesFalhos: [], problemas, runs };
     }
 
@@ -577,8 +823,11 @@ export async function escreverCapitulo(
     // Reprovado: correção dirigida se há instruções, orçamento e convergência.
     // O saldo pondera TODAS as fontes de reprovação (violações do revisor +
     // contradições bloqueantes e conhecimento indevido do auditor).
-    const violacoes = parecer.sinais.filter((s) => s.disposicao === "violacao_confirmada").length;
-    const saldo = violacoes + 2 * contradicoesBloqueantes.length + auditoria.conhecimento_indevido.length;
+    const violacoes = parecer.sinais.filter(
+      (s) => s.disposicao === "violacao_confirmada" || conferencia.rebaixados.includes(s.sinal)
+    ).length;
+    const saldo =
+      violacoes + 2 * contradicoesBloqueantes.length + auditoria.conhecimento_indevido.length + (povViolado ? 2 : 0) + 2 * conformidade.problemas.length;
     if (saldoAnterior !== null && saldo >= saldoAnterior) rodadasSemMelhora++;
     else rodadasSemMelhora = 0;
     const semConvergencia = rodadasSemMelhora >= 2; // duas rodadas sem melhora líquida = parar
@@ -597,6 +846,15 @@ export async function escreverCapitulo(
         problema: `conhecimento indevido: ${k.quem} não pode saber "${k.sabe_o_que_nao_deveria}"`,
         instrucao: "reescreva o trecho para que a informação não seja revelada por quem não a tem",
       })),
+      ...(povViolado
+        ? [
+            {
+              local: "capítulo inteiro",
+              problema: `POV violado: ${auditoria.pov_violado.detalhe}`,
+              instrucao: `reescreva os trechos indicados para respeitar o POV do contrato (${deps.contrato.contrato.pov.pessoa}), sem acesso a percepções ou pensamentos fora do ponto de vista vigente`,
+            },
+          ]
+        : []),
     ];
 
     // Violação difusa (ex.: cadência/cota estourada no capítulo inteiro) não se
@@ -605,7 +863,7 @@ export async function escreverCapitulo(
     // flagrou — o escritor precisa saber QUAIS frases contam (achados do canário
     // hoover).
     const globais = parecer.sinais
-      .filter((s) => s.disposicao === "violacao_confirmada")
+      .filter((s) => s.disposicao === "violacao_confirmada" || conferencia.rebaixados.includes(s.sinal))
       .map((s) => {
         const medido = acharSinalMedido(s.sinal, sinais);
         const cota = medido?.cota;
@@ -631,8 +889,12 @@ export async function escreverCapitulo(
       correcoesFeitas++;
       // Instrução global presente = meta difusa: modo REESCRITA ORIENTADA (preserva
       // eventos/fatos/diálogo/estrutura, reescreve a superfície). Sem meta global,
-      // modo cirúrgico. A escolha é do pipeline, nunca do modelo.
-      const modo: ModoCorrecao = globais.length > 0 ? "reescrita" : "cirurgico";
+      // modo cirúrgico. A escolha é do pipeline, nunca do modelo — e a estratégia
+      // da escada (`reescrita_orientada`/`reescrita_integral`) força o modo amplo.
+      const modo: ModoCorrecao =
+        globais.length > 0 || estrategia === "reescrita_orientada" || estrategia === "reescrita_integral"
+          ? "reescrita"
+          : "cirurgico";
       await corrigirComEscritor(todasCorrecoes, modo);
       gatesFalhos = await garantirGates();
       if (gatesFalhos.length) return bloquearPorGates(gatesFalhos);

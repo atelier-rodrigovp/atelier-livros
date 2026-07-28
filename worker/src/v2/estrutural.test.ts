@@ -26,6 +26,17 @@ function ler(n: number): string {
   return readFileSync(path.join(dir, `capitulo-${String(n).padStart(2, "0")}.md`), "utf8");
 }
 
+/**
+ * Conteúdo esperado quando o capítulo `origem` passa a ocupar a posição `novo`:
+ * a prosa é preservada e o cabeçalho acompanha a renumeração (fatia F — antes a
+ * edição estrutural só renomeava o arquivo e a prosa mantinha o número antigo).
+ */
+function renumerado(origem: number, novo: number): string {
+  return `## Capítulo ${novo}
+
+Conteúdo original ${origem}.`;
+}
+
 function plano(tipo: PropostaEstrutural["tipo"], extra: Partial<PropostaEstrutural> = {}): { schema: "structural-edit/v1"; propostas: unknown[] } {
   return { schema: "structural-edit/v1", propostas: [{ tipo, capitulos: [], justificativa: "motivo estrutural", ...extra }] };
 }
@@ -130,8 +141,11 @@ describe("aplicarEdicaoEstrutural", () => {
     });
     expect(rel.mapa).toEqual({ 2: 1, 1: 2 });
     expect(rel.totalFinal).toBe(2);
-    expect(ler(1)).toBe(c2); // o antigo capítulo 2 vira o 1
-    expect(ler(2)).toBe(c1);
+    // A prosa é preservada e o cabeçalho acompanha a renumeração.
+    expect(ler(1)).toBe(renumerado(2, 1)); // o antigo capítulo 2 vira o 1
+    expect(ler(2)).toBe(renumerado(1, 2));
+    expect(ler(1)).not.toBe(c2); // antes ficava "## Capítulo 2" dentro do capitulo-01.md
+    expect(c1).toContain("Conteúdo original 1.");
   });
 
   it("corte move para _cortados e renumera o restante", () => {
@@ -145,8 +159,9 @@ describe("aplicarEdicaoEstrutural", () => {
     });
     expect(rel.mapa).toEqual({ 1: 1, 3: 2 });
     expect(rel.totalFinal).toBe(2);
-    expect(ler(1)).toBe(c1);
-    expect(ler(2)).toBe(c3); // o antigo 3 vira 2
+    expect(ler(1)).toBe(c1); // posição inalterada: conteúdo intacto
+    expect(ler(2)).toBe(renumerado(3, 2)); // o antigo 3 vira 2, cabeçalho junto
+    expect(c3).toContain("## Capítulo 3");
     expect(existsSync(path.join(dir, "capitulo-03.md"))).toBe(false);
     expect(rel.arquivoOriginais).toBeTruthy();
     expect(existsSync(path.join(dir, rel.arquivoOriginais!, "capitulo-02.md"))).toBe(true);
@@ -159,7 +174,8 @@ describe("aplicarEdicaoEstrutural", () => {
     const propostas: PropostaEstrutural[] = [{ tipo: "reordenacao", capitulos: [1, 2], nova_ordem: [2, 1], justificativa: "troca" }];
     aplicarEdicaoEstrutural({ dirManuscrito: dir, propostas, total: 2 });
     const depoisPrimeira = [ler(1), ler(2)];
-    expect(depoisPrimeira).toEqual([c2, c1]);
+    expect(depoisPrimeira).toEqual([renumerado(2, 1), renumerado(1, 2)]);
+    expect([c1, c2]).toEqual([renumerado(1, 1), renumerado(2, 2)]);
 
     const rel2 = aplicarEdicaoEstrutural({ dirManuscrito: dir, propostas, total: 2 });
     expect(rel2.aplicadas).toEqual([]); // não reaplica
@@ -234,6 +250,7 @@ describe("aplicarEdicaoEstrutural", () => {
       total: 2,
     });
     expect(nova.aplicadas.length).toBeGreaterThan(0);
-    expect([ler(1), ler(2)]).toEqual([antes[1], antes[0]]);
+    expect([ler(1), ler(2)]).toEqual([renumerado(2, 1), renumerado(1, 2)]);
+    expect(antes).toEqual([renumerado(1, 1), renumerado(2, 2)]);
   });
 });

@@ -36,6 +36,13 @@ export interface PersistenciaV2 {
   maiorVersaoSpec(projectId: string, capitulo: number): Promise<number>;
   /** Ficha (scene-spec) da MAIOR versão persistida para (projeto, capítulo); null se nenhuma. */
   lerFichaMaisRecente(projectId: string, capitulo: number): Promise<SceneSpec | null>;
+  /**
+   * Ficha da maior versão de CADA capítulo do projeto, em UMA leitura.
+   * Existe para não fazer N consultas por capítulo escrito: o pacote do arquiteto
+   * e do contextualizador precisam do passado inteiro condensado, e o gate de
+   * rotação precisa do fio de cada capítulo.
+   */
+  lerFichasMaisRecentes(projectId: string): Promise<{ capitulo: number; ficha: SceneSpec }[]>;
   lerEstado(projectId: string): Promise<EstadoCanonico | null>;
   /** Grava com versao+1 (optimistic lock); ErroConcorrencia se a versão esperada divergir. */
   gravarEstado(estado: EstadoCanonico): Promise<void>;
@@ -172,6 +179,28 @@ export class SupabasePersistencia implements PersistenciaV2 {
         .maybeSingle();
       this.conferir(error, "engine_scene_specs.select_ficha");
       return (data as { ficha: SceneSpec } | null)?.ficha ?? null;
+    });
+  }
+
+  async lerFichasMaisRecentes(projectId: string): Promise<{ capitulo: number; ficha: SceneSpec }[]> {
+    return this.comRede(async () => {
+      const { sb, OWNER } = await this.cliente();
+      const { data, error } = await sb
+        .from("engine_scene_specs")
+        .select("capitulo, versao, ficha")
+        .eq("project_id", projectId)
+        .eq("owner", OWNER)
+        .order("capitulo", { ascending: true })
+        .order("versao", { ascending: true });
+      this.conferir(error, "engine_scene_specs.select_fichas");
+      // Ordenado por versão crescente: a última gravação de cada capítulo vence.
+      const porCapitulo = new Map<number, SceneSpec>();
+      for (const l of (data ?? []) as { capitulo: number; ficha: SceneSpec }[]) {
+        if (l.ficha) porCapitulo.set(l.capitulo, l.ficha);
+      }
+      return [...porCapitulo.entries()]
+        .map(([capitulo, ficha]) => ({ capitulo, ficha }))
+        .sort((a, b) => a.capitulo - b.capitulo);
     });
   }
 
@@ -337,6 +366,23 @@ export class DiscoPersistencia implements PersistenciaV2 {
       }
     }
     return ficha;
+  }
+
+  async lerFichasMaisRecentes(projectId: string): Promise<{ capitulo: number; ficha: SceneSpec }[]> {
+    const maiorVersao = new Map<number, number>();
+    const fichas = new Map<number, SceneSpec>();
+    for (const linha of this.lerJsonl("specs.jsonl")) {
+      if (linha.op !== "insert") continue;
+      const r = linha.registro as { project_id?: string; capitulo?: number; versao?: number; ficha?: SceneSpec };
+      if (r.project_id !== projectId || typeof r.capitulo !== "number" || typeof r.versao !== "number" || !r.ficha) continue;
+      if (r.versao >= (maiorVersao.get(r.capitulo) ?? 0)) {
+        maiorVersao.set(r.capitulo, r.versao);
+        fichas.set(r.capitulo, r.ficha);
+      }
+    }
+    return [...fichas.entries()]
+      .map(([capitulo, ficha]) => ({ capitulo, ficha }))
+      .sort((a, b) => a.capitulo - b.capitulo);
   }
 
   async lerEstado(projectId: string): Promise<EstadoCanonico | null> {

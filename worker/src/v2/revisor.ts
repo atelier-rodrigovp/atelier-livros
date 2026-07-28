@@ -246,6 +246,12 @@ export interface ConsistenciaParecer {
   problemas: string[];
   /** veredito EFETIVO após as regras (pode rebaixar o do revisor, nunca promover) */
   verdictEfetivo: Verdict;
+  /**
+   * Sinais cuja "excecao_valida" foi rebaixada a violação por disposição fechada
+   * do contrato. O pipeline os trata como violação ao montar as correções — senão
+   * o capítulo reprovaria sem instrução e só queimaria tentativa.
+   */
+  rebaixados: string[];
 }
 
 /**
@@ -256,7 +262,63 @@ export interface ConsistenciaParecer {
  * 4. qualquer necessita_decisao_humana ⇒ verdict necessita_decisao_humana.
  * 5. o veredito nunca é promovido por código — só rebaixado (quem aprova é o revisor).
  */
-export function conferirParecer(parecer: Parecer, sinaisMedidos: SinalMedido[]): ConsistenciaParecer {
+/**
+ * PISOS por eixo (fatia J). O parecer trazia notas de 0 a 5 e o veredito era do
+ * revisor: nada impedia "continuidade 1, progressão dramática 1, verdict:
+ * aprovado". Agora a regra numérica vence a declaração — código só REBAIXA.
+ *
+ * Continuidade e progressão dramática têm piso mais alto de propósito: são as
+ * duas coisas que um capítulo bonito e inútil costuma falhar.
+ */
+export const PISOS_POR_EIXO: Record<string, number> = {
+  dramatic_progression: 3,
+  continuity: 3,
+  skill_adherence: 2,
+  clarity: 2,
+  emotional_effect: 2,
+  hook_effectiveness: 2,
+};
+
+/** Eixos abaixo do piso, com a nota e o piso citados. */
+export function eixosAbaixoDoPiso(
+  parecer: Parecer,
+  pisos: Record<string, number> = PISOS_POR_EIXO
+): { eixo: string; nota: number; piso: number }[] {
+  const out: { eixo: string; nota: number; piso: number }[] = [];
+  for (const [eixo, piso] of Object.entries(pisos)) {
+    const valor = (parecer as unknown as Record<string, { nota?: number } | undefined>)[eixo];
+    const nota = Number(valor?.nota ?? NaN);
+    if (Number.isFinite(nota) && nota < piso) out.push({ eixo, nota, piso });
+  }
+  return out;
+}
+
+/** Evidência que não localiza nada não sustenta aprovação. */
+export function evidenciasNaoLocalizaveis(parecer: Parecer): string[] {
+  const problemas: string[] = [];
+  for (const [i, e] of parecer.evidencias.entries()) {
+    if (!e.trecho?.trim()) {
+      problemas.push(`evidencias[${i}]: trecho vazio`);
+      continue;
+    }
+    if (e.trecho.trim().length < 12) {
+      problemas.push(`evidencias[${i}]: trecho curto demais para localizar ("${e.trecho}")`);
+    }
+    if (!e.local?.trim()) {
+      problemas.push(`evidencias[${i}]: sem "local" — a evidência precisa dizer ONDE está`);
+    }
+    if (!e.observacao?.trim()) {
+      problemas.push(`evidencias[${i}]: sem observação — citar sem dizer o que prova não é evidência`);
+    }
+  }
+  return problemas;
+}
+
+export function conferirParecer(
+  parecer: Parecer,
+  sinaisMedidos: SinalMedido[],
+  pisos: Record<string, number> = PISOS_POR_EIXO
+): ConsistenciaParecer {
   const problemas: string[] = [];
   let verdict: Verdict = parecer.verdict;
 
@@ -264,6 +326,24 @@ export function conferirParecer(parecer: Parecer, sinaisMedidos: SinalMedido[]):
   if (aprovando && parecer.evidencias.length === 0) {
     problemas.push("aprovação sem evidência positiva");
     verdict = "reprovado";
+  }
+
+  // Piso por eixo: o parecer NÃO pode declarar aprovação contra a regra numérica.
+  const abaixo = eixosAbaixoDoPiso(parecer, pisos);
+  if (abaixo.length && aprovando) {
+    for (const a of abaixo) {
+      problemas.push(`eixo "${a.eixo}" com nota ${a.nota}, abaixo do piso ${a.piso} — aprovação impossível`);
+    }
+    verdict = "reprovado";
+  }
+
+  // Evidência precisa LOCALIZAR: trecho citável, onde está e o que prova.
+  if (aprovando) {
+    const naoLocalizaveis = evidenciasNaoLocalizaveis(parecer);
+    if (naoLocalizaveis.length) {
+      problemas.push(...naoLocalizaveis);
+      verdict = "reprovado";
+    }
   }
 
   const citacoesInvalidas = problemasDeCitacao(parecer, sinaisMedidos);
@@ -278,6 +358,23 @@ export function conferirParecer(parecer: Parecer, sinaisMedidos: SinalMedido[]):
       problemas.push(`sinal fora da cota sem disposição: ${m.sinal} (${m.valor})`);
       verdict = verdict === "necessita_decisao_humana" ? verdict : "reprovado";
     }
+  }
+
+  // Disposição FECHADA (contrato com `sem_excecao`): "excecao_valida" não é
+  // resposta admissível — o piso de densidade do romantasy diz, literalmente,
+  // "abaixo do piso é reprovação, não 'ou justificado'". Código só REBAIXA
+  // (regra 5): a exceção vira violação, nunca o contrário.
+  const rebaixados: string[] = [];
+  for (const s of parecer.sinais) {
+    if (s.disposicao !== "excecao_valida") continue;
+    const medido = acharSinalMedido(s.sinal, sinaisMedidos);
+    if (!medido?.sem_excecao || !medido.fora_da_cota) continue;
+    rebaixados.push(s.sinal);
+    problemas.push(
+      `sinal "${s.sinal}" (${String(medido.valor)}): o contrato não admite exceção para esta cota — ` +
+        `"excecao_valida" rebaixada a violação`
+    );
+    if (verdict !== "necessita_decisao_humana") verdict = "reprovado";
   }
 
   const violacoes = parecer.sinais.filter((s) => s.disposicao === "violacao_confirmada");
@@ -301,5 +398,5 @@ export function conferirParecer(parecer: Parecer, sinaisMedidos: SinalMedido[]):
     }
   }
 
-  return { ok: problemas.length === 0, problemas, verdictEfetivo: verdict };
+  return { ok: problemas.length === 0, problemas, verdictEfetivo: verdict, rebaixados };
 }

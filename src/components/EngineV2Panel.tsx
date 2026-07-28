@@ -13,6 +13,8 @@ import {
   type ReviewV2,
   type RunV2,
 } from "@/lib/engineV2";
+import { PainelEditorial } from "@/components/PainelEditorial";
+import type { EstadoV2Painel } from "@/lib/painelEditorial";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
@@ -431,6 +433,8 @@ export function EngineV2Panel({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-4">
+      {/* Fatia O — o que a engine sabe sobre o livro, antes do detalhe técnico. */}
+      <PainelEditorial estado={doc as unknown as EstadoV2Painel} />
       <Card>
         <CardHeader>
           <CardTitle className="text-xl">Engine V2</CardTitle>

@@ -22,18 +22,22 @@ import {
 import { ChevronDown } from "lucide-react";
 import { IDIOMAS, type Job, type Project } from "@/lib/types";
 import { displayProjectStatus, jobStatusBadgeEx } from "@/lib/status";
-import { resolveOperationalState, buildResolverInput, toneToVariant, escritaGovernaCartao } from "@/lib/resolveOperationalState";
+import { resolveOperationalState, buildResolverInput, toneToVariant, escritaGovernaCartao, motivoEscritaIndisponivel, ROTULO_CLASSE_BLOQUEIO } from "@/lib/resolveOperationalState";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { EstadoOperacional } from "@/components/EstadoOperacional";
+import { interpretarAutorizacao, rotularAutorizacao, type AutorizacaoV2Row, type RotuloAutorizacao } from "@/lib/autorizacaoV2";
+import { lerProntidaoPublicada, type ProntidaoNaTela } from "@/lib/prontidaoPublicada";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ReviewReport } from "@/components/ReviewReport";
 import { EngineV2Panel } from "@/components/EngineV2Panel";
+import { chaveStorageDocumento, documentosParaExibir } from "@/lib/documentosFundacao";
 
 interface Edition { id: string; idioma: string; status: string; is_origem: boolean; nota_review: number | null; }
 interface Artifact { id: string; edition_id: string | null; tipo: string; storage_path: string; url_publica: string | null; created_at?: string; meta?: any; }
@@ -69,6 +73,10 @@ export default function Projeto() {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [pkgs, setPkgs] = useState<Pkg[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
+  // Autorizacao e prontidao publicada: sem elas a tela nao distingue "nao posso"
+  // de "esta quebrado", nem saude local de producao certificada.
+  const [autorizacao, setAutorizacao] = useState<RotuloAutorizacao | null>(null);
+  const [prontidao, setProntidao] = useState<ProntidaoNaTela | null>(null);
   const [idiomasSel, setIdiomasSel] = useState<string[]>([]);
   const [capaUrls, setCapaUrls] = useState<Record<string, string | null>>({});
   const [capaBrief, setCapaBrief] = useState("");
@@ -131,6 +139,20 @@ export default function Projeto() {
     setArtifacts((arts as Artifact[]) ?? []);
     setPkgs((pk as Pkg[]) ?? []);
     setJobs((js as Job[]) ?? []);
+
+    // Fail-closed: erro ou tabela ausente vira estado "indisponivel" explicito,
+    // nunca ausencia de aviso. `interpretarAutorizacao` decide; a tela so mostra.
+    const rAut = await supabase
+      .from("engine_autorizacoes_v2")
+      .select("project_id,modo,autorizado_por,motivo,ativo,revoked_at,created_at")
+      .eq("project_id", id);
+    setAutorizacao(
+      rotularAutorizacao(interpretarAutorizacao((rAut.data as AutorizacaoV2Row[] | null) ?? null, rAut.error))
+    );
+
+    // Mesma convencao da telemetria: linha em `jobs` com tipo dedicado.
+    const rPront = await supabase.from("jobs").select("payload").eq("tipo", "prontidao_v2").limit(1).maybeSingle();
+    setProntidao(lerProntidaoPublicada((rPront.data as { payload?: unknown } | null)?.payload ?? null));
     const counts: Record<string, number> = {};
     for (const c of (chs as { edition_id: string }[]) ?? []) counts[c.edition_id] = (counts[c.edition_id] ?? 0) + 1;
     setChapters(counts);
@@ -212,6 +234,12 @@ export default function Projeto() {
     if (error) { toast.error(error.message); return; }
     setProj((p) => (p ? { ...p, briefing: novo } : p));
   }
+  // Uma so porta para "escrever": os quatro ids do resolvedor que significam
+  // "toque a escrita" apontam para ca, em vez de repetir a chamada em cada um.
+  function escreverAgora() {
+    void enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {});
+  }
+
   async function produzirAgora() {
     const { data } = await supabase.from("projects").select("briefing").eq("owner", proj?.owner ?? "").neq("id", id ?? "");
     const maxOutros = Math.max(0, ...((data ?? []).map((p: any) => Number(p.briefing?.prioridade ?? 0) || 0)));
@@ -393,8 +421,8 @@ export default function Projeto() {
     setRelRaw(false);
     setRelCarregando(true);
     setRelOpen(true);
-    const txt = await downloadText("manuscritos", rev.storage_path);
-    setRelTxt(txt || "Não consegui carregar o relatório.");
+    const r = await downloadText("manuscritos", rev.storage_path);
+    setRelTxt(r.erro ? `Não consegui carregar o relatório: ${r.erro}` : r.texto || "(relatório vazio)");
     setRelCarregando(false);
   }
   async function enviarMelhorias() {
@@ -672,15 +700,23 @@ export default function Projeto() {
                     <div className="space-y-2">
                       <p className="text-xs font-medium text-muted-foreground">Documentos</p>
                       <div className="flex flex-wrap gap-2">
-                        {["Biblia-da-Obra.md", "Estrutura-do-Livro.md", "Mapa-de-Personagens.md", "perfil-de-voz.md"].map((f) => (
-                          <Button key={f} variant="outline" size="sm" onClick={async () => {
-                            const url = await signedUrl("manuscritos", `${proj.owner}/${proj.id}/fundacao/${f}`);
-                            if (url) window.open(url, "_blank"); else toast.error("Arquivo não encontrado no Storage.");
+                        {documentosParaExibir(pg).map((d) => (
+                          <Button key={d.caminho} variant="outline" size="sm" onClick={async () => {
+                            const url = await signedUrl("manuscritos", chaveStorageDocumento(proj.owner, proj.id, d.caminho));
+                            if (url) window.open(url, "_blank"); else toast.error(`Documento não encontrado no Storage: ${d.caminho}`);
                           }}>
-                            <FileText className="h-4 w-4" /> {f}
+                            <FileText className="h-4 w-4" /> {d.titulo}
+                            {d.origem === "contrato" && (
+                              <span className="ml-1 rounded bg-muted px-1 text-[10px] text-muted-foreground">contrato</span>
+                            )}
                           </Button>
                         ))}
                       </div>
+                      {Array.isArray(pg?.storage_falhas) && pg.storage_falhas.length > 0 && (
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          {pg.storage_falhas.length} documento(s) não subiram para o Storage e não abrem aqui — o worker registrou o motivo.
+                        </p>
+                      )}
                     </div>
 
                     <div className="space-y-2 rounded-lg border p-4">
@@ -791,6 +827,12 @@ export default function Projeto() {
                     {st.blocker_humano ? (
                       <p className="text-xs text-amber-700 dark:text-amber-400">{st.blocker_humano}</p>
                     ) : null}
+                    {/* De que NATUREZA é o impedimento. Sem isto, "aguardando cota"
+                        e "capítulo reprovado" chegam ao autor com a mesma cara, e
+                        as reações certas são opostas: uma é esperar, outra é ler. */}
+                    {st.classe_bloqueio ? (
+                      <p className="text-xs text-muted-foreground">{ROTULO_CLASSE_BLOQUEIO[st.classe_bloqueio]}</p>
+                    ) : null}
                     {/* SG7: pendência de FUNDAÇÃO em banner próprio — não se mistura ao capítulo. */}
                     {st.aviso_fundacao ? (
                       <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">{st.aviso_fundacao}</p>
@@ -799,7 +841,12 @@ export default function Projeto() {
                       {/* SG6: em correção automática o clique NÃO é necessário — o botão vira
                           ação excepcional ("Tentar agora" antecipa a janela do retry). */}
                       <Button
-                        title={st.situacao === "aguardando_correcao" ? "Opcional: antecipa a tentativa automática (o fluxo segue sozinho sem clique)." : dicaRefino}
+                        title={
+                          motivoEscritaIndisponivel(escrevendo, escritaPausada, st.situacao) ??
+                          (st.situacao === "aguardando_correcao"
+                            ? "Opcional: antecipa a tentativa automática (o fluxo segue sozinho sem clique)."
+                            : dicaRefino)
+                        }
                         disabled={escrevendo || escritaPausada || st.situacao === "correcao_automatica"}
                         onClick={() => enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {})}
                       >
@@ -824,6 +871,26 @@ export default function Projeto() {
                         </span>
                       ) : null}
                     </div>
+                    {/* O contrato do resolvedor, renderizado: próxima ação e
+                        botões deixam de ser campos que só o teste lia. Só entram
+                        as ações com handler NESTA tela — controle sem handler
+                        seria botão que o autor clica e nada acontece. */}
+                    <EstadoOperacional
+                      estado={st}
+                      autorizacao={autorizacao ?? undefined}
+                      prontidao={prontidao ?? undefined}
+                      acoes={{
+                        ver_diagnostico: () => setTab("engine"),
+                        ver_edicao: () => setTab("edicoes"),
+                        abrir_configuracoes: () => nav("/configuracoes"),
+                        // Quatro rótulos, uma ação: enfileirar a escrita. O que
+                        // muda entre eles é o momento, não o efeito.
+                        iniciar_escrita: escreverAgora,
+                        tentar_agora: escreverAgora,
+                        corrigir: escreverAgora,
+                        continuar: escreverAgora,
+                      }}
+                    />
                     {st.situacao === "circuit_breaker" && (
                       <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
                         <p className="font-medium">

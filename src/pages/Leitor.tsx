@@ -119,8 +119,11 @@ export default function Leitor() {
     let vivo = true;
     setCarregandoCap(true);
     (async () => {
-      const md = await downloadText("manuscritos", cap.storage_path!);
-      const h = mdToHtml(md);
+      const r = await downloadText("manuscritos", cap.storage_path!);
+      // Capitulo que nao carregou nao pode aparecer como capitulo em branco.
+      const h = r.erro
+        ? `<p class="erro-leitura">Nao foi possivel carregar este capitulo: ${r.erro}</p>`
+        : mdToHtml(r.texto);
       cacheRef.current[cap.id] = h;
       if (vivo) { setHtml(h); setCarregandoCap(false); }
     })();

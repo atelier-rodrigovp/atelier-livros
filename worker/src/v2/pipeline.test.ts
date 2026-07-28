@@ -10,6 +10,7 @@ import { Gravador } from "./gravador.js";
 import { DiscoPersistencia } from "./persistencia.js";
 import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
 import { ProvedorMock } from "./provedor.js";
+import { entradasDaFicha, TETO_LEDGER_NO_PACOTE } from "./ledger.js";
 import { medirSinais } from "./sinais.js";
 import type { Parecer, SceneSpec, SkillContract } from "./tipos.js";
 
@@ -189,7 +190,9 @@ describe("escreverCapitulo — caminho feliz", () => {
     expect(r.textHash).toBe(hashText(PROSA_OK));
     expect(r.gatesFalhos).toEqual([]);
     expect(r.problemas).toEqual([]);
-    expect(r.runs).toHaveLength(5);
+    // 7 papéis no capítulo aprovado: ficha, contexto, escritor, revisor, auditor,
+    // conformidade e extrator de memória (este só roda depois da aprovação).
+    expect(r.runs).toHaveLength(7);
 
     // Arquivo no disco escrito pelo pipeline (não pelo modelo)
     const caminho = path.join(dir, "manuscrito", "capitulo-03.md");
@@ -223,7 +226,7 @@ describe("escreverCapitulo — caminho feliz", () => {
 
     // Runs no ledger, todos com input_bundle_hash preenchido
     const runs = await disco.lerRuns();
-    expect(runs.length).toBeGreaterThanOrEqual(5);
+    expect(runs.length).toBeGreaterThanOrEqual(7);
     for (const run of runs) expect(run.input_bundle_hash).toBeTruthy();
     expect(runs.every((run) => run.status === "ok")).toBe(true);
   });
@@ -268,7 +271,7 @@ describe("escreverCapitulo — correção de gate", () => {
 
     const r = await escreverCapitulo(deps, 3);
     expect(r.status).toBe("aprovado");
-    expect(r.runs).toHaveLength(6); // escritor rodou duas vezes
+    expect(r.runs).toHaveLength(8); // escritor rodou duas vezes (+ conformidade + memória)
 
     // A correção dirigida citou o gate falho e o texto atual
     const chamadasEscritor = provedor.chamadas.filter((c) => c.papel === "escritor");
@@ -310,7 +313,7 @@ describe("escreverCapitulo — aprovação sem evidência rebaixa", () => {
     expect(r.status).toBe("reprovado");
     expect(r.problemas).toContain("aprovação sem evidência positiva");
     expect(r.textHash).toBe(hashText(PROSA_CORRIGIDA));
-    expect(r.runs).toHaveLength(7); // ctx + escritor + (rev+aud) + escritor + (rev+aud)
+    expect(r.runs).toHaveLength(9); // ctx + escritor + (rev+aud+conf) + escritor + (rev+aud+conf)
 
     // Review reprovada persistida + bloqueio registrado no estado
     const reviews = lerJsonl("reviews.jsonl");
@@ -547,5 +550,166 @@ describe("escreverCapitulo — contextualizador fora do schema", () => {
     expect(runsCtx).toHaveLength(2);
     expect(runsCtx.every((run) => run.status === "falha")).toBe(true);
     expect(runsCtx.every((run) => run.erro?.codigo === "FORA_DO_SCHEMA")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Memória de longo alcance: ledger de revelações no pacote e no gate
+// ---------------------------------------------------------------------------
+
+/** Semeia N capítulos aprovados: fichas persistidas + ledger no estado canônico. */
+async function semearPassado(ate: number): Promise<void> {
+  const estado = (await disco.lerEstado("proj-1")) ?? {
+    project_id: "proj-1",
+    engine_version: "2.0.0",
+    versao: 0,
+    doc: { schema: "engine-state/v1", fase: "escrita", capitulos: {}, bloqueios: [] },
+  };
+  const ledger = [];
+  for (let n = 1; n <= ate; n++) {
+    const f: SceneSpec = {
+      ...ficha(),
+      capitulo: n,
+      pov: n % 2 === 0 ? "Helena" : "Marina",
+      tempo: `Dia ${n}, 09h`,
+      informacao_nova: `o registro ${n} aponta para o cais ${n}`,
+    };
+    await disco.inserirSpec({
+      project_id: "proj-1",
+      capitulo: n,
+      versao: 1,
+      hash: `h-${n}`,
+      status: "validada",
+      ficha: f,
+    });
+    ledger.push(...entradasDaFicha(n, f));
+    estado.doc.capitulos[String(n)] = { status: "aprovado", text_hash: `t-${n}`, spec_versao: 1 };
+  }
+  estado.doc.ledger_revelacoes = ledger;
+  await disco.gravarEstado(estado as never);
+}
+
+describe("arquiteto de cena enxerga o passado", () => {
+  it("pacote do capítulo 8 com 7 capítulos aprovados traz o ledger e as fichas anteriores", async () => {
+    await semearPassado(7);
+
+    const f8 = { ...ficha(), capitulo: 8, informacao_nova: "o cofre do consulado tem fundo falso" };
+    provedor.enfileirar("arquiteto_cena", JSON.stringify(f8));
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_OK.replace("Capítulo 3", "Capítulo 8"));
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecer()));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    const r = await escreverCapitulo(deps, 8);
+    expect(r.status).toBe("aprovado");
+
+    const promptArquiteto = provedor.chamadas.find((c) => c.papel === "arquiteto_cena")!.prompt;
+    // O ledger inteiro chega ao pacote (7 revelações, com capítulo de origem).
+    expect(promptArquiteto).toContain("LEDGER DE REVELAÇÕES");
+    for (let n = 1; n <= 7; n++) {
+      expect(promptArquiteto).toContain(`o registro ${n} aponta para o cais ${n}`);
+      expect(promptArquiteto).toContain(`R0${n}.1`);
+    }
+    // E o passado condensado, uma linha por capítulo.
+    expect(promptArquiteto).toContain("CAPÍTULOS ANTERIORES (fichas condensadas)");
+    expect(promptArquiteto).toContain("Cap 7 [Marina]");
+    expect(promptArquiteto).toContain("Cap 2 [Helena]");
+  });
+
+  it("o contextualizador também recebe ledger e passado (para de inventar)", async () => {
+    await semearPassado(7);
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_OK);
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecer()));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    await escreverCapitulo(deps, 8, { fichaExistente: { ...ficha(), capitulo: 8 } });
+
+    const promptCtx = provedor.chamadas.find((c) => c.papel === "contextualizador")!.prompt;
+    expect(promptCtx).toContain("LEDGER DE REVELAÇÕES");
+    expect(promptCtx).toContain("CAPÍTULOS ANTERIORES (fichas condensadas)");
+    expect(promptCtx).toContain("o registro 3 aponta para o cais 3");
+  });
+});
+
+describe("gate de revelação repetida no pipeline", () => {
+  it("revelação já no ledger reprova a ficha e o RETRY recebe a entrada exata", async () => {
+    await semearPassado(7);
+
+    // 1ª tentativa: repete literalmente a revelação do capítulo 3.
+    provedor.enfileirar(
+      "arquiteto_cena",
+      JSON.stringify({ ...ficha(), capitulo: 8, informacao_nova: "o registro 3 aponta para o cais 3" })
+    );
+    // 2ª tentativa: revelação genuinamente nova.
+    provedor.enfileirar(
+      "arquiteto_cena",
+      JSON.stringify({ ...ficha(), capitulo: 8, informacao_nova: "o cofre do consulado tem fundo falso" })
+    );
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_OK.replace("Capítulo 3", "Capítulo 8"));
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecer()));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    const r = await escreverCapitulo(deps, 8);
+    expect(r.status).toBe("aprovado");
+
+    // A 1ª tentativa foi reprovada pelo gate, com o capítulo de origem citado.
+    const runsArq = (await disco.lerRuns()).filter((run) => run.papel === "arquiteto_cena");
+    expect(runsArq).toHaveLength(2);
+    expect(runsArq[0].status).toBe("falha");
+    expect(runsArq[0].erro?.mensagem).toContain("capítulo 3");
+    expect(runsArq[0].erro?.mensagem).toContain("R03.1");
+
+    // ADENDO §1: o prompt do retry carrega a ENTRADA LITERAL do ledger.
+    const promptRetry = provedor.chamadas.filter((c) => c.papel === "arquiteto_cena")[1].prompt;
+    expect(promptRetry).toContain("CORREÇÃO (tentativa 2)");
+    expect(promptRetry).toContain("o registro 3 aponta para o cais 3");
+    expect(promptRetry).toContain("capítulo 3");
+  });
+
+  it("o retry vê a entrada mesmo quando ela está FORA da janela do pacote", async () => {
+    await semearPassado(TETO_LEDGER_NO_PACOTE + 30);
+
+    // Repete a revelação do capítulo 1, que a janela do pacote não mostra.
+    provedor.enfileirar(
+      "arquiteto_cena",
+      JSON.stringify({ ...ficha(), capitulo: 200, informacao_nova: "o registro 1 aponta para o cais 1" })
+    );
+    provedor.enfileirar(
+      "arquiteto_cena",
+      JSON.stringify({ ...ficha(), capitulo: 200, informacao_nova: "o cofre do consulado tem fundo falso" })
+    );
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_OK.replace("Capítulo 3", "Capítulo 200"));
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecer()));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    const r = await escreverCapitulo(deps, 200);
+    expect(r.status).toBe("aprovado");
+
+    const chamadas = provedor.chamadas.filter((c) => c.papel === "arquiteto_cena");
+    // O pacote da 1ª tentativa DEGRADOU: a entrada do capítulo 1 não estava lá.
+    expect(chamadas[0].prompt).toContain("omitidas por tamanho");
+    expect(chamadas[0].prompt).not.toContain("[R01.1 · cap 1]");
+    // Mas o retry recebe a entrada exata — sem isso o teto de tentativas
+    // seria consumido em silêncio (adendo §1 do autor).
+    expect(chamadas[1].prompt).toContain("o registro 1 aponta para o cais 1");
+    expect(chamadas[1].prompt).toContain("capítulo 1");
+  });
+
+  it("aprovar um capítulo alimenta o ledger deterministicamente", async () => {
+    provedor.enfileirar("arquiteto_cena", JSON.stringify(ficha()));
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_OK);
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecer()));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    await escreverCapitulo(deps, 3);
+
+    const estado = await disco.lerEstado("proj-1");
+    expect(estado?.doc.ledger_revelacoes).toEqual([
+      { id: "R03.1", capitulo: 3, enunciado: "o nome do irmão consta como acompanhante" },
+    ]);
   });
 });

@@ -13,13 +13,23 @@ export async function signedUrl(
 }
 
 // Baixa um objeto de texto (ex.: markdown da fundação) como string.
-export async function downloadText(
-  bucket: string,
-  key: string
-): Promise<string> {
+export interface TextoBaixado {
+  texto: string;
+  /** Mensagem de falha; `null` quando o download deu certo. */
+  erro: string | null;
+}
+
+/**
+ * Devolvia "" tanto para "documento vazio" quanto para "o Storage falhou". Um
+ * capitulo que nao carregou aparecia como capitulo em branco — erro de rede
+ * virando sucesso visual. Agora a falha e um valor, e quem chama tem de decidir
+ * o que mostrar.
+ */
+export async function downloadText(bucket: string, key: string): Promise<TextoBaixado> {
   const { data, error } = await supabase.storage.from(bucket).download(key);
-  if (error || !data) return "";
-  return await data.text();
+  if (error) return { texto: "", erro: error.message || "falha ao baixar do Storage" };
+  if (!data) return { texto: "", erro: "o Storage nao devolveu conteudo" };
+  return { texto: await data.text(), erro: null };
 }
 
 const BUCKETS = ["manuscritos", "epubs", "capas", "pacotes"];

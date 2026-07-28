@@ -12,9 +12,11 @@ import type { Gravador } from "./gravador.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
+import { rodarGatesCapitulo } from "./gates.js";
 import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
 import { tarefaAvaliadorLivro, tarefaSinteseArco } from "./tarefas.js";
-import { ErroEngine, type ContratoCompilado, type MapaModelos, type Parecer, type SceneSpec } from "./tipos.js";
+import { capitulosAfetados, construirGrafo, decidirRevalidacao } from "./revalidacao.js";
+import { ErroEngine, type ContratoCompilado, type MapaModelos, type Parecer, type ResultadoGate, type SceneSpec } from "./tipos.js";
 import type { CapituloEstado } from "./tipos.js";
 
 // Acima disso, o manuscrito é avaliado em blocos de capítulos e as avaliações são agregadas.
@@ -115,6 +117,65 @@ export function derivarNotaEFloor(dimensoes: Record<string, DimensaoAvaliada>): 
 
 function contarPalavras(t: string): number {
   return t.split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * Vizinhança de um capítulo para reescrita: TODOS os capítulos anteriores no
+ * disco (o gate de repetição quase-literal roda contra eles) e a cauda do N−1
+ * (continuidade imediata de gancho).
+ *
+ * Existe porque a meta-9 reescrevia sem passar nada disso: o gate de repetição
+ * nem chegava a rodar, e a reescrita podia reintroduzir uma frase já usada em
+ * outro capítulo sem ninguém perceber.
+ */
+export function vizinhancaDoCapitulo(
+  dirManuscrito: string,
+  capitulo: number
+): { anteriores: { numero: number; trecho: string }[]; trechosAnteriores: SecaoContexto[] } {
+  const anteriores: { numero: number; trecho: string }[] = [];
+  const trechosAnteriores: SecaoContexto[] = [];
+  for (let n = 1; n < capitulo; n++) {
+    const caminho = path.join(dirManuscrito, nomeCapitulo(n));
+    if (!existsSync(caminho)) continue;
+    const texto = readFileSync(caminho, "utf8");
+    anteriores.push({ numero: n, trecho: texto });
+    if (n === capitulo - 1) {
+      trechosAnteriores.push({
+        titulo: `FINAL DO CAPÍTULO ${n} (continuidade imediata)`,
+        texto: texto.split(/\n{2,}/).slice(-3).join("\n\n"),
+        fonte: `capitulo-${n}`,
+      });
+    }
+  }
+  return { anteriores, trechosAnteriores };
+}
+
+/**
+ * Revalida a VIZINHANÇA depois de reescrever um capítulo. O capítulo N+1 foi
+ * escrito consumindo o gancho do N ANTIGO; trocado o N, ele precisa ser conferido
+ * de novo contra a nova vizinhança. Roda os gates determinísticos (não gasta
+ * modelo): repetição quase-literal, truncamento, POV.
+ *
+ * Devolve os gates que falharam por capítulo — a decisão de bloquear é de quem
+ * chama, com a evidência na mão.
+ */
+export function revalidarVizinhanca(
+  dirManuscrito: string,
+  capituloReescrito: number,
+  total: number,
+  contrato: ContratoCompilado
+): { capitulo: number; gates: ResultadoGate[] }[] {
+  const problemas: { capitulo: number; gates: ResultadoGate[] }[] = [];
+  const vizinhos = [capituloReescrito + 1].filter((n) => n <= total);
+  for (const n of vizinhos) {
+    const caminho = path.join(dirManuscrito, nomeCapitulo(n));
+    if (!existsSync(caminho)) continue;
+    const texto = readFileSync(caminho, "utf8");
+    const { anteriores } = vizinhancaDoCapitulo(dirManuscrito, n);
+    const falhos = rodarGatesCapitulo({ texto, contrato: contrato.contrato, anteriores }).filter((g) => !g.passou);
+    if (falhos.length) problemas.push({ capitulo: n, gates: falhos });
+  }
+  return problemas;
 }
 
 function nomeCapitulo(n: number): string {
@@ -725,10 +786,15 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
         instrucao: alvo.instrucoes[i] ?? alvo.instrucoes[0] ?? "reescreva conforme o problema apontado",
       }));
       try {
+        // Reescrita COM a vizinhança: sem isto o gate de repetição quase-literal
+        // não roda, e a reescrita pode reintroduzir uma frase já usada antes.
+        const vizinhanca = vizinhancaDoCapitulo(deps.dirManuscrito, alvo.capitulo);
         const r = await escreverCapitulo(depsPipeline, alvo.capitulo, {
           fichaExistente: fichas.get(alvo.capitulo)!,
           textoBase: snapshot.texto,
           reescritaDirigida: { correcoes },
+          anteriores: vizinhanca.anteriores,
+          trechosAnteriores: vizinhanca.trechosAnteriores,
         });
         lotePendente.tentativas.set(alvo.capitulo, {
           status: r.status === "necessita_decisao_humana" ? "bloqueado" : r.status,
@@ -737,7 +803,55 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
         });
         // A meta-nota é um funil de melhora: uma exceção nova não substitui uma
         // versão já aprovada. Canários e estado final exigem aprovação plena.
-        if (r.status === "aprovado") continue;
+        if (r.status === "aprovado") {
+          // REVALIDAÇÃO TRANSITIVA (fatia K): a vizinhança cobre continuidade
+          // local; o grafo de dependências cobre o capítulo 11 que depende do
+          // que o 4 estabeleceu. Reabrir ≠ reescrever: a lista aqui é de
+          // capítulos cuja aprovação foi INVALIDADA e que serão REAVALIADOS.
+          const estadoDeps = await deps.gravador.carregarEstado();
+          const fichasParaGrafo: { capitulo: number; ficha: SceneSpec }[] = [];
+          for (let n = 1; n <= total; n++) {
+            const f = await deps.persistencia.lerFichaMaisRecente(deps.projectId, n);
+            if (f) fichasParaGrafo.push({ capitulo: n, ficha: f });
+          }
+          const grafo = construirGrafo({
+            fichas: fichasParaGrafo,
+            memoria: estadoDeps.doc.memoria_prosa ?? [],
+          });
+          const afetados = capitulosAfetados(grafo, alvo.capitulo);
+          const decisaoRev = decidirRevalidacao(afetados);
+          await deps.gravador.registrarRevalidacao(alvo.capitulo, decisaoRev.acao, afetados);
+          if (decisaoRev.acao === "decisao_humana") {
+            const motivo = `reescrita do capítulo ${alvo.capitulo}: ${decisaoRev.motivo}`;
+            await restaurarLote(lotePendente, motivo);
+            lotePendente = null;
+            await deps.gravador.registrarBloqueio("META_CASCATA_ACIMA_DO_TETO", "livro", motivo);
+            throw new ErroEngine({
+              codigo: "META_CASCATA_ACIMA_DO_TETO",
+              classe: "qualidade",
+              mensagem: `meta ${meta} não atingida: ${motivo}; melhor versão aprovada restaurada`,
+              detalhe: { capitulo: alvo.capitulo, afetados: afetados.map((a) => a.capitulo) },
+            });
+          }
+
+          const vizinhos = revalidarVizinhanca(deps.dirManuscrito, alvo.capitulo, total, deps.contrato);
+          if (vizinhos.length) {
+            const detalhe = vizinhos
+              .map((v) => `cap ${v.capitulo}: ${v.gates.map((g) => `${g.gate} (${g.evidencia ?? "sem evidência"})`).join(", ")}`)
+              .join(" · ");
+            const motivo = `reescrita do capítulo ${alvo.capitulo} quebrou a vizinhança — ${detalhe}`;
+            await restaurarLote(lotePendente, motivo);
+            lotePendente = null;
+            await deps.gravador.registrarBloqueio("META_VIZINHANCA_QUEBRADA", "livro", motivo);
+            throw new ErroEngine({
+              codigo: "META_VIZINHANCA_QUEBRADA",
+              classe: "qualidade",
+              mensagem: `meta ${meta} não atingida: ${motivo}; melhor versão aprovada restaurada`,
+              detalhe: { capitulo: alvo.capitulo, vizinhos },
+            });
+          }
+          continue;
+        }
 
         const motivo = `tentativa da meta-nota terminou "${r.status}" e não substituiu a versão aprovada`;
         await restaurarLote(lotePendente, motivo);

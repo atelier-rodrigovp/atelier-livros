@@ -1,7 +1,7 @@
 {
   "schema": "skill-contract/v1",
   "id": "romantasy",
-  "versao": "1.0.0",
+  "versao": "1.1.0",
   "nome": "Romantasy — fantasia romântica de página-vira (Lena Agarti)",
   "familia_editorial": "romantasy",
   "motor_narrativo": "dois arcos entrelaçados — romance de alto risco + fantasia épica com custo de magia; desejo → obstáculo → marco → gancho cruel",
@@ -17,7 +17,11 @@
     }
   },
   "temporalidade": "linear por marcos: cada capítulo avança um arco (romance OU fantasia), idealmente os dois; um relógio ou arco sempre move; a escada de slow burn ancora degraus a capítulos-alvo",
-  "faixa_palavras": { "min": 2000, "alvo": 2700, "max": 3200 },
+  "faixa_palavras": {
+    "min": 2000,
+    "alvo": 2700,
+    "max": 3200
+  },
   "ritmo": {
     "descricao": "a frase-soco (fragmento de ênfase) é assinatura BookTok — folga na contagem de fragmentos, com pontaria; densidade sem staccato vazio (o staccato medido do gênero é baixo)",
     "cadencia": {
@@ -41,10 +45,12 @@
   },
   "politica_exposicao": "o mundo entra por cena e por custo, nunca por palestra: regras de magia claras e demonstradas em uso; fair-play do sistema (custo declarado antes da solução)",
   "politica_dialogo": {
-    "descricao": "a química nasce de cena e diálogo, não de declaração; troca de POV só quando a outra cabeça entrega informação ou tensão nova"
+    "descricao": "a química nasce de cena e diálogo, não de declaração; troca de POV só quando a outra cabeça entrega informação ou tensão nova",
+    "piso_percentual": 10
   },
   "politica_metafora": {
-    "descricao": "imagem sensorial a serviço do desejo e do mundo; sem cadeia de metáforas; a muleta genérica ('coisa'/'algo') sai — nomeie o objeto, o gesto, a sensação"
+    "descricao": "imagem sensorial a serviço do desejo e do mundo; sem cadeia de metáforas; a muleta genérica ('coisa'/'algo') sai — nomeie o objeto, o gesto, a sensação",
+    "justificativa_sem_cota": "o defeito declarado é a CADEIA de metáforas, medida por sanfona/cadência — não uma contagem por capítulo"
   },
   "tipos_gancho": [
     "virada_de_trama",
@@ -58,84 +64,143 @@
       "id": "anti-gnomico",
       "texto": "Feche beats em imagem concreta, ação ou consequência; fecho gnômico (máxima/aforismo geral) fica em no máximo 2 por capítulo.",
       "tipo": "cota",
-      "cota": { "max": 2, "por": "capitulo" },
-      "papeis": ["escritor", "revisor_literario"]
+      "cota": {
+        "max": 2,
+        "por": "capitulo"
+      },
+      "papeis": [
+        "escritor",
+        "revisor_literario"
+      ]
     },
     {
       "id": "anti-personificacao",
       "texto": "Prefira agente humano + verbo concreto; personificação de abstração fica em no máximo 2 por capítulo.",
       "tipo": "cota",
-      "cota": { "max": 2, "por": "capitulo" },
-      "papeis": ["escritor", "revisor_literario"]
+      "cota": {
+        "max": 2,
+        "por": "capitulo"
+      },
+      "papeis": [
+        "escritor",
+        "revisor_literario"
+      ]
     },
     {
       "id": "anti-sanfona",
       "texto": "Diga cada percepção UMA vez, a melhor; frase-sanfona fica em no máximo 1 por capítulo.",
       "tipo": "cota",
-      "cota": { "max": 1, "por": "capitulo" },
-      "papeis": ["escritor", "revisor_literario"]
+      "cota": {
+        "max": 1,
+        "por": "capitulo"
+      },
+      "papeis": [
+        "escritor",
+        "revisor_literario"
+      ]
     },
     {
       "id": "pov-alterna-com-informacao",
       "texto": "Alterne os 2 amantes: nunca 2 capítulos seguidos na mesma cabeça sem justificativa (teto duro 3); troque de POV só com informação nova, nunca recontando a mesma cena pela outra cabeça.",
       "tipo": "alvo_positivo",
-      "papeis": ["arquiteto_cena", "escritor", "editor_estrutural"]
+      "papeis": [
+        "arquiteto_cena",
+        "escritor",
+        "editor_estrutural"
+      ]
     },
     {
       "id": "slow-burn-por-merito",
       "texto": "O slow burn sobe por MARCO da escada, ganho por evento ou escolha — nunca resolução precoce nem salto sem causa; repouso precisa de justificativa.",
       "tipo": "alvo_positivo",
-      "papeis": ["arquiteto_enredo", "arquiteto_cena", "escritor", "revisor_literario"]
+      "papeis": [
+        "arquiteto_enredo",
+        "arquiteto_cena",
+        "escritor",
+        "revisor_literario"
+      ]
     },
     {
       "id": "custo-de-magia-escala",
       "texto": "Toda solução mágica decisiva paga o preço plantado antes e o custo ESCALA vs. usos anteriores (ou é partilhado com preço); poder novo conveniente é deus-ex proibido.",
       "tipo": "alvo_positivo",
-      "papeis": ["arquiteto_enredo", "arquiteto_cena", "escritor", "revisor_literario"]
+      "papeis": [
+        "arquiteto_enredo",
+        "arquiteto_cena",
+        "escritor",
+        "revisor_literario"
+      ]
     },
     {
       "id": "gancho-cruel",
       "texto": "Cada capítulo fecha em gancho cruel (página-vira), de tipo diferente dos 2 capítulos anteriores.",
       "tipo": "alvo_positivo",
-      "papeis": ["arquiteto_cena", "escritor", "revisor_literario"]
+      "papeis": [
+        "arquiteto_cena",
+        "escritor",
+        "revisor_literario"
+      ]
     },
     {
       "id": "frase-soco",
       "texto": "A frase-soco (fragmento de ênfase) é assinatura da voz — use com pontaria, sem virar staccato vazio.",
       "tipo": "alvo_positivo",
-      "papeis": ["escritor", "revisor_literario"]
+      "papeis": [
+        "escritor",
+        "revisor_literario"
+      ]
     },
     {
       "id": "piso-densidade",
       "texto": "Cena vivida: pelo menos 2.000 palavras (alvo 2.200–3.200); abaixo do piso é reprovação, não 'ou justificado' — densidade pela régua das sete camadas, não gordura.",
-      "tipo": "cota",
-      "cota": { "min": 2000, "por": "capitulo" },
-      "papeis": ["escritor", "revisor_literario"]
+      "tipo": "alvo_positivo",
+      "papeis": [
+        "escritor",
+        "revisor_literario"
+      ],
+      "sem_excecao": true
     },
     {
       "id": "fair-play-duplo",
       "texto": "Fair-play da trama E do romance: viradas plantadas antes; a química nasce de cena, não de declaração.",
       "tipo": "alvo_positivo",
-      "papeis": ["arquiteto_enredo", "arquiteto_cena", "revisor_literario"]
+      "papeis": [
+        "arquiteto_enredo",
+        "arquiteto_cena",
+        "revisor_literario"
+      ]
     },
     {
       "id": "muleta-coisa",
       "texto": "Nomeie o objeto, o gesto, a sensação: 'coisa'/'algo' genérico fica em no máximo 1 por capítulo.",
       "tipo": "cota",
-      "cota": { "max": 1, "por": "capitulo" },
-      "papeis": ["escritor", "revisor_literario"]
+      "cota": {
+        "max": 1,
+        "por": "capitulo"
+      },
+      "papeis": [
+        "escritor",
+        "revisor_literario"
+      ],
+      "sem_excecao": false
     },
     {
       "id": "fundacao-dois-arcos",
       "texto": "A Estrutura materializa a MATRIZ POV (o que cada cabeça sabe/esconde do outro e a regra de alternância), a TABELA DE CUSTO DE MAGIA (poder → preço → escala por ato) e a ESCADA DE SLOW BURN (degraus ancorados a capítulos-alvo).",
       "tipo": "alvo_positivo",
-      "papeis": ["arquiteto_enredo"]
+      "papeis": [
+        "arquiteto_enredo"
+      ]
     },
     {
       "id": "arco-avanca",
       "texto": "Cada capítulo avança um arco (romance OU fantasia), idealmente os dois — capítulo que não move nenhum é defeito de montagem.",
       "tipo": "alvo_positivo",
-      "papeis": ["arquiteto_cena", "escritor", "editor_estrutural"]
+      "papeis": [
+        "arquiteto_cena",
+        "escritor",
+        "editor_estrutural"
+      ]
     }
   ],
   "testes_positivos": [
@@ -157,8 +222,18 @@
   "excecoes": [],
   "estruturas_exigidas": {
     "docs": [],
-    "campos_spec": ["Ponto de vista", "Degrau slow burn", "Custo de magia", "Decisão/Ação", "Modo", "Novidade"]
+    "campos_spec": [
+      "Ponto de vista",
+      "Degrau slow burn",
+      "Custo de magia",
+      "Decisão/Ação",
+      "Modo",
+      "Novidade"
+    ]
   },
-  "referencias": ["references/voz-e-oficio.md", "references/processo-de-capitulo.md"],
+  "referencias": [
+    "references/voz-e-oficio.md",
+    "references/processo-de-capitulo.md"
+  ],
   "modelos_positivos": []
 }

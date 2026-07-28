@@ -2,6 +2,9 @@
 // NÃO é um papel/agente: é código. Verifica artefatos no disco (verdade no disco),
 // registra runs e mantém o estado canônico com lock otimista (retry com releitura).
 import { hashArquivo } from "./hash.js";
+import { fundirNoLedger } from "./ledger.js";
+import type { ConflitoFichaProsa, EntradaMemoria } from "./memoria-prosa.js";
+import type { SnapshotCanario } from "./canario-snapshot.js";
 import { ErroConcorrencia, type PersistenciaV2 } from "./persistencia.js";
 import {
   ENGINE_V2_VERSION,
@@ -12,7 +15,9 @@ import {
   type EstadoCanonicoDoc,
   type Evidencia,
   type Parecer,
+  type RevelacaoLedger,
   type RunRegistro,
+  type TentativaCorrecao,
   type Verdict,
 } from "./tipos.js";
 
@@ -203,7 +208,13 @@ export class Gravador {
   async aprovarCapitulo(
     cap: number,
     review: { id: string; text_hash: string; verdict: Verdict; parecer: Parecer },
-    caminhoArquivo: string
+    caminhoArquivo: string,
+    /**
+     * Revelações da ficha aprovada (ledger.entradasDaFicha). Alimentam o ledger
+     * de revelações deterministicamente — sem chamada de modelo. Omitir mantém o
+     * ledger intacto (retrocompatível com chamadores anteriores).
+     */
+    revelacoes?: RevelacaoLedger[]
   ): Promise<void> {
     if (review.verdict !== "aprovado" && review.verdict !== "aprovado_com_excecao") {
       throw new ErroEngine({
@@ -251,6 +262,8 @@ export class Gravador {
       };
       // Aprovação com evidência supera bloqueios anteriores DESTE capítulo (retomada limpa).
       doc.bloqueios = doc.bloqueios.filter((b) => b.alvo !== `capitulo:${cap}`);
+      // Ledger de revelações: fusão idempotente (reaprovar substitui, nunca duplica).
+      if (revelacoes) doc.ledger_revelacoes = fundirNoLedger(doc.ledger_revelacoes ?? [], revelacoes);
     });
   }
 
@@ -339,6 +352,134 @@ export class Gravador {
         };
       }
       doc.bloqueios.push(entrada);
+    });
+  }
+
+  /**
+   * Registra uma tentativa da escada de correção (fatia C).
+   *
+   * A tentativa é gravada ABERTA (`hash_saida: null`) ANTES de rodar — assim uma
+   * queda do worker no meio da tentativa não faz a escada repetir a estratégia na
+   * retomada — e FECHADA depois, com o hash produzido e o resultado. Fechar é
+   * completar o registro da MESMA tentativa (mesma estratégia, mesmo texto de
+   * entrada), nunca reescrever uma tentativa anterior: qualquer outra combinação
+   * entra como linha nova.
+   */
+  async registrarTentativaCorrecao(tentativa: TentativaCorrecao): Promise<void> {
+    await this.mutarEstado((doc) => {
+      const chave = String(tentativa.capitulo);
+      doc.correcoes = doc.correcoes ?? {};
+      const lista = [...(doc.correcoes[chave] ?? [])];
+      const aberta = lista.findIndex(
+        (t) =>
+          t.hash_saida === null &&
+          t.estrategia === tentativa.estrategia &&
+          t.hash_entrada === tentativa.hash_entrada
+      );
+      if (aberta >= 0) lista[aberta] = tentativa;
+      else lista.push(tentativa);
+      doc.correcoes[chave] = lista;
+    });
+  }
+
+  /**
+   * Memória derivada da PROSA APROVADA (fatia H). Append por capítulo: reprocessar
+   * um capítulo substitui as entradas DELE, nunca as dos outros.
+   */
+  async registrarMemoriaDaProsa(
+    capitulo: number,
+    entradas: EntradaMemoria[],
+    conflitos: ConflitoFichaProsa[]
+  ): Promise<void> {
+    await this.mutarEstado((doc) => {
+      const outros = (doc.memoria_prosa ?? []).filter((m) => m.capitulo !== capitulo);
+      doc.memoria_prosa = [...outros, ...entradas].sort((a, b) => a.capitulo - b.capitulo);
+      if (conflitos.length) {
+        const anteriores = (doc.conflitos_ficha_prosa ?? []).filter((c) => c.capitulo !== capitulo);
+        doc.conflitos_ficha_prosa = [...anteriores, ...conflitos];
+      }
+    });
+  }
+
+  /** O extrator falhou: o capítulo segue aprovado, mas a memória dele está incompleta. */
+  async registrarMemoriaIncompleta(capitulo: number): Promise<void> {
+    await this.mutarEstado((doc) => {
+      const outros = (doc.memoria_prosa ?? []).filter((m) => m.capitulo !== capitulo);
+      doc.memoria_prosa = outros;
+      doc.bloqueios.push({
+        codigo: "MEMORIA_PROSA_INCOMPLETA",
+        alvo: `capitulo:${capitulo}`,
+        detalhe: "o extrator de memória falhou; o fechamento não pode cobrar pistas deste capítulo",
+        desde: this.agora(),
+      });
+    });
+  }
+
+  /**
+   * Registra uma onda de revalidação transitiva (fatia K): o que foi reaberto,
+   * por quê, e a decisão. É o que a interface mostra como "capítulos afetados
+   * por reescrita" — antes, a propagação era invisível.
+   */
+  async registrarRevalidacao(
+    origem: number,
+    acao: "nenhuma" | "reabrir" | "decisao_humana",
+    afetados: { capitulo: number; distancia: number; motivos: { canal: string; chave: string; via: number }[] }[]
+  ): Promise<void> {
+    await this.mutarEstado((doc) => {
+      doc.revalidacoes = [
+        ...(doc.revalidacoes ?? []).filter((r) => r.origem !== origem),
+        {
+          origem,
+          acao,
+          em: this.agora(),
+          afetados: afetados.map((a) => ({
+            capitulo: a.capitulo,
+            distancia: a.distancia,
+            motivos: a.motivos.map((m) => `${m.canal}:${m.chave} (via cap ${m.via})`),
+          })),
+        },
+      ].sort((a, b) => a.origem - b.origem);
+    });
+  }
+
+  /** Grava o snapshot imutável do canário aprovado (fatia L). */
+  async registrarSnapshotCanario(snapshot: SnapshotCanario): Promise<void> {
+    await this.mutarEstado((doc) => {
+      doc.canario_snapshot = snapshot;
+    });
+  }
+
+  /** Premissas vigentes: a base contra a qual a próxima execução compara. */
+  async registrarPremissas(premissas: NonNullable<EstadoCanonicoDoc["premissas"]>): Promise<void> {
+    await this.mutarEstado((doc) => {
+      doc.premissas = premissas;
+    });
+  }
+
+  /** Artefatos invalidados por mudança de premissa — nunca silencioso. */
+  async registrarInvalidacao(inv: NonNullable<EstadoCanonicoDoc["invalidacao"]>): Promise<void> {
+    await this.mutarEstado((doc) => {
+      doc.invalidacao = inv;
+      doc.bloqueios.push({
+        codigo: "PREMISSA_ALTERADA",
+        alvo: "livro",
+        detalhe: inv.motivo,
+        desde: this.agora(),
+      });
+    });
+  }
+
+  /** A escada parou neste capítulo: a decisão passa a ser do autor. */
+  async registrarCircuitBreaker(capitulo: number, motivo: string, tentativas: number): Promise<void> {
+    await this.mutarEstado((doc) => {
+      doc.circuit_breaker = doc.circuit_breaker ?? [];
+      const existente = doc.circuit_breaker.find((c) => c.capitulo === capitulo);
+      if (existente) {
+        existente.motivo = motivo;
+        existente.tentativas = tentativas;
+        return;
+      }
+      doc.circuit_breaker.push({ capitulo, motivo, tentativas, em: this.agora() });
     });
   }
 

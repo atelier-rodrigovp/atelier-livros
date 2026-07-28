@@ -1,6 +1,7 @@
 import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { carregarCorpusCalibracao } from "./calibracao.js";
 import {
@@ -11,7 +12,10 @@ import {
   validarRotulosCsv,
 } from "./rotulagem-csv.js";
 
-const corpusReal = path.resolve(process.cwd(), "worker", "calibration", "v1");
+// Ancorado no ARQUIVO, não no diretório corrente: rodar a suíte da raiz ou de
+// dentro de `worker/` tem de dar o mesmo caminho (este era o único teste do
+// worker que dependia de `process.cwd()`).
+const corpusReal = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "calibration", "v1");
 const temporarios: string[] = [];
 
 afterEach(() => {
@@ -44,7 +48,7 @@ describe("fluxo CSV de rotulagem humana", () => {
     expect(parsearCsv(serializarCsv(linhas))[0].justificativa).toBe('Contexto "humano"; linha um\r\nlinha dois.');
   });
 
-  it("valida o pacote completo sem modificar o corpus no dry-run", () => {
+  it("[DOD:Q-01] valida o pacote completo sem modificar o corpus no dry-run", () => {
     const dir = copiarCorpus();
     const antes = readFileSync(path.join(dir, "corpus.json"), "utf8");
     const exportado = exportarRotulosCsv(dir, { amostra: "dan-brown-aprovado-01" });

@@ -2,7 +2,8 @@
 // Determinísticos, bloqueantes, válidos para QUALQUER skill — nunca medem gosto.
 // Sinais editoriais ficam em sinais.ts e só bloqueiam via disposição do revisor.
 
-import { detectarRepeticaoCrossCapitulo } from "../maneirismo.js";
+import { detectarRepeticaoCrossCapitulo, entradasLedgerDoCapitulo } from "../maneirismo.js";
+import { detectarRepeticaoLiteral } from "./repeticao.js";
 import type { ResultadoGate, SceneSpec, SkillContract } from "./tipos.js";
 
 export function gateArtefatoPresente(texto: string | null | undefined): ResultadoGate {
@@ -20,19 +21,50 @@ export function gateTruncamento(texto: string): ResultadoGate {
   return { gate: "texto_truncado", passou, evidencia: passou ? undefined : `final: "…${t.slice(-80)}"` };
 }
 
-/** Repetição quase literal contra capítulos anteriores (verbatim/quase-verbatim). */
+/**
+ * Repetição quase literal contra capítulos anteriores (verbatim/quase-verbatim).
+ *
+ * `detectarRepeticaoCrossCapitulo` compara os SLOTS AFORÍSTICOS do capítulo atual
+ * contra cada `trecho` anterior — e espera que esses trechos sejam ENTRADAS DE
+ * LEDGER (slots curtos), não capítulos inteiros. A V2 sempre lhe entregou o texto
+ * completo do capítulo anterior, e com isso o gate ficava INERTE: um slot de ~8
+ * shingles contra os ~1500 de um capítulo dá Jaccard ≈0,005, longe do limiar 0,6,
+ * e a via verbatim exigiria o capítulo inteiro ser idêntico a uma frase.
+ *
+ * Aqui o texto anterior é convertido nos seus slots antes da comparação. A
+ * conversão é idempotente para quem já passa slots curtos. `maneirismo.ts` não é
+ * tocado (alimenta o corpus de calibração hash-bound).
+ */
 export function gateRepeticaoQuaseLiteral(
   texto: string,
   anteriores: { numero: number; trecho: string }[]
 ): ResultadoGate {
+  const slotsAnteriores = anteriores.flatMap((a) =>
+    entradasLedgerDoCapitulo(a.numero, a.trecho).map((e) => ({ numero: e.capitulo, trecho: e.trecho_original }))
+  );
   // O detector já aplica limiar interno alto (slots aforísticos + shingles): tudo que
   // ele retorna (verbatim ou quase-verbatim) conta como repetição quase literal.
-  const reps = detectarRepeticaoCrossCapitulo(texto, anteriores);
-  const passou = reps.length === 0;
+  const reps = detectarRepeticaoCrossCapitulo(texto, slotsAnteriores);
+
+  // Fatia I, camada 1: além dos slots aforísticos, comparação de FRASE INTEIRA
+  // contra TODOS os capítulos anteriores. O detector de slots pega a assinatura
+  // reciclada; este pega o parágrafo repetido dez capítulos depois, que passava.
+  const literais = detectarRepeticaoLiteral(
+    texto,
+    anteriores.map((a) => ({ numero: a.numero, texto: a.trecho }))
+  );
+
+  const evidencias = [
+    ...reps.slice(0, 3).map((r) => `cap ${r.capituloAnterior}: "${r.trecho}"`),
+    ...literais.slice(0, 3).map(
+      (r) => `cap ${r.capituloAnterior} (${Math.round(r.similaridade * 100)}%): "${r.trechoAtual.slice(0, 90)}" ≈ "${r.trechoAnterior.slice(0, 90)}"`
+    ),
+  ];
+  const passou = evidencias.length === 0;
   return {
     gate: "repeticao_quase_literal",
     passou,
-    evidencia: passou ? undefined : reps.slice(0, 3).map((r) => `cap ${r.capituloAnterior}: "${r.trecho}"`).join(" · "),
+    evidencia: passou ? undefined : evidencias.join(" · "),
   };
 }
 

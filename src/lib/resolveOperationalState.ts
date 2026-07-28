@@ -84,14 +84,59 @@ export type Situacao =
 
 export type Tone = "info" | "success" | "warning" | "danger" | "neutral";
 
+/**
+ * Vocabulário FECHADO de ações. Fechado de propósito: enquanto era `string`, o
+ * resolvedor podia anunciar um botão que nenhuma tela sabia executar — e foi
+ * exatamente o que aconteceu com `reconciliar`, `continuar` e `ver_edicao`.
+ * Como `AcoesOperacionais` exige a chave de cada id, id novo sem handler passa a
+ * ser erro de compilação, não descoberta em produção.
+ */
+export type IdAcao =
+  | "ver_diagnostico"
+  | "tentar_agora"
+  | "corrigir"
+  | "continuar"
+  | "ver_edicao"
+  | "iniciar_escrita"
+  | "abrir_configuracoes";
+
+export const IDS_ACAO: IdAcao[] = [
+  "ver_diagnostico",
+  "tentar_agora",
+  "corrigir",
+  "continuar",
+  "ver_edicao",
+  "iniciar_escrita",
+  "abrir_configuracoes",
+];
+
 export interface OperationalButton {
-  id: string;
+  id: IdAcao;
   label: string;
   habilitado: boolean;
+  /**
+   * Por que está indisponível. Botão cinza sem explicação faz o autor achar que
+   * a tela travou; com o motivo, ele sabe o que precisa acontecer antes.
+   * Obrigatório sempre que `habilitado` é false.
+   */
+  motivo_indisponivel: string | null;
 }
+
+/**
+ * De que NATUREZA é o impedimento. Sem isto o autor não distingue "a engine
+ * quebrou" de "o capítulo não passou no gate" — reações opostas diante de
+ * badges parecidos.
+ */
+export type ClasseBloqueio =
+  | "tecnico" // infra, cota, worker fora do ar: passa sozinho ou é problema de máquina
+  | "editorial" // gate reprovou o texto: a engine está tentando corrigir
+  | "decisao_humana" // a engine parou de propósito e espera o autor
+  | "ausencia_de_prova"; // nada falhou; falta evidência (ex.: fundação pendente)
 
 export interface OperationalState {
   situacao: Situacao;
+  /** Natureza do impedimento; null quando nada está impedido. */
+  classe_bloqueio: ClasseBloqueio | null;
   badge: string;
   tone: Tone;
   mensagem_humana: string;
@@ -184,7 +229,64 @@ function traduzirMensagem(pg: ProgressoEscrita, capitulo: number | null): string
   return "";
 }
 
+/**
+ * Natureza do impedimento, derivada da situação. Central de propósito: cada
+ *  do resolvedor monta seu objeto inline, e espalhar a classificação por
+ * eles seria convite a divergência.
+ */
+export function classeDeBloqueio(s: Situacao): ClasseBloqueio | null {
+  switch (s) {
+    case "aguardando_cota":
+    case "retry_infra":
+    case "producao_desativada":
+      return "tecnico";
+    case "bloqueado_qualidade":
+    case "correcao_automatica":
+    case "aguardando_correcao":
+      return "editorial";
+    case "circuit_breaker":
+    case "aguardando_decisao":
+    case "pausado_manual":
+      return "decisao_humana";
+    default:
+      return null;
+  }
+}
+
+/** Como cada natureza de impedimento é dita ao autor, em uma linha. */
+export const ROTULO_CLASSE_BLOQUEIO: Record<ClasseBloqueio, string> = {
+  tecnico: "Impedimento técnico — infraestrutura ou cota; passa sozinho, nada a decidir.",
+  editorial: "Impedimento editorial — um gate reprovou o texto; a engine está corrigindo.",
+  decisao_humana: "Decisão sua — a engine parou de propósito e espera você.",
+  ausencia_de_prova: "Falta prova — nada falhou; um artefato ainda não foi comprovado.",
+};
+
+/**
+ * Por que o botão de escrita está indisponível. `null` quando está disponível.
+ * Botão cinza mudo é lido como tela travada.
+ */
+export function motivoEscritaIndisponivel(
+  escrevendo: boolean,
+  pausada: boolean,
+  situacao: Situacao
+): string | null {
+  if (escrevendo) return "Já existe uma execução de escrita em andamento para este projeto.";
+  if (pausada) return "A produção deste projeto está pausada — retome-a para escrever.";
+  if (situacao === "correcao_automatica") {
+    return "A engine está corrigindo um capítulo agora; o fluxo segue sozinho, sem clique.";
+  }
+  return null;
+}
+
 export function resolveOperationalState(input: ResolverInput): OperationalState {
+  const r = resolverInterno(input);
+  // Pendência de fundação não reprovou texto nem quebrou máquina: falta prova.
+  // Sem esta linha ela apareceria como "nada acontecendo".
+  const classe = classeDeBloqueio(r.situacao) ?? (r.aviso_fundacao ? "ausencia_de_prova" : null);
+  return { ...r, classe_bloqueio: classe };
+}
+
+function resolverInterno(input: ResolverInput): Omit<OperationalState, "classe_bloqueio"> {
   const now = input.now ?? Date.now();
   const job = input.job;
   const pg: ProgressoEscrita = (job?.progresso ?? {}) as ProgressoEscrita;
@@ -217,7 +319,8 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
 
   // Botões contextuais (§7) montados ao fim conforme a situação.
   const botoes: OperationalButton[] = [];
-  const add = (id: string, label: string, habilitado = true) => botoes.push({ id, label, habilitado });
+  const add = (id: IdAcao, label: string, habilitado = true, motivo: string | null = null) =>
+    botoes.push({ id, label, habilitado, motivo_indisponivel: habilitado ? null : motivo });
 
   const base = {
     contadores: cont,
@@ -230,6 +333,8 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
 
   // Sem job de escrita: estado neutro (projeto ainda não escreveu ou só histórico).
   if (!job) {
+    // "Iniciar escrita" era anunciado como próxima ação sem controle próprio.
+    if (cont.produzidos === 0) add("iniciar_escrita", "Iniciar escrita");
     return { situacao: "sem_escrita", badge: "Sem escrita", tone: "neutral", mensagem_humana: "Escrita ainda não iniciada.", ...base, diagnostico_tecnico: null, blocker_humano: null, proxima_acao: cont.produzidos > 0 ? null : "Iniciar escrita", botoes };
   }
 
@@ -353,8 +458,12 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
     const blocker = humanizarBlocker(pg.quality_blockers, capituloBloqueado);
     add("corrigir", `Corrigir capítulo ${capituloBloqueado ?? ""}`.trim());
     add("ver_diagnostico", "Ver diagnóstico");
-    if (cont.produzidos > cont.sincronizados) add("reconciliar", "Reconciliar aprovados");
-    add("continuar", `Continuar a partir do ${(capituloBloqueado ?? 0) + 1}`, false); // só após o bloqueado ser aprovado
+    add(
+      "continuar",
+      `Continuar a partir do ${(capituloBloqueado ?? 0) + 1}`,
+      false,
+      `o capítulo ${capituloBloqueado ?? "bloqueado"} precisa ser aprovado antes — a escrita não pula capítulo reprovado`
+    );
     return { situacao: "bloqueado_qualidade", badge: capituloBloqueado ? `Correção necessária no cap ${capituloBloqueado}` : "Correção necessária", tone: "danger", mensagem_humana: traduzirMensagem(pg, capituloBloqueado), ...base, blocker_humano: blocker, proxima_acao: `Corrigir capítulo ${capituloBloqueado ?? ""}`.trim(), botoes };
   }
   // 4b. bloqueado por infraestrutura (paused)
@@ -364,6 +473,9 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
   // 5a. produção GLOBAL desativada (worker_control): nada roda até religar — a
   // verdade da fila inteira; distinto da pausa por projeto e da correção.
   if (globalDesativada && (job.status === "queued" || job.status === "paused")) {
+    // A próxima ação declarada era "Religar a produção (Configurações)" e não
+    // vinha botão nenhum: instrução sem controle faz o autor caçar a tela.
+    add("abrir_configuracoes", "Abrir Configurações");
     return {
       situacao: "producao_desativada",
       badge: "Produção global desativada",
@@ -385,10 +497,34 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
   if (job.status === "queued") {
     return { situacao: "na_fila", badge: "Na fila", tone: "neutral", mensagem_humana: "Na fila — aguardando o worker pegar o job.", ...base, blocker_humano: null, proxima_acao: null, botoes };
   }
-  // 9. concluído
+  // 9. concluído — SÓ quando o livro fechou de verdade.
+  //
+  // `job.status === "done"` sozinho não significa livro pronto: com execução
+  // encadeada (`max_novos_caps`), o job termina limpo depois de escrever UM
+  // capítulo de doze, e a tela dizia "Concluído · Escrita concluída". É a mentira
+  // mais cara da interface — o autor pára de acompanhar um livro pela metade.
   if (job.status === "done") {
-    add("ver_edicao", "Ver edição");
-    return { situacao: "concluido", badge: "Concluído", tone: "success", mensagem_humana: "Escrita concluída.", ...base, diagnostico_tecnico: null, blocker_humano: null, proxima_acao: null, botoes };
+    const totalAlvo = input.totalCapitulos;
+    const completo = totalAlvo > 0 && cont.aprovados >= totalAlvo;
+    if (completo) {
+      add("ver_edicao", "Ver edição");
+      return { situacao: "concluido", badge: "Concluído", tone: "success", mensagem_humana: "Escrita concluída.", ...base, diagnostico_tecnico: null, blocker_humano: null, proxima_acao: null, botoes };
+    }
+    add("continuar", "Continuar a escrita");
+    return {
+      situacao: "interrompido_retomavel",
+      badge: totalAlvo > 0 ? `Parcial — ${cont.aprovados}/${totalAlvo}` : "Parcial",
+      tone: "warning",
+      mensagem_humana:
+        totalAlvo > 0
+          ? `A execução terminou em checkpoint com ${cont.aprovados} de ${totalAlvo} capítulos aprovados. O livro ainda não fechou.`
+          : "A execução terminou, mas o total de capítulos do projeto não está definido — não dá para afirmar que o livro fechou.",
+      ...base,
+      diagnostico_tecnico: null,
+      blocker_humano: null,
+      proxima_acao: "Continuar a escrita de onde parou",
+      botoes,
+    };
   }
   // fallback (error/canceled/paused sem quality_status)
   return { situacao: "sem_escrita", badge: "Aguardando", tone: "neutral", mensagem_humana: job.erro ? "A escrita parou por um erro técnico (ver diagnóstico)." : "Aguardando.", ...base, blocker_humano: null, proxima_acao: null, botoes };

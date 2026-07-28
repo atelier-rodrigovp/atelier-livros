@@ -14,7 +14,10 @@ export type Papel =
   | "escritor"              // ÚNICO autor de prosa
   | "revisor_literario"     // voz, transparência, emoção, propulsão, aderência
   | "auditor_factual"       // nomes, datas, geografia, continuidade, conhecimento
-  | "editor_estrutural";    // cortes, fusões, ordem, macro-ritmo (propõe; worker aplica)
+  | "editor_estrutural"     // cortes, fusões, ordem, macro-ritmo (propõe; worker aplica)
+  | "conformidade_ficha"     // a prosa cumpriu a ficha? (fatia G) — evidência localizada
+  | "extrator_memoria"       // o que a PROSA APROVADA estabeleceu (fatia H)
+  | "julgamento_idioma";     // variante-alvo × narração e diálogo (fatia J)
 // O "gravador de estado" NÃO é um papel: é código determinístico (gravador.ts).
 
 export type ClasseCapacidade = "raciocinio" | "fatos" | "prosa" | "julgamento";
@@ -28,6 +31,9 @@ export const CLASSE_POR_PAPEL: Record<Papel, ClasseCapacidade> = {
   revisor_literario: "julgamento",
   auditor_factual: "fatos",
   editor_estrutural: "raciocinio",
+  conformidade_ficha: "julgamento",
+  extrator_memoria: "fatos",
+  julgamento_idioma: "julgamento",
 };
 
 export interface MapaModelos {
@@ -46,6 +52,13 @@ export interface PoliticaEscala {
   alvo?: number;
   min?: number;
   max?: number;
+  /**
+   * Isenção do PISO por condição verificável no texto. Vocabulário FECHADO — o
+   * núcleo implementa a condição genericamente, sem condicional por skill.
+   * Existe porque o piso de densidade do hoover diz "o fio-M é isento do piso", e
+   * o fio-M é definido pelo próprio contrato como o fio de memória em itálico.
+   */
+  isencao_piso?: { condicao: "capitulo_predominantemente_italico"; justificativa: string };
 }
 
 export interface RegraDeclarada {
@@ -54,6 +67,13 @@ export interface RegraDeclarada {
   tipo: "alvo_positivo" | "proibicao" | "cota";
   cota?: { max?: number; min?: number; por: "capitulo" | "cena" | "1000_palavras" };
   papeis: Papel[];                // quem precisa ver esta regra
+  /**
+   * Disposição FECHADA: "excecao_valida" não é resposta admissível para o sinal
+   * desta regra — fora da cota é violação, ponto. Existe porque o piso de
+   * densidade do romantasy diz, com todas as letras, "abaixo do piso é reprovação,
+   * não 'ou justificado'". Ausente/false = as quatro disposições continuam valendo.
+   */
+  sem_excecao?: boolean;
 }
 
 export interface ExcecaoCena {
@@ -135,6 +155,17 @@ export interface SceneSpec {
   fios_ausentes: string[];        // deliberadamente fora deste capítulo
   campos_skill?: Record<string, string>; // campos extras exigidos pelo contrato (ex.: "Relógios")
   excecao_editorial?: { regra_id: string; justificativa: string };
+  // --- Arco de longo alcance (fundação v3). OPCIONAIS: fichas v2 seguem válidas. ---
+  /** Ato da grade a que este capítulo pertence (fundacao.arco.atos[].numero). */
+  ato?: number;
+  /** Tensão-alvo 1–5 declarada pela grade de atos. */
+  tensao_alvo?: number;
+  /** Revelações EXTRAS ao `informacao_nova` (≤2, ≤25 palavras cada). */
+  revelacoes?: string[];
+  /** Promessas da fundação tocadas por este capítulo. */
+  promessas_tocadas?: { id: string; acao: "planta" | "reforca" | "paga" }[];
+  /** Marcos de arco de personagem atingidos aqui. */
+  marcos_arco?: { personagem: string; marco: string }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +205,55 @@ export interface Parecer {
   evidencias: EvidenciaLocalizada[];   // aprovação exige ≥1 evidência POSITIVA
   sinais: SinalDisposto[];             // disposição de cada sinal editorial detectado
   correcoes: { local: string; problema: string; instrucao: string }[];
+}
+
+// ---------------------------------------------------------------------------
+// Ledger de revelações e arco de longo alcance (fundação v3)
+// ---------------------------------------------------------------------------
+
+/** Uma revelação = o que o LEITOR passa a saber. Declarada na ficha, entra na aprovação. */
+export interface RevelacaoLedger {
+  id: string;            // ex.: "R07.1" (capítulo + ordinal) — estável e citável
+  capitulo: number;      // onde foi revelada
+  enunciado: string;     // ≤25 palavras
+}
+
+export interface Ato {
+  numero: number;
+  cap_inicio: number;
+  cap_fim: number;
+  funcao: string;
+  tensao_alvo: number;   // 1–5
+}
+
+export interface Promessa {
+  id: string;
+  enunciado: string;
+  plantada_em: number;
+  reforcada_em: number[];
+  paga_em: number;
+}
+
+export interface FioArco {
+  id: string;
+  nome: string;
+  abre: number;
+  escalada: number[];
+  climax: number;
+  fecha: number;
+}
+
+export interface ArcoPersonagem {
+  personagem: string;
+  marcos: { capitulo: number; estado: string }[];
+}
+
+/** Seção `arco` de estrutura.json — presente só na fundação v3. */
+export interface ArcoFundacao {
+  atos: Ato[];
+  promessas: Promessa[];
+  fios: FioArco[];
+  arcos: ArcoPersonagem[];
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +375,36 @@ export interface CapituloEstado {
   origens_estruturais?: number[];
 }
 
+// ---------------------------------------------------------------------------
+// Escada de correção (fatia C) — a política vive em correcao.ts; o registro, aqui.
+// ---------------------------------------------------------------------------
+
+export type EstrategiaCorrecao =
+  | "correcao_cirurgica"
+  | "reescrita_orientada"
+  | "reficha"
+  | "reescrita_integral"
+  | "julgamento_alternativo";
+
+export interface TentativaCorrecao {
+  capitulo: number;
+  /** Gate/blocker que disparou a tentativa. */
+  gate: string;
+  estrategia: EstrategiaCorrecao;
+  /** Por que esta estratégia deveria resolver ESTE blocker. */
+  hipotese: string;
+  /** Instrução efetivamente enviada ao papel (auditável). */
+  instrucao: string;
+  hash_entrada: string;
+  /** Hash do texto produzido; null = a tentativa não chegou a produzir texto. */
+  hash_saida: string | null;
+  resultado: "resolvido" | "persistiu" | "piorou" | "erro";
+  criado_em: string;
+}
+
+import type { ConflitoFichaProsa, EntradaMemoria } from "./memoria-prosa.js";
+import type { SnapshotCanario } from "./canario-snapshot.js";
+
 export interface EstadoCanonicoDoc {
   schema: "engine-state/v1";
   // Ordem lógica: escrita → revisao_final → consolidacao → avaliacao → concluido.
@@ -308,7 +418,22 @@ export interface EstadoCanonicoDoc {
     | "concluido"
     | "bloqueado";
   skill?: { id: string; versao: string; hash: string };
-  fundacao?: { versao: string; hash: string; docs: Record<string, string> }; // doc → sha256
+  fundacao?: {
+    versao: string;
+    hash: string;
+    docs: Record<string, string>; // doc → sha256
+    /**
+     * Índice dos documentos materializados (D7): é o que a interface consome
+     * para saber o QUE existe e o QUE abrir. Sem ele, a tela adivinhava nomes —
+     * e tentava baixar arquivos que a V2 nunca escreveu.
+     */
+    indice?: {
+      gerado_em: string;
+      documentos: { titulo: string; caminho: string; origem: "nucleo" | "contrato"; hash: string }[];
+    };
+    /** Uploads que falharam. Registrado, nunca engolido. */
+    storage_falhas?: string[];
+  };
   total_capitulos?: number;
   // Edição estrutural (editor propõe; o pipeline aplica cortes/fusões/reordenações).
   edicao_estrutural?: { run_id?: string; propostas: number; aplicadas: number; detalhe: string[]; em: string };
@@ -334,6 +459,62 @@ export interface EstadoCanonicoDoc {
     em: string;
   }[];
   capitulos: Record<string, CapituloEstado>;
+  /**
+   * Ledger de revelações: o que o LEITOR já sabe, por capítulo. Derivado
+   * deterministicamente da ficha na APROVAÇÃO do capítulo (sem chamada de modelo).
+   * Ausente = livro anterior a esta versão; `garantirLedger` reconstrói das fichas.
+   */
+  ledger_revelacoes?: RevelacaoLedger[];
+  /** Retries dirigidos que o portão da fundação consumiu (adendo do autor ao §5). */
+  fundacao_portao?: { retries: number; reprovacoes: string[]; em: string };
+  /**
+   * Ledger da escada de correção (fatia C), por capítulo. É o que impede a escada
+   * de repetir estratégia entre execuções do worker e o que permite retomar no
+   * capítulo certo. Registro completo (hipótese, instrução, hashes) em
+   * `TentativaCorrecao`; a chave é o número do capítulo.
+   */
+  correcoes?: Record<string, TentativaCorrecao[]>;
+  /** Capítulos em que a escada parou e aguardam decisão do autor. */
+  circuit_breaker?: { capitulo: number; motivo: string; tentativas: number; em: string }[];
+  /**
+   * Memória derivada da PROSA APROVADA (fatia H). O ledger de revelações vem da
+   * FICHA (o plano); isto vem da página. Uma pista plantada só na escrita existe
+   * aqui — e é aqui que o fechamento a cobra.
+   */
+  memoria_prosa?: EntradaMemoria[];
+  /** Divergências ficha × prosa: evento explícito, nunca sobrescrita silenciosa. */
+  conflitos_ficha_prosa?: ConflitoFichaProsa[];
+  /**
+   * Premissas sob as quais os artefatos deste livro foram construídos (fatia L).
+   * Mudar qualquer uma invalida explicitamente o que dependia dela — antes,
+   * fundação e capítulos antigos continuavam com cara de válidos.
+   */
+  premissas?: {
+    canario_hash: string;
+    briefing_hash: string;
+    idioma: string;
+    skill_id: string;
+    skill_hash: string;
+    contrato_hash: string;
+    total_capitulos: number;
+    docs: Record<string, string>;
+  };
+  /** Snapshot imutável do canário de voz aprovado pelo autor. */
+  canario_snapshot?: SnapshotCanario;
+  /** Artefatos invalidados por mudança de premissa, aguardando decisão do autor. */
+  invalidacao?: {
+    artefatos: string[];
+    mudancas: { premissa: string; de: string; para: string }[];
+    motivo: string;
+    em: string;
+  };
+  /** Ondas de revalidação transitiva (fatia K): o que uma reescrita reabriu. */
+  revalidacoes?: {
+    origem: number;
+    acao: "nenhuma" | "reabrir" | "decisao_humana";
+    em: string;
+    afetados: { capitulo: number; distancia: number; motivos: string[] }[];
+  }[];
   // status_anterior: guarda o status do capítulo antes do bloqueio, para restauração fiel
   bloqueios: { codigo: string; alvo: string; detalhe: string; desde: string; status_anterior?: CapituloStatusV2 }[];
   migracao?: {
@@ -368,7 +549,15 @@ export type GateUniversal =
   | "estado_inconsistente"
   | "skill_ou_contexto_invalido"
   | "fora_do_schema"
-  | "aprovacao_sem_evidencia";
+  | "aprovacao_sem_evidencia"
+  // --- Memória e arco de longo alcance ---
+  | "revelacao_repetida"
+  | "rotacao_pov_violada"
+  | "promessa_nao_paga"
+  /** Ficha contradiz a grade de arco (ato, tensão-alvo, promessa tocada, marco). */
+  | "ficha_fora_do_arco"
+  | "fundacao_estrutura_incoerente"
+  | "fundacao_arco_incompleto";
 
 export interface ResultadoGate {
   gate: GateUniversal;

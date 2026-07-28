@@ -4,6 +4,7 @@ import {
   percentDeclarativasSimples, sinalDialogoInterioridade, contarMetaforaElaborada,
   diagnosticarTransparencia, orcTransparenciaParaSkill, SINAL_TRANSPARENCIA,
 } from "./maneirismo.js";
+import { LIMITACOES_RECALL } from "./limitacoes-conhecidas.js";
 
 // ===========================================================================
 // D1 — contarGnomico (máxima/gnômico ampliado)
@@ -25,11 +26,11 @@ describe("contarGnomico", () => {
     expect(contarGnomico("Os doentes enterram a si mesmos.").n).toBeGreaterThanOrEqual(1);
   });
 
-  // recall conhecido: heurística não cobre — o segmento após ":" é "quem preenche o
-  // silêncio primeiro entrega mais do que pretende"; _RE_SUJEITO_GENERICO exige "quem
-  // QUE" (redundante, quase nunca ocorre), não "quem" + verbo direto ("quem preenche…").
-  // Nenhum outro molde de _ehMaxima cobre essa construção. Reportado, não corrigido aqui.
-  it.skip('recall conhecido: heurística não cobre — máxima após dois-pontos ("quem preenche…")', () => {
+  // Estava `it.skip` com um comentário afirmando que a heurística não cobria.
+  // Ao tirar o skip, o detector acusou: cobre. O comentário era de uma versão
+  // antiga do regex e envelheceu calado — teste pulado nunca roda, então nunca
+  // desmente a si mesmo. É a razão de não existir mais `skip` neste arquivo.
+  it('máxima após dois-pontos ("quem preenche o silêncio primeiro…")', () => {
     const t = "Deixou o silêncio correr, uma tática antiga: quem preenche o silêncio primeiro entrega mais do que pretende.";
     expect(contarGnomico(t).n).toBeGreaterThanOrEqual(1);
   });
@@ -68,11 +69,9 @@ describe("contarPersonificacao", () => {
     expect(contarPersonificacao("A própria terra que desmente a história.").n).toBeGreaterThanOrEqual(1);
   });
 
-  // recall conhecido: "já tinha decidido" tem o auxiliar "tinha" entre o corpo-agente e o
-  // verbo; "tinha" não está na lista de auxiliares opcionais (se/já/não/nunca/vai/ia) do
-  // regex, e a janela lazy (até 3 palavras + 1 auxiliar) não alcança "decidido" (5ª palavra
-  // após "mão"). Reportado, não corrigido aqui.
-  it.skip('recall conhecido: heurística não cobre — auxiliar "tinha" quebra a janela ("A mão no corrimão já tinha decidido antes dela.")', () => {
+  // Também estava `it.skip` alegando que o auxiliar "tinha" quebrava a janela.
+  // Não quebra mais. Mesma lição do caso anterior em `contarGnomico`.
+  it('corpo-agente com auxiliar ("A mão no corrimão já tinha decidido antes dela.")', () => {
     expect(contarPersonificacao("A mão no corrimão já tinha decidido antes dela.").n).toBeGreaterThanOrEqual(1);
   });
 
@@ -100,12 +99,11 @@ describe("contarSanfona", () => {
     expect(contarSanfona(t).n).toBeGreaterThanOrEqual(1);
   });
 
-  // recall conhecido: tripla negação reformuladora ("não X, não Y, Z") sem o conector
-  // "mas/e sim/só/é" logo após a vírgula — negReformula exige esse conector explícito.
-  // E só há 2 vírgulas (apostoDenso exige >=3 sem travessão). Reportado, não corrigido aqui.
-  it.skip('recall conhecido: heurística não cobre — tripla negação sem conector ("Não era… não era… era…")', () => {
+  // LIMITAÇÃO REC-03 — ver comentário em REC-01 sobre por que caracterização.
+  it('LIMITAÇÃO REC-03: tripla negação sem conector NÃO é detectada como sanfona', () => {
     const t = "Não era uma igreja de verdade, não era um templo, era uma fábrica com a lógica de culto que sobrava.";
-    expect(contarSanfona(t).n).toBeGreaterThanOrEqual(1);
+    expect(contarSanfona(t).n).toBe(0);
+    expect(LIMITACOES_RECALL.find((l) => l.id === "REC-03")?.detector).toBe("contarSanfona");
   });
 
   it("NÃO dispara: enumeração legítima", () => {

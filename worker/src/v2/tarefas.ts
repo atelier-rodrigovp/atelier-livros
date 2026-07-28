@@ -5,28 +5,53 @@
 import { nomeIdioma, type BriefingFundacao } from "./briefing.js";
 import type { SceneSpec, SkillContract } from "./tipos.js";
 
-/** Arquiteto de cena: produz a ficha estruturada (scene-spec/v1) — SEM prosa. */
-export function tarefaArquitetoCena(capitulo: number, contrato: SkillContract): string {
+/**
+ * Arquiteto de cena: produz a ficha estruturada (scene-spec/v1) — SEM prosa.
+ * `temArco` liga os campos de longo alcance (fundação v3); em fundação v2 eles
+ * não são pedidos, e a ficha continua válida sem eles.
+ */
+export function tarefaArquitetoCena(capitulo: number, contrato: SkillContract, temArco = false): string {
   const camposSkill = contrato.estruturas_exigidas?.campos_spec ?? [];
   return [
     `Produza a FICHA DE CENA do capítulo ${capitulo} como JSON válido no schema "scene-spec/v1".`,
     `Campos obrigatórios: pov, local, tempo, objetivo, obstaculo, acao_fisica, informacao_nova, virada, mudanca_estado, gancho {tipo, descricao}, fatos_obrigatorios[], conhecimentos_proibidos[], fios_avancados[], fios_ausentes[].`,
     camposSkill.length ? `Campos extras desta skill em campos_skill: ${camposSkill.map((c) => `"${c}"`).join(", ")}.` : "",
     `gancho.tipo deve ser um de: ${contrato.tipos_gancho.join(", ")}.`,
+    `"informacao_nova" é o que o LEITOR passa a saber neste capítulo. A seção LEDGER DE REVELAÇÕES lista o que ele JÁ sabe: repetir uma entrada de lá reprova a ficha. Avançar ou complicar uma revelação antiga é legítimo; reapresentá-la como novidade, não.`,
+    `Opcional: "revelacoes": [string] com até 2 revelações ADICIONAIS (≤25 palavras cada), quando o capítulo entrega mais de uma informação nova ao leitor.`,
+    temArco
+      ? [
+          `Campos de ARCO (a seção ARCO DO CAPÍTULO traz a grade — respeite-a):`,
+          `- "ato": número do ato a que este capítulo pertence; "tensao_alvo": 1–5, o alvo declarado para o ato.`,
+          `- "promessas_tocadas": [{"id": string, "acao": "planta"|"reforca"|"paga"}] — SOMENTE ids que a seção ARCO lista, e a ação tem de bater com o que a grade prevê para este capítulo.`,
+          `- "marcos_arco": [{"personagem": string, "marco": string ≤20 palavras}] quando a grade marca um ponto de arco aqui.`,
+        ].join("\n")
+      : "",
     `REGRAS DURAS: a ficha APONTA, não redige. Proibido: metáfora, aforismo, diálogo pronto, frase de abertura/encerramento, pensamento redigido, parágrafo-modelo, alternativas de prosa. Campos com no máximo ~40 palavras.`,
     `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
   ].filter(Boolean).join("\n");
 }
 
-/** Contextualizador: só fatos e continuidade — proibido escrever prosa. */
+/**
+ * Contextualizador: só fatos e continuidade — proibido escrever prosa.
+ *
+ * Ele SELECIONA do material do pacote; não lembra nem deduz. O pacote passou a
+ * trazer BÍBLIA, MAPA, ESTRUTURA, LEDGER DE REVELAÇÕES e as fichas condensadas dos
+ * capítulos anteriores — antes ele recebia zero capítulo e era instruído a listar
+ * "fatos com origem" e "repetições recentes", o que só podia sair de invenção
+ * (raiz do diagnóstico). Cada lista abaixo está amarrada a uma seção que existe no
+ * pacote, e a origem tem de citá-la.
+ */
 export function tarefaContextualizador(capitulo: number): string {
   return [
     `Selecione o contexto factual mínimo para escrever o capítulo ${capitulo}.`,
     `Responda APENAS JSON: { "fatos": [{"fato": string, "origem": string}], "continuidade": [{"item": string, "origem": string}], "repeticoes_recentes": [string] }.`,
     `- "fatos": fatos estabelecidos que este capítulo NÃO pode contradizer (nomes, datas, lugares, quem sabe o quê).`,
     `- "continuidade": estados abertos que este capítulo toca (objetos, ferimentos, promessas, posições).`,
-    `- "repeticoes_recentes": frases/imagens marcantes já usadas que o escritor não deve repetir.`,
-    `REGRAS DURAS: você NÃO escreve prosa, metáfora, imagem, pensamento ou frase literária. Só fato seco com origem (documento/capítulo). Máx 15 itens por lista.`,
+    `- "repeticoes_recentes": informações que o LEDGER DE REVELAÇÕES registra como já entregues ao leitor e que o escritor não pode reapresentar como novidade.`,
+    `REGRA DE PROCEDÊNCIA (dura): todo item TEM de sair de uma seção presente neste pacote — BÍBLIA DA OBRA, MAPA DE PERSONAGENS, ESTRUTURA DO LIVRO, LEDGER DE REVELAÇÕES ou CAPÍTULOS ANTERIORES (fichas condensadas). "origem" cita a seção e, quando houver, o capítulo (ex.: "ledger R07.1, cap 7"; "ficha cap 3"; "bíblia").`,
+    `Se o pacote não sustenta um item, ele NÃO existe: liste menos. É proibido inferir, completar lacuna ou supor o que "provavelmente" foi estabelecido — lista curta e verdadeira vale mais que lista longa e inventada.`,
+    `REGRAS DURAS: você NÃO escreve prosa, metáfora, imagem, pensamento ou frase literária. Só fato seco com origem. Máx 15 itens por lista.`,
   ].join("\n");
 }
 
@@ -118,6 +143,7 @@ export function tarefaRevisor(capitulo: number, resumoSinais: string, contrato: 
     `- "aprovado" exige evidência POSITIVA em "evidencias" (o que está vivo e funciona, localizado) — ausência de defeito não basta.`,
     `- Qualquer "violacao_confirmada" exige entrada correspondente em "correcoes" e veredito "reprovado".`,
     `- Capítulo competente mas MORTO (sem evento, sem avanço) reprova mesmo dentro das cotas.`,
+    `- REPETIÇÃO DE REVELAÇÃO: a seção LEDGER DE REVELAÇÕES lista o que o leitor JÁ SABE. Se este capítulo reapresenta como novidade algo que o ledger já registra — ainda que com outras palavras, outra cena ou outro personagem descobrindo —, isso é defeito: acrescente o sinal "revelacao_ja_no_ledger" com disposicao "violacao_confirmada", cite em "evidencia" o id/capítulo da entrada do ledger e o trecho do capítulo, e reprove. O detector automático só pega repetição literal; a repetição REESCRITA é sua responsabilidade. Avançar, complicar ou pagar uma revelação antiga NÃO é repetir — repetir é entregá-la de novo como se fosse nova.`,
     `- Julgue aderência à skill pelo contrato do pacote (testes positivos: ${contrato.testes_positivos.slice(0, 4).join("; ") || "—"}).`,
   ].join("\n");
 }
@@ -154,17 +180,87 @@ export function tarefaSinteseArco(totalBlocos: number): string {
 
 /** Arquiteto de enredo: fundação (bíblia + mapa de personagens + perfil + estrutura), sem semear ornamento. */
 export function tarefaArquitetoEnredo(briefing: BriefingFundacao, contrato: SkillContract): string {
+  const docsExigidos = contrato.estruturas_exigidas?.docs ?? [];
   return [
     `Monte a fundação do livro "${briefing.titulo}" (${briefing.totalCapitulos} capítulos, escrito em ${nomeIdioma(briefing.idioma)}) para a skill do pacote.`,
     `Premissa do autor: ${briefing.premissa}`,
     briefing.detalhes ? `BRIEFING COMPLETO DO AUTOR (decisões vinculantes — a fundação as respeita, nunca as substitui):\n${briefing.detalhes}` : "",
-    `Responda APENAS JSON: { "perfil_voz": string, "biblia": string, "mapa_personagens": [{"nome": string, "papel": string, "ferida": string, "segredo": string, "desejo": string, "voz": string, "arco": string}], "estrutura": [{"capitulo": number, "fio": string, "resumo_estrutural": string}], "fios": [string], "promessa_editorial": string }.`,
+    `Responda APENAS JSON: { "perfil_voz": string, "biblia": string, "mapa_personagens": [{"nome": string, "papel": string, "ferida": string, "segredo": string, "desejo": string, "voz": string, "arco": string}], "estrutura": [{"capitulo": number, "fio": string, "resumo_estrutural": string}], "fios": [string], "promessa_editorial": string, "arco": {"atos": [...], "promessas": [...], "fios": [...], "arcos": [...]}${docsExigidos.length ? `, "docs_exigidos": {${docsExigidos.map((d) => `"${d}": string`).join(", ")}}` : ""} }.`,
     `- "perfil_voz": descrição de voz em markdown curto (≤300 palavras) coerente com o contrato (${contrato.familia_editorial}; ${contrato.acao_interioridade.relacao}). PROIBIDO incluir parágrafos-modelo, aforismos ou frases de exemplo — a fundação não semeia ornamento (o perfil descreve, não demonstra).`,
     `- "biblia": bíblia da obra em markdown (≤1200 palavras): mundo/ambientação, cânone factual, linha do tempo, final planejado e proibições do autor. Fatos secos e decisões — sem prosa de cena, sem diálogo, sem parágrafo-modelo.`,
     `- "mapa_personagens": um item por personagem relevante (protagonistas, antagonistas, apoio com função na trama); cada campo ≤25 palavras; "voz" descreve o registro de fala, nunca cita falas prontas.`,
-    `- "estrutura": um item por capítulo; "resumo_estrutural" aponta objetivo/virada em ≤25 palavras, sem prosa.`,
+    `- "estrutura": EXATAMENTE ${briefing.totalCapitulos} itens, um por capítulo, numerados de 1 a ${briefing.totalCapitulos}, sem furo nem repetição; "resumo_estrutural" aponta objetivo/virada em ≤25 palavras, sem prosa.`,
     `- "fios": nomes dos fios narrativos${contrato.pov.rotacao ? ` (entre ${contrato.pov.rotacao.fios_min} e ${contrato.pov.rotacao.fios_max})` : ""}.`,
+    ``,
+    `## ARCO — a grade que governa o livro inteiro (obrigatória)`,
+    `Um livro de ${briefing.totalCapitulos} capítulos não se sustenta com uma linha por capítulo. Preencha "arco" com objetos verificáveis:`,
+    `- "atos": [{"numero": int, "cap_inicio": int, "cap_fim": int, "funcao": string ≤20 palavras, "tensao_alvo": 1–5}] — os atos cobrem os capítulos 1 a ${briefing.totalCapitulos} SEM FURO e SEM SOBREPOSIÇÃO (o primeiro começa em 1, o último termina em ${briefing.totalCapitulos}), e a tensão-alvo escala ao longo do livro.`,
+    `- "promessas": [{"id": "P1", "enunciado": string ≤20 palavras, "plantada_em": int, "reforcada_em": [int], "paga_em": int}] — toda expectativa que o livro cria no leitor. REGRA DURA: plantada_em < paga_em, todo reforço fica entre as duas, e NENHUMA promessa fica sem paga_em. Promessa que você não sabe pagar não deve ser plantada.`,
+    `- "fios": [{"id": string, "nome": string, "abre": int, "escalada": [int], "climax": int, "fecha": int}] — um por fio narrativo declarado em "fios", com abre ≤ escalada ≤ climax ≤ fecha ≤ ${briefing.totalCapitulos}.`,
+    `- "arcos": [{"personagem": string, "marcos": [{"capitulo": int, "estado": string ≤20 palavras}]}] — para CADA protagonista e antagonista, no mínimo 3 marcos: um até o capítulo ${Math.ceil(briefing.totalCapitulos * 0.25)}, um no miolo, e um a partir do capítulo ${Math.ceil(briefing.totalCapitulos * 0.8)}. Marco é ESTADO do personagem naquele ponto, não cena.`,
+    `Os campos do arco são conferidos por código: furo na grade de atos, promessa sem pagamento, fio sem fechamento ou arco sem marcos reprovam a fundação inteira antes de qualquer capítulo ser escrito.`,
+    docsExigidos.length
+      ? [
+          ``,
+          `## DOCUMENTOS EXIGIDOS PELA SKILL (obrigatórios)`,
+          `"docs_exigidos": objeto {nome_do_arquivo: conteúdo markdown}, com EXATAMENTE estas chaves: ${docsExigidos.map((d) => `"${d}"`).join(", ")}.`,
+          `São documentos de CÂNONE FACTUAL, consultados pelo auditor durante a escrita: fatos secos, tabelas, datas, nomes, medidas — sem prosa de cena, sem diálogo, sem parágrafo-modelo. Cada um com no mínimo 150 palavras de conteúdo útil e específico deste livro.`,
+        ].join("\n")
+      : "",
   ].filter(Boolean).join("\n");
+}
+
+/**
+ * PASSADA 1 (MACRO): a fundação de longo alcance, SEM a linha por capítulo.
+ * Separar as passadas evita o que a geração única forçava — pedir ao modelo o
+ * arco e 40 resumos na mesma resposta, o que o deixava raso justamente no arco.
+ */
+export function tarefaArquitetoEnredoMacro(briefing: BriefingFundacao, contrato: SkillContract): string {
+  const docsExigidos = contrato.estruturas_exigidas?.docs ?? [];
+  const completa = tarefaArquitetoEnredo(briefing, contrato);
+  // Reaproveita as regras da tarefa completa e substitui só o contrato de saída:
+  // a micro (estrutura capítulo a capítulo) fica para a passada 2.
+  const semEstrutura = completa
+    .split("\n")
+    .filter((l) => !l.startsWith(`- "estrutura":`))
+    .join("\n");
+  return [
+    `PASSADA 1 de 2 — MACRO. Nesta passada você NÃO escreve a linha de cada capítulo.`,
+    ``,
+    semEstrutura.replace(
+      /Responda APENAS JSON: \{[^\n]*\}\./,
+      `Responda APENAS JSON: { "perfil_voz": string, "biblia": string, "mapa_personagens": [{"nome": string, "papel": string, "ferida": string, "segredo": string, "desejo": string, "voz": string, "arco": string}], "fios": [string], "promessa_editorial": string, "arco": {"atos": [...], "promessas": [...], "fios": [...], "arcos": [...]}${docsExigidos.length ? `, "docs_exigidos": {${docsExigidos.map((d) => `"${d}": string`).join(", ")}}` : ""} }. NÃO inclua "estrutura" nesta passada.`
+    ),
+    ``,
+    `A macro é validada ANTES da micro: atos sem furo, promessa com pagamento, fio com escalada e fechamento, arco de personagem com marcos, tensão que escala entre os atos e antagonista estrutural. Nada disso é negociável na passada 2.`,
+  ].join("\n");
+}
+
+/**
+ * PASSADA 2 (MICRO): a linha de cada capítulo, DENTRO da macro já aprovada.
+ * A macro entra como contexto vinculante — a micro não pode contradizê-la.
+ */
+export function tarefaArquitetoEnredoMicro(
+  briefing: BriefingFundacao,
+  contrato: SkillContract,
+  macro: { fios: string[]; promessa_editorial: string; arcoResumo: string }
+): string {
+  return [
+    `PASSADA 2 de 2 — MICRO. A macro do livro "${briefing.titulo}" já foi APROVADA pelo portão e é VINCULANTE: você a detalha, nunca a altera.`,
+    ``,
+    `## MACRO APROVADA (não contradiga)`,
+    `Promessa editorial: ${macro.promessa_editorial}`,
+    `Fios declarados: ${macro.fios.join(", ")}`,
+    macro.arcoResumo,
+    ``,
+    `Escreva a estrutura capítulo a capítulo.`,
+    `Responda APENAS JSON: { "estrutura": [{"capitulo": number, "fio": string, "resumo_estrutural": string}] }.`,
+    `- EXATAMENTE ${briefing.totalCapitulos} itens, numerados de 1 a ${briefing.totalCapitulos}, sem furo nem repetição.`,
+    `- "fio" de cada capítulo é UM dos fios declarados acima, escrito igual.`,
+    `- "resumo_estrutural" aponta objetivo e virada em ≤25 palavras, sem prosa, sem diálogo.`,
+    `- Cada capítulo tem função PRÓPRIA: dois capítulos com resumo intercambiável reprovam a fundação inteira (o portão compara por similaridade, não só por igualdade).`,
+    `- Os capítulos de plantio, reforço e pagamento de cada promessa, e os de abertura/escalada/clímax/fechamento de cada fio, têm de bater com a macro acima.`,
+  ].join("\n");
 }
 
 /** Editor estrutural: PROPÕE corte/fusão/reordenação — nunca escreve prosa. */
@@ -189,5 +285,88 @@ export function tarefaAuditorFactual(capitulo: number): string {
     `Audite o capítulo ${capitulo} (seção TEXTO A AVALIAR) contra os FATOS e a ficha do pacote.`,
     `Responda APENAS JSON: { "contradicoes": [{"fato_estabelecido": string, "trecho_do_capitulo": string, "gravidade": "bloqueante"|"aviso"}], "conhecimento_indevido": [{"quem": string, "sabe_o_que_nao_deveria": string, "trecho": string}], "pov_violado": {"ha": boolean, "detalhe": string} }.`,
     `Só aponte contradição COMPROVADA pelo material do pacote (cite o fato e o trecho). Não julgue estilo.`,
+  ].join("\n");
+}
+
+/**
+ * Conformidade FICHA → PROSA (fatia G). O papel julga se o capítulo ENTREGOU o
+ * que a ficha planejou — e cada afirmação precisa citar um trecho que exista no
+ * texto. Sem trecho localizável, a afirmação não sustenta nada.
+ */
+export function tarefaConformidade(capitulo: number, ficha: SceneSpec, sinais: string): string {
+  const itens = [
+    `- "objetivo": o que ${ficha.pov} queria — ${ficha.objetivo}`,
+    `- "obstaculo": o que impediu — ${ficha.obstaculo}`,
+    `- "acao_decisiva": a ação concreta — ${ficha.acao_fisica}`,
+    `- "virada": ${ficha.virada}`,
+    `- "mudanca_estado": ${ficha.mudanca_estado}`,
+    `- "gancho": ${ficha.gancho?.descricao ?? ""}`,
+    `- "informacao_nova": ${ficha.informacao_nova}`,
+    ...((ficha.marcos_arco ?? []).length
+      ? [`- "marco_arco": ${(ficha.marcos_arco ?? []).map((m) => `${m.personagem}: ${m.marco}`).join("; ")}`]
+      : []),
+    ...((ficha.promessas_tocadas ?? []).length
+      ? [`- "promessa": ${(ficha.promessas_tocadas ?? []).map((p) => `${p.id} (${p.acao})`).join("; ")}`]
+      : []),
+  ];
+  return [
+    `Verifique se o CAPÍTULO ${capitulo} cumpre a FICHA que o planejou. Você NÃO julga qualidade de prosa — julga ENTREGA.`,
+    ``,
+    `Itens a verificar:`,
+    ...itens,
+    ``,
+    sinais,
+    ``,
+    `Responda APENAS JSON: { "afirmacoes": [{"item": string, "cumprido": boolean, "trecho": string, "justificativa": string}] }.`,
+    `REGRAS DURAS:`,
+    `- UMA afirmação por item listado acima, usando exatamente o nome do item.`,
+    `- "trecho": CITAÇÃO LITERAL do capítulo (≥12 caracteres), copiada do texto sem alterar uma vírgula. Um trecho que não exista no capítulo INVALIDA a afirmação.`,
+    `- "cumprido": true SOMENTE se o trecho citado de fato entrega o item. Um capítulo bem escrito que não cumpre a função dramática prevista NÃO é conforme.`,
+    `- "justificativa": por que aquele trecho entrega (ou por que o item não foi entregue). Nunca vazia.`,
+    `- Na dúvida entre "entregou de forma fraca" e "não entregou": se o evento previsto não acontece na página, é "cumprido": false.`,
+    `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
+  ].join("\n");
+}
+
+/**
+ * Extrator de memória da PROSA APROVADA (fatia H). Roda DEPOIS da aprovação: o
+ * que ele registra é o que o livro passou a ter como verdade — inclusive o que a
+ * ficha não previa.
+ */
+export function tarefaExtratorMemoria(capitulo: number, ficha: SceneSpec): string {
+  return [
+    `O capítulo ${capitulo} foi APROVADO. Extraia o que ele estabeleceu para o livro.`,
+    `Você NÃO julga qualidade e NÃO escreve prosa: registra o que passou a ser verdade, com a citação que prova.`,
+    ``,
+    `Responda APENAS JSON: { "entradas": [{"tipo": string, "enunciado": string, "trecho": string, "quem": string?, "confianca": "alta"|"media"|"baixa", "origem": "ficha"|"prosa"}], "divergencias": [{"campo": string, "ficha": string, "prosa": string, "trecho": string}] }.`,
+    ``,
+    `"tipo" ∈ fato, revelacao, pista, objeto, promessa, pergunta_aberta, mudanca_estado, mudanca_relacao, condicao_fisica, localizacao, conhecimento.`,
+    `- "enunciado": ≤25 palavras, seco, verificável. Não é resumo do capítulo: é UM fato por entrada.`,
+    `- "trecho": CITAÇÃO LITERAL do capítulo (≥12 caracteres). Entrada sem trecho localizável é descartada.`,
+    `- "origem": "ficha" se o item já estava previsto na FICHA DA CENA; "prosa" se surgiu só na escrita.`,
+    `- "quem": o personagem, quando a entrada for conhecimento, condição física, localização ou relação.`,
+    ``,
+    `ATENÇÃO ESPECIAL ao que a ficha NÃO previa: pista plantada de improviso, objeto que ganhou peso, promessa que o texto abriu, pergunta que ficou no ar. É exatamente isso que ninguém mais registra — e que o fechamento do livro vai cobrar.`,
+    ``,
+    `"divergencias": onde a PÁGINA contradiz a ficha (o objetivo mudou, a virada foi outra, o gancho é de outro tipo). Cite o trecho. Não "conserte" a ficha: reporte.`,
+    `A ficha planejada era: ${JSON.stringify({ objetivo: ficha.objetivo, virada: ficha.virada, gancho: ficha.gancho, informacao_nova: ficha.informacao_nova })}.`,
+    `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
+  ].join("\n");
+}
+
+/** Julgamento de IDIOMA e VARIANTE (fatia J). O detector aponta; este papel decide. */
+export function tarefaIdioma(capitulo: number, alvo: string, sinais: string): string {
+  return [
+    `O capítulo ${capitulo} deve estar em ${nomeIdioma(alvo)} (${alvo}). Julgue a VARIANTE.`,
+    ``,
+    sinais,
+    ``,
+    `Responda APENAS JSON: { "narracao_conforme": boolean, "intencionais": [{"trecho": string, "motivo": string}], "injustificadas": [{"trecho": string, "detalhe": string}] }.`,
+    `REGRAS DURAS:`,
+    `- Julgue a NARRAÇÃO por um critério e o DIÁLOGO por outro. A narração tem de estar em ${alvo}, sem exceção.`,
+    `- Fala de personagem de outra origem, citação de documento estrangeiro e epígrafe são INTENCIONAIS: liste em "intencionais" com o motivo.`,
+    `- "injustificadas": só divergência que não tem explicação no texto. Cite o trecho — acusação sem trecho não conta.`,
+    `- O detector pode errar: se o que ele apontou for legítimo no contexto, diga isso em "intencionais" em vez de repetir a acusação.`,
+    `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
   ].join("\n");
 }

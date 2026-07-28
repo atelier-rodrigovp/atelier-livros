@@ -37,3 +37,15 @@ worker/audit-backup/
 # Backups .orig.bak (auditoria antivazamento) e bytecode python
 *.orig.bak
 __pycache__/
+
+# Artefato do comando de prontidão (gerado; não versionado)
+.prontidao/
+
+# Evidencias de verificacao externa: carregam project id, caminhos de Storage e
+# log de execucao. O remoto e PUBLICO — nunca versionar.
+.evidencias/
+
+# Rotulagem humana PREENCHIDA (julgamento do autor sobre trechos da obra).
+# O template vazio fica versionado; o arquivo respondido, nao.
+calibracao-humana/*.local.csv
+calibracao-humana/rotulos-pendentes.csv

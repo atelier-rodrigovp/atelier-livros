@@ -18,6 +18,13 @@ import { compilarPacote, type SecaoContexto } from "./compilador.js";
 import { executarPapel } from "./papeis.js";
 import { tarefaCanarioVoz, tarefaEditorEstrutural, tarefaRevisorCanario } from "./tarefas.js";
 import { gerarFundacaoV2, materializarFundacao } from "./fundacao.js";
+import { autorizarFundacao, type BriefingAprovado } from "./briefing-aprovacao.js";
+import { compararPremissas, decidirComPremissaAlterada, invalidarPorPremissa } from "./canario-snapshot.js";
+import { documentosDaFundacao } from "./documentos.js";
+import { parsearArco } from "./arco.js";
+import { avaliarFechamentoLivro } from "./fechamento.js";
+import { escreverCapituloComEscada } from "./correcao.js";
+import { reconstruirLedger } from "./ledger.js";
 import {
   briefingParaFundacao,
   decisoesAvulsas,
@@ -39,10 +46,11 @@ import { fundirFichas, PersistenciaEstadoIsolado } from "./estrutural-staging.js
 import { executarMeta9 } from "./meta9.js";
 import { resolverTotalCapitulos } from "./total-capitulos.js";
 import { medirSinais, resumoSinais } from "./sinais.js";
-import { exigirReleaseAtual } from "./release.js";
+import { exigirReleaseAtual, lerAutorizacaoProjeto, type OperacaoV2 } from "./release.js";
 import { conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
 import {
   ErroEngine,
+  type ArcoFundacao,
   type ContratoCompilado,
   type EstadoCanonico,
   type MapaModelos,
@@ -51,7 +59,14 @@ import {
 } from "./tipos.js";
 
 /** Tipos de job que a V2 sabe executar (os demais permanecem na V1 mesmo em modo v2). */
-export const TIPOS_V2 = new Set(["escrever_livro", "criar_fundacao", "laboratorio_v2", "revisar", "refinar_fundacao"]);
+export const TIPOS_V2 = new Set([
+  "escrever_livro",
+  "criar_fundacao",
+  "laboratorio_v2",
+  "revisar",
+  "refinar_fundacao",
+  "avaliar",
+]);
 
 export async function engineModeDoProjeto(projectId: string): Promise<string> {
   const { sb, OWNER } = await import("../supabase.js");
@@ -73,11 +88,21 @@ export async function engineModeDoProjeto(projectId: string): Promise<string> {
  * Ponto único de roteamento. `executarV1` é injetado (não importamos jobs.ts aqui
  * para evitar ciclo de import e para manter a V1 byte-idêntica).
  */
+/**
+ * Resultado do roteamento. `continuar` = a execução parou num CHECKPOINT limpo e
+ * ainda há trabalho: o job deve voltar para a fila em vez de ser dado como
+ * concluído. É o que torna a escrita encadeada (nem um job monolítico de 12
+ * capítulos, nem uma parada definitiva depois do primeiro).
+ */
+export interface ResultadoRoteado {
+  continuar?: { motivo: string; proximoCapitulo: number; progresso: Record<string, unknown> };
+}
+
 export async function executarJobRoteado(
   job: Job,
   hb: (extra?: Record<string, unknown>) => Promise<void>,
   executarV1: (job: Job, hb: (extra?: Record<string, unknown>) => Promise<void>) => Promise<void>
-): Promise<void> {
+): Promise<ResultadoRoteado | void> {
   if (job.tipo === "laboratorio_v2") {
     // Job exclusivo V2 (não existe na V1) — dispensa engine_mode.
     const { executarLaboratorio } = await import("./lab/job.js");
@@ -92,15 +117,31 @@ export async function executarJobRoteado(
     if (modo === "v2") {
       if (job.tipo === "criar_fundacao") return executarFundacaoV2Job(job);
       if (job.tipo === "refinar_fundacao") return executarRefinarFundacaoV2(job);
+      if (job.tipo === "avaliar") return executarAvaliarV2(job);
       if (job.tipo === "revisar") {
         // Revisão V2 opera na edição de ORIGEM; tradução segue o pipeline V1.
-        if (await edicaoEhTraducao(job.edition_id)) return executarV1(job, hb);
+        if (await edicaoEhTraducao(job.edition_id)) {
+          registrarDesvioV1(job, "revisão de tradução não tem pipeline V2");
+          return executarV1(job, hb);
+        }
         return executarRevisarV2(job);
       }
       return executarEscritaV2(job);
     }
   }
+  // Projeto V2 cujo TIPO de job não tem implementação V2 (gerar_epub, traduzir,
+  // gerar_capa…) cai aqui legitimamente — mas nunca em silêncio. Rota calada é
+  // como um livro V2 seria montado por código V1 sem ninguém notar.
+  if (job.project_id && !TIPOS_V2.has(job.tipo)) {
+    const modo = await engineModeDoProjeto(job.project_id).catch(() => "desconhecido");
+    if (modo === "v2") registrarDesvioV1(job, `tipo '${job.tipo}' não tem implementação V2`);
+  }
   return executarV1(job, hb);
+}
+
+/** Toda vez que um projeto V2 executa por código V1, isso vai para o log. */
+export function registrarDesvioV1(job: Pick<Job, "id" | "tipo">, motivo: string): void {
+  console.log(`[engine-v2] job ${job.id} (${job.tipo}) roteado para a V1 — ${motivo}`);
 }
 
 async function atualizarProgresso(jobId: string, progresso: Record<string, unknown>): Promise<void> {
@@ -239,7 +280,7 @@ export async function prepararEdicaoEstrutural(opts: {
  * (escrever_livro, revisar): projeto, contrato, release, persistência, perfil,
  * briefing (camadas 3/7), fundação e edição de origem — caminho ÚNICO.
  */
-async function prepararProjetoV2(job: Job): Promise<{
+async function prepararProjetoV2(job: Job, operacao: OperacaoV2 = "escrita"): Promise<{
   proj: Record<string, unknown>;
   contrato: ReturnType<typeof carregarContrato>;
   release: ReturnType<typeof exigirReleaseAtual>;
@@ -257,7 +298,10 @@ async function prepararProjetoV2(job: Job): Promise<{
   const projectId = job.project_id!;
   const { data: proj, error } = await sb
     .from("projects")
-    .select("id,titulo,skill_escrita,total_capitulos,piso_palavras,meta_nota,idioma_origem,briefing")
+    // `piso_palavras` e `paginas_alvo` são colunas da V1 e NÃO entram aqui: na V2
+    // a faixa de palavras vem do contrato da skill (`faixa_palavras`), que é quem
+    // o medidor de sinais lê. Selecioná-las dava a impressão de que decidiam algo.
+    .select("id,titulo,skill_escrita,total_capitulos,meta_nota,idioma_origem,briefing")
     .eq("owner", OWNER)
     .eq("id", projectId)
     .single();
@@ -268,7 +312,7 @@ async function prepararProjetoV2(job: Job): Promise<{
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const skillId = MAPA_SKILL_V1_V2[skillV1] ?? skillV1;
   const contrato = carregarContrato(skillId); // skill desconhecida/contrato inválido = falha clara AQUI, antes do escritor
-  const release = exigirReleaseAtual(contrato.contrato.id, projectId);
+  const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId), operacao);
 
   const dirProjeto = projDir(projectId);
   const { persistencia, migracaoPendente } = await criarPersistencia({ dirProjeto });
@@ -290,6 +334,20 @@ async function prepararProjetoV2(job: Job): Promise<{
   }
 
   const estado = await gravador.carregarEstado();
+
+  // Ledger de revelações: livros começados antes desta versão têm capítulos
+  // aprovados e nenhum ledger. Reconstrói UMA vez, das fichas já persistidas
+  // (derivação pura — o resultado é o mesmo que a aprovação teria gravado).
+  if (!estado.doc.ledger_revelacoes) {
+    const fichas = await persistencia.lerFichasMaisRecentes(projectId);
+    const reconstruido = reconstruirLedger(fichas, (cap) => {
+      const s = estado.doc.capitulos[String(cap)]?.status;
+      return s === "aprovado" || s === "aprovado_com_excecao";
+    });
+    estado.doc.ledger_revelacoes = reconstruido;
+    await persistencia.gravarEstado(estado);
+    console.log(`[engine-v2] ledger de revelações reconstruído: ${reconstruido.length} entrada(s) de ${fichas.length} ficha(s)`);
+  }
 
   // Docs factuais do contrato (ex.: dossie-factual.md do dan-brown, matriz-de-relogios
   // do hoover): quando existem no projeto, entram VERBATIM no pacote do revisor e do
@@ -335,11 +393,14 @@ async function prepararProjetoV2(job: Job): Promise<{
     path.join(dirProjeto, "mapa-personagens.json")
   );
   let estruturaFundacao: { capitulo: number; fio: string; resumo_estrutural: string }[] | undefined;
+  let arcoFundacao: ArcoFundacao | undefined;
   try {
     const cru = JSON.parse(await lerPrimeiro(path.join(dirProjeto, "estrutura.json")) || "null") as
       | { estrutura?: { capitulo: number; fio: string; resumo_estrutural: string }[] }
       | null;
     if (Array.isArray(cru?.estrutura)) estruturaFundacao = cru.estrutura;
+    // `arco` só existe na fundação v3; ausente = v2, e os gates de arco são no-op.
+    arcoFundacao = parsearArco(cru) ?? undefined;
   } catch { /* estrutura ausente/ilegível: seções ficam vazias (fundação antiga) */ }
 
   // Edição de ORIGEM: o livro V2 existe para a plataforma (Leitor/tradução/
@@ -361,14 +422,75 @@ async function prepararProjetoV2(job: Job): Promise<{
     instrucoesAutor,
     preferencias,
     idioma,
-    fundacao: { biblia, mapaPersonagens, estrutura: estruturaFundacao },
+    fundacao: { biblia, mapaPersonagens, estrutura: estruturaFundacao, arco: arcoFundacao },
   };
 
   return { proj: proj as Record<string, unknown>, contrato, release, dirProjeto, persistencia, migracaoPendente, gravador, estado, deps, docsFactuais, editionId };
 }
 
 /** Executa escrever_livro no pipeline V2, capítulo a capítulo, retomável. */
-export async function executarEscritaV2(job: Job): Promise<void> {
+/**
+ * Capítulos por execução. `0` (default) = escreve até o fim do livro numa única
+ * execução, com checkpoint durável por capítulo. Valor > 0 encadeia: a execução
+ * para no checkpoint e o job volta à fila para continuar do capítulo seguinte —
+ * útil quando o ambiente derruba processos longos.
+ */
+export function capsPorExecucao(env: Record<string, string | undefined> = process.env): number {
+  const bruto = Number(env.V2_CAPS_POR_EXECUCAO ?? 0);
+  return Number.isFinite(bruto) && bruto > 0 ? Math.floor(bruto) : 0;
+}
+
+/**
+ * Encadear ou seguir no mesmo job? Decisão pura, no checkpoint do capítulo `n`.
+ * Nunca encadeia no último capítulo (aí a execução tem de seguir para o
+ * fechamento) e nunca encadeia com lote desligado (livro inteiro numa execução).
+ */
+export function devolverAFilaNoCheckpoint(opts: {
+  lote: number;
+  novosCaps: number;
+  capitulo: number;
+  total: number;
+}): boolean {
+  return opts.lote > 0 && opts.novosCaps >= opts.lote && opts.capitulo < opts.total;
+}
+
+/**
+ * D5 — o livro está COMPLETO? Só quando todo capítulo de 1..N está aprovado.
+ * `done` derivado de "a execução retornou sem erro" é falso positivo: com
+ * `max_novos_caps=1`, um livro de 12 capítulos aparecia concluído no primeiro.
+ */
+export function livroCompleto(opts: {
+  total: number;
+  statusPorCapitulo: Record<string, { status?: string } | undefined>;
+}): boolean {
+  if (!opts.total || opts.total < 1) return false;
+  for (let n = 1; n <= opts.total; n++) {
+    const s = opts.statusPorCapitulo[String(n)]?.status;
+    if (s !== "aprovado" && s !== "aprovado_com_excecao") return false;
+  }
+  return true;
+}
+
+/**
+ * Parada por limite de lote (`max_novos_caps`). Retorna o próximo capítulo a
+ * escrever, ou null quando não há motivo para parar. Nunca "encerra" o livro:
+ * parar por lote e concluir o livro são coisas diferentes.
+ */
+export function pararPorLoteDeNovos(opts: {
+  maxNovosCaps: number;
+  novosCaps: number;
+  proximoCapitulo: number;
+  total: number;
+}): { motivo: string; proximoCapitulo: number } | null {
+  if (!Number.isFinite(opts.maxNovosCaps) || opts.novosCaps < opts.maxNovosCaps) return null;
+  if (opts.proximoCapitulo > opts.total) return null; // nada a continuar
+  return {
+    motivo: `max_novos_caps=${opts.maxNovosCaps} atingido; livro incompleto (${opts.proximoCapitulo - 1}/${opts.total})`,
+    proximoCapitulo: opts.proximoCapitulo,
+  };
+}
+
+export async function executarEscritaV2(job: Job): Promise<ResultadoRoteado | void> {
   const { proj, contrato, release, dirProjeto, persistencia, migracaoPendente, gravador, estado, deps, docsFactuais, editionId } =
     await prepararProjetoV2(job);
   const projectId = job.project_id!;
@@ -402,13 +524,55 @@ export async function executarEscritaV2(job: Job): Promise<void> {
       : {}),
   });
 
+  // PREMISSAS (fatia L): a base sob a qual os artefatos foram construídos. Se
+  // mudou — canário, briefing, idioma, skill, contrato, total, documentos — o
+  // que dependia dela está INVALIDADO e a execução para até o autor decidir.
+  const premissasAgora = {
+    canario_hash: estado.doc.canario_snapshot?.hash ?? "",
+    briefing_hash: hashJsonCanonico((proj as { briefing?: unknown }).briefing ?? {}),
+    idioma: deps.idioma ?? "pt-BR",
+    skill_id: contrato.contrato.id,
+    skill_hash: contrato.hash,
+    contrato_hash: contrato.contrato.versao,
+    total_capitulos: total,
+    docs: estado.doc.fundacao?.docs ?? {},
+  };
+  const invalidacao = invalidarPorPremissa(
+    estado.doc.premissas ? compararPremissas(estado.doc.premissas, premissasAgora) : []
+  );
+  const escolhaAutor = (job.payload as { premissa_alterada?: "reconstruir" | "migrar" })?.premissa_alterada;
+  const decisaoPremissa = decidirComPremissaAlterada(invalidacao, escolhaAutor);
+  if (decisaoPremissa.acao === "bloquear") {
+    await gravador.registrarInvalidacao({
+      artefatos: decisaoPremissa.invalidacao.artefatos,
+      mudancas: decisaoPremissa.invalidacao.mudancas,
+      motivo: decisaoPremissa.invalidacao.motivo,
+      em: new Date().toISOString(),
+    });
+    await atualizarProgresso(job.id, {
+      quality_status: "aguardando_decisao",
+      invalidacao: decisaoPremissa.invalidacao.artefatos,
+      resumo: decisaoPremissa.invalidacao.motivo,
+    });
+    throw new ErroEngine({
+      codigo: "PREMISSA_ALTERADA",
+      classe: "configuracao",
+      mensagem: decisaoPremissa.invalidacao.motivo,
+      detalhe: { mudancas: decisaoPremissa.invalidacao.mudancas },
+    });
+  }
+  await gravador.registrarPremissas(premissasAgora);
+
   // Retomada: capítulos já aprovados em execuções anteriores ficam duráveis
   // ANTES de escrever o próximo (idempotente; hash-bound).
   await sincronizarCapitulosAprovados({ projectId, editionId, dirManuscrito: deps.dirManuscrito, estado });
 
   // Escrita incremental controlada (ex.: prova de 1 capítulo num livro migrado):
   // payload.max_novos_caps limita quantos capítulos NOVOS esta execução escreve.
+  // O limite de LOTE (V2_CAPS_POR_EXECUCAO) é outra coisa: não encerra o livro,
+  // encadeia — ao atingi-lo a execução para no checkpoint e o job volta à fila.
   const maxNovosCaps = Number((job.payload as { max_novos_caps?: number })?.max_novos_caps ?? 0) || Infinity;
+  const lote = capsPorExecucao();
   let novosCaps = 0;
   const legadosPulados: number[] = [];
 
@@ -421,13 +585,21 @@ export async function executarEscritaV2(job: Job): Promise<void> {
       legadosPulados.push(n);
       continue;
     }
-    if (novosCaps >= maxNovosCaps) {
-      await atualizarProgresso(job.id, {
+    // D5 — `max_novos_caps` LIMITA O LOTE, não encerra o livro. Antes, atingir o
+    // limite fazia `return` limpo e o worker marcava o job como `done`: um livro
+    // de 12 capítulos com max_novos_caps=1 aparecia CONCLUÍDO no capítulo 1.
+    // Agora devolve o job à fila, com o próximo capítulo declarado.
+    const paradaLote = pararPorLoteDeNovos({ maxNovosCaps, novosCaps, proximoCapitulo: n, total });
+    if (paradaLote) {
+      const progresso = {
         fase: "ESCRITA",
-        etapa: `limite de ${maxNovosCaps} capítulo(s) novo(s) atingido — job encerrado sem revisão final`,
+        etapa: `lote de ${maxNovosCaps} capítulo(s) novo(s) concluído — execução encadeada continua no capítulo ${n}`,
+        cap_atual: n - 1,
+        proximo_capitulo: n,
         ...(legadosPulados.length ? { aviso_legado: `capítulos legado preservados (não reescritos): ${legadosPulados.join(", ")}` } : {}),
-      });
-      return;
+      };
+      await atualizarProgresso(job.id, progresso);
+      return { continuar: { ...paradaLote, progresso } };
     }
 
     // Trechos anteriores estritamente relevantes: cauda do capítulo anterior (gancho/continuidade local).
@@ -445,7 +617,13 @@ export async function executarEscritaV2(job: Job): Promise<void> {
     }
 
     await atualizarProgresso(job.id, { cap_atual: n, etapa: `capitulo ${n}/${total}` });
-    const r = await escreverCapitulo(deps, n, { anteriores, trechosAnteriores: trechos });
+    const r = await escreverCapituloComEscada({
+      deps,
+      gravador,
+      capitulo: n,
+      opts: { anteriores, trechosAnteriores: trechos },
+      onProgresso: (p) => atualizarProgresso(job.id, p),
+    });
     novosCaps++;
 
     if (r.status === "bloqueado" || r.status === "reprovado" || r.status === "necessita_decisao_humana") {
@@ -461,14 +639,38 @@ export async function executarEscritaV2(job: Job): Promise<void> {
       });
     }
 
-    // Capítulo aprovado vira durável AGORA (chapters + Storage): a reprovação
-    // do N+1 nunca oculta o N aprovado (mesma lição do contrato de progresso V1).
+    // CHECKPOINT: capítulo aprovado vira durável AGORA (chapters + Storage). A
+    // reprovação do N+1 nunca oculta o N aprovado (mesma lição do contrato de
+    // progresso V1), e a retomada — por queda, cota ou encadeamento — parte daqui.
     await sincronizarCapitulosAprovados({
       projectId,
       editionId,
       dirManuscrito: deps.dirManuscrito,
       estado: await gravador.carregarEstado(),
     });
+    await atualizarProgresso(job.id, {
+      checkpoint: { capitulo: n, total, em: new Date().toISOString() },
+      cap_concluido: n,
+    });
+
+    // Encadeamento: lote cheio e livro incompleto → para no checkpoint e devolve
+    // o job à fila. Nunca "concluído": o trabalho continua na próxima execução.
+    if (devolverAFilaNoCheckpoint({ lote, novosCaps, capitulo: n, total })) {
+      const progresso = {
+        fase: "ESCRITA",
+        etapa: `checkpoint no capítulo ${n}/${total} — execução encadeada continua no ${n + 1}`,
+        cap_atual: n,
+        proximo_capitulo: n + 1,
+      };
+      await atualizarProgresso(job.id, progresso);
+      return {
+        continuar: {
+          motivo: `lote de ${lote} capítulo(s) concluído no checkpoint do capítulo ${n}`,
+          proximoCapitulo: n + 1,
+          progresso,
+        },
+      };
+    }
   }
 
   // Livro migrado com capítulos legado pulados: o manuscrito NÃO está todo
@@ -481,6 +683,37 @@ export async function executarEscritaV2(job: Job): Promise<void> {
       aviso_legado: `capítulos legado preservados (não reescritos): ${legadosPulados.join(", ")}`,
     });
     return;
+  }
+
+  // ---------------------------------------------------------------------------
+  // GATE DE FECHAMENTO — promessa plantada e nunca paga.
+  // Roda UMA vez, com o livro inteiro escrito, e é gate do LIVRO: o capítulo que
+  // apenas planta uma promessa válida (a pagar lá na frente) nunca é reprovado
+  // por ele durante a escrita. Fundação v2 (sem `arco`) = no-op com aviso.
+  // ---------------------------------------------------------------------------
+  const fechamento = await avaliarFechamentoLivro({
+    projectId,
+    total,
+    arco: deps.fundacao?.arco,
+    estado: await gravador.carregarEstado(),
+    persistencia,
+  });
+  if (!fechamento.passou) {
+    const falho = fechamento.gates.find((g) => !g.passou)!;
+    await atualizarProgresso(job.id, {
+      quality_status: "bloqueado",
+      quality_gate: falho.gate,
+      quality_blockers: [`${falho.gate}: ${falho.evidencia ?? "sem evidência"}`],
+    });
+    await gravador.registrarBloqueio(`GATE_${falho.gate}`, "livro", falho.evidencia ?? "");
+    throw new ErroEngine({
+      codigo: "LIVRO_FECHAMENTO_BLOQUEADO",
+      classe: "qualidade",
+      mensagem: `fechamento bloqueado por ${falho.gate}: ${falho.evidencia}`,
+    });
+  }
+  if (fechamento.naoAplicavel) {
+    await atualizarProgresso(job.id, { aviso_arco: fechamento.naoAplicavel });
   }
 
   // Retomabilidade: um job re-executado com a meta-nota já em curso NUNCA pode
@@ -702,6 +935,8 @@ async function executarMeta9Integrada(
     projectId: string;
     docsFactuais: { titulo: string; texto: string; fonte: string }[];
     metaProjeto?: number | null;
+    /** 1 = avaliar e sair (diagnóstico da rota `avaliar`), sem reescrita. */
+    maxIteracoes?: number;
   }
 ): Promise<void> {
   await executarMeta9({
@@ -723,7 +958,7 @@ async function executarMeta9Integrada(
     fundacao: ctx.deps.fundacao,
     // Meta do projeto (coluna meta_nota) é a fonte; payload permanece como override explícito.
     meta: (job.payload as { meta_nota?: number })?.meta_nota ?? (ctx.metaProjeto ?? 9),
-    maxIteracoes: (job.payload as { max_iteracoes?: number })?.max_iteracoes ?? 3,
+    maxIteracoes: ctx.maxIteracoes ?? (job.payload as { max_iteracoes?: number })?.max_iteracoes ?? 3,
     reportarEtapa: async (etapa, dados) => {
       if (etapa === "CONSOLIDACAO") await atualizarProgresso(job.id, { fase: "CONSOLIDACAO" });
       else if (etapa === "AVALIACAO") await atualizarProgresso(job.id, { fase: "AVALIACAO", ...(dados ?? {}) });
@@ -742,6 +977,42 @@ async function executarMeta9Integrada(
     });
     if (estadoFinal.doc.fase === "concluido") await marcarEdicaoEmRevisao(ctx.deps.editionId);
   }
+}
+
+/**
+ * `avaliar` no V2 — o botão "Avaliar" caía no caminho V1 e não funcionava em
+ * livro V2. Aqui ele é DIAGNÓSTICO: consolida, avalia pelas dimensões da
+ * meta-nota e grava o relatório. NUNCA reescreve (maxIteracoes = 1: avalia e sai
+ * antes de qualquer rodada de reescrita) — quem reescreve é `escrever_livro`.
+ */
+export async function executarAvaliarV2(job: Job): Promise<void> {
+  const ctx = await prepararProjetoV2(job, "avaliacao");
+  const estado = await ctx.gravador.carregarEstado();
+  const total = estado.doc.total_capitulos ?? 0;
+  const aprovados = Object.values(estado.doc.capitulos).filter(
+    (c) => c.status === "aprovado" || c.status === "aprovado_com_excecao"
+  ).length;
+  // Avaliar um livro pela metade daria uma nota sobre um manuscrito incompleto —
+  // e a meta-nota muda a FASE do livro, o que num livro em escrita seria regressão.
+  if (!total || aprovados < total) {
+    throw new ErroEngine({
+      codigo: "AVALIACAO_LIVRO_INCOMPLETO",
+      classe: "configuracao",
+      mensagem: `avaliação exige o livro inteiro aprovado: ${aprovados} de ${total || "?"} capítulo(s)`,
+    });
+  }
+  await atualizarProgresso(job.id, { engine: "v2", fase: "AVALIACAO", etapa: "diagnóstico (sem reescrita)" });
+  await executarMeta9Integrada(job, {
+    gravador: ctx.gravador,
+    persistencia: ctx.persistencia,
+    deps: ctx.deps,
+    contrato: ctx.contrato,
+    dirProjeto: ctx.dirProjeto,
+    projectId: job.project_id!,
+    docsFactuais: ctx.docsFactuais,
+    metaProjeto: (ctx.proj as { meta_nota?: number | null }).meta_nota,
+    maxIteracoes: 1,
+  });
 }
 
 /**
@@ -765,7 +1036,7 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
   }
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const contrato = carregarContrato(MAPA_SKILL_V1_V2[skillV1] ?? skillV1);
-  const release = exigirReleaseAtual(contrato.contrato.id, projectId);
+  const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId), "fundacao");
   const dirProjeto = projDir(projectId);
   await fs.mkdir(dirProjeto, { recursive: true }); // cwd do CLI precisa existir antes do provedor
   const { persistencia } = await criarPersistencia({ dirProjeto });
@@ -788,6 +1059,27 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
   }
 
   // Briefing COMPLETO da entrevista chega ao arquiteto (não só a ideia central).
+  // Fatia E — o briefing precisa estar COMPLETO, sem conflito e APROVADO pelo
+  // autor. Antes, a fundação era gerada do que estivesse gravado, inclusive
+  // contraditório, e nada registrava que o autor tinha visto aquilo.
+  const briefingBruto = ((proj as { briefing?: BriefingAutor }).briefing ?? {}) as BriefingAutor;
+  const autorizacaoBriefing = autorizarFundacao(
+    briefingBruto,
+    (proj as { briefing_aprovado?: BriefingAprovado | null }).briefing_aprovado ?? null,
+    {
+      idioma_origem: (proj as { idioma_origem?: string | null }).idioma_origem ?? null,
+      total_capitulos: (proj as { total_capitulos?: number | null }).total_capitulos ?? null,
+      skill_escrita: (proj as { skill_escrita?: string | null }).skill_escrita ?? null,
+    }
+  );
+  if (!autorizacaoBriefing.permitido) {
+    throw new ErroEngine({
+      codigo: "BRIEFING_NAO_APROVADO",
+      classe: "configuracao",
+      mensagem: `fundação bloqueada — ${autorizacaoBriefing.motivo}: ${autorizacaoBriefing.detalhe}`,
+      detalhe: { motivo: autorizacaoBriefing.motivo },
+    });
+  }
   const briefingFundacao = briefingParaFundacao(proj as Parameters<typeof briefingParaFundacao>[0]);
   if (!briefingFundacao.premissa) {
     throw new ErroEngine({ codigo: "BRIEFING_AUSENTE", classe: "configuracao", mensagem: "criar_fundacao V2 exige briefing.ideia_central" });
@@ -801,6 +1093,10 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
     contrato,
     dirProjeto,
     jobId: job.id,
+    // D7: sem estes, os documentos ficam só no disco do worker e a interface
+    // não abre nenhum deles.
+    ownerId: OWNER,
+    projectId,
   };
   await atualizarProgresso(job.id, {
     engine: "v2",
@@ -809,9 +1105,21 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
     skill_versao: contrato.contrato.versao,
     release_commit: release.codigo_commit,
   });
-  const { fundacao, runId } = await gerarFundacaoV2(depsF, { ...briefingFundacao, totalCapitulos: totalCaps });
-  await materializarFundacao(depsF, fundacao, totalCaps);
-  await atualizarProgresso(job.id, { fase: "FUNDACAO", etapa: "fundação materializada", fios: fundacao.fios, fundacao_run: runId });
+  const { fundacao, runId, portao } = await gerarFundacaoV2(depsF, { ...briefingFundacao, totalCapitulos: totalCaps });
+  await materializarFundacao(depsF, fundacao, totalCaps, portao);
+  await atualizarProgresso(job.id, {
+    fase: "FUNDACAO",
+    etapa: "fundação materializada",
+    fios: fundacao.fios,
+    fundacao_run: runId,
+    fundacao_schema: fundacao.arco ? "v3" : "v2",
+    // D7 — índice dos documentos materializados: é o que a tela do projeto usa
+    // para saber o que existe e o que abrir (antes ela adivinhava nomes da V1).
+    documentos: documentosDaFundacao(fundacao).map((d) => ({ titulo: d.titulo, caminho: d.caminho, origem: d.origem })),
+    portao_retries: portao.retries,
+    ...(portao.reprovacoes.length ? { portao_reprovacoes: portao.reprovacoes } : {}),
+    ...(portao.avisos.length ? { portao_avisos: portao.avisos } : {}),
+  });
 }
 
 /** Edição de tradução (existe e não é origem)? Traduções seguem o pipeline V1. */
@@ -868,7 +1176,7 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
   }
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const contrato = carregarContrato(MAPA_SKILL_V1_V2[skillV1] ?? skillV1);
-  const release = exigirReleaseAtual(contrato.contrato.id, projectId);
+  const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId), "fundacao");
   const totalCaps = (proj as { total_capitulos?: number }).total_capitulos ?? 0;
   if (!totalCaps || totalCaps < 1) {
     throw new ErroEngine({ codigo: "TOTAL_CAPITULOS_INDEFINIDO", classe: "configuracao", mensagem: "refinar_fundacao V2 exige total_capitulos definido no projeto" });
@@ -877,6 +1185,27 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
   await fs.mkdir(dirProjeto, { recursive: true }); // cwd do CLI precisa existir antes do provedor
   const { persistencia } = await criarPersistencia({ dirProjeto });
   const gravador = new Gravador({ persistencia, projectId });
+  // Fatia E — o briefing precisa estar COMPLETO, sem conflito e APROVADO pelo
+  // autor. Antes, a fundação era gerada do que estivesse gravado, inclusive
+  // contraditório, e nada registrava que o autor tinha visto aquilo.
+  const briefingBruto = ((proj as { briefing?: BriefingAutor }).briefing ?? {}) as BriefingAutor;
+  const autorizacaoBriefing = autorizarFundacao(
+    briefingBruto,
+    (proj as { briefing_aprovado?: BriefingAprovado | null }).briefing_aprovado ?? null,
+    {
+      idioma_origem: (proj as { idioma_origem?: string | null }).idioma_origem ?? null,
+      total_capitulos: (proj as { total_capitulos?: number | null }).total_capitulos ?? null,
+      skill_escrita: (proj as { skill_escrita?: string | null }).skill_escrita ?? null,
+    }
+  );
+  if (!autorizacaoBriefing.permitido) {
+    throw new ErroEngine({
+      codigo: "BRIEFING_NAO_APROVADO",
+      classe: "configuracao",
+      mensagem: `fundação bloqueada — ${autorizacaoBriefing.motivo}: ${autorizacaoBriefing.detalhe}`,
+      detalhe: { motivo: autorizacaoBriefing.motivo },
+    });
+  }
   const briefingFundacao = briefingParaFundacao(proj as Parameters<typeof briefingParaFundacao>[0]);
   const detalhes = [briefingFundacao.detalhes, `- Instruções de refino do autor: ${instrucoes}`].filter(Boolean).join("\n");
 
@@ -888,6 +1217,10 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
     contrato,
     dirProjeto,
     jobId: job.id,
+    // D7: sem estes, os documentos ficam só no disco do worker e a interface
+    // não abre nenhum deles.
+    ownerId: OWNER,
+    projectId,
   };
   await atualizarProgresso(job.id, {
     engine: "v2",
@@ -895,9 +1228,18 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
     skill: contrato.contrato.id,
     release_commit: release.codigo_commit,
   });
-  const { fundacao, runId } = await gerarFundacaoV2(depsF, { ...briefingFundacao, detalhes, totalCapitulos: totalCaps });
-  await materializarFundacao(depsF, fundacao, totalCaps);
-  await atualizarProgresso(job.id, { fase: "REFINAR_FUNDACAO", etapa: "fundação refinada e materializada", fundacao_run: runId });
+  const { fundacao, runId, portao } = await gerarFundacaoV2(depsF, { ...briefingFundacao, detalhes, totalCapitulos: totalCaps });
+  await materializarFundacao(depsF, fundacao, totalCaps, portao);
+  await atualizarProgresso(job.id, {
+    fase: "REFINAR_FUNDACAO",
+    etapa: "fundação refinada e materializada",
+    fundacao_run: runId,
+    fundacao_schema: fundacao.arco ? "v3" : "v2",
+    // D7 — índice dos documentos materializados: é o que a tela do projeto usa
+    // para saber o que existe e o que abrir (antes ela adivinhava nomes da V1).
+    documentos: documentosDaFundacao(fundacao).map((d) => ({ titulo: d.titulo, caminho: d.caminho, origem: d.origem })),
+    portao_retries: portao.retries,
+  });
 }
 
 /**
