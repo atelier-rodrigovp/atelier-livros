@@ -78,11 +78,21 @@ export async function engineModeDoProjeto(projectId: string): Promise<string> {
  * Ponto único de roteamento. `executarV1` é injetado (não importamos jobs.ts aqui
  * para evitar ciclo de import e para manter a V1 byte-idêntica).
  */
+/**
+ * Resultado do roteamento. `continuar` = a execução parou num CHECKPOINT limpo e
+ * ainda há trabalho: o job deve voltar para a fila em vez de ser dado como
+ * concluído. É o que torna a escrita encadeada (nem um job monolítico de 12
+ * capítulos, nem uma parada definitiva depois do primeiro).
+ */
+export interface ResultadoRoteado {
+  continuar?: { motivo: string; proximoCapitulo: number; progresso: Record<string, unknown> };
+}
+
 export async function executarJobRoteado(
   job: Job,
   hb: (extra?: Record<string, unknown>) => Promise<void>,
   executarV1: (job: Job, hb: (extra?: Record<string, unknown>) => Promise<void>) => Promise<void>
-): Promise<void> {
+): Promise<ResultadoRoteado | void> {
   if (job.tipo === "laboratorio_v2") {
     // Job exclusivo V2 (não existe na V1) — dispensa engine_mode.
     const { executarLaboratorio } = await import("./lab/job.js");
@@ -390,7 +400,32 @@ async function prepararProjetoV2(job: Job): Promise<{
 }
 
 /** Executa escrever_livro no pipeline V2, capítulo a capítulo, retomável. */
-export async function executarEscritaV2(job: Job): Promise<void> {
+/**
+ * Capítulos por execução. `0` (default) = escreve até o fim do livro numa única
+ * execução, com checkpoint durável por capítulo. Valor > 0 encadeia: a execução
+ * para no checkpoint e o job volta à fila para continuar do capítulo seguinte —
+ * útil quando o ambiente derruba processos longos.
+ */
+export function capsPorExecucao(env: Record<string, string | undefined> = process.env): number {
+  const bruto = Number(env.V2_CAPS_POR_EXECUCAO ?? 0);
+  return Number.isFinite(bruto) && bruto > 0 ? Math.floor(bruto) : 0;
+}
+
+/**
+ * Encadear ou seguir no mesmo job? Decisão pura, no checkpoint do capítulo `n`.
+ * Nunca encadeia no último capítulo (aí a execução tem de seguir para o
+ * fechamento) e nunca encadeia com lote desligado (livro inteiro numa execução).
+ */
+export function devolverAFilaNoCheckpoint(opts: {
+  lote: number;
+  novosCaps: number;
+  capitulo: number;
+  total: number;
+}): boolean {
+  return opts.lote > 0 && opts.novosCaps >= opts.lote && opts.capitulo < opts.total;
+}
+
+export async function executarEscritaV2(job: Job): Promise<ResultadoRoteado | void> {
   const { proj, contrato, release, dirProjeto, persistencia, migracaoPendente, gravador, estado, deps, docsFactuais, editionId } =
     await prepararProjetoV2(job);
   const projectId = job.project_id!;
@@ -430,7 +465,10 @@ export async function executarEscritaV2(job: Job): Promise<void> {
 
   // Escrita incremental controlada (ex.: prova de 1 capítulo num livro migrado):
   // payload.max_novos_caps limita quantos capítulos NOVOS esta execução escreve.
+  // O limite de LOTE (V2_CAPS_POR_EXECUCAO) é outra coisa: não encerra o livro,
+  // encadeia — ao atingi-lo a execução para no checkpoint e o job volta à fila.
   const maxNovosCaps = Number((job.payload as { max_novos_caps?: number })?.max_novos_caps ?? 0) || Infinity;
+  const lote = capsPorExecucao();
   let novosCaps = 0;
   const legadosPulados: number[] = [];
 
@@ -489,14 +527,38 @@ export async function executarEscritaV2(job: Job): Promise<void> {
       });
     }
 
-    // Capítulo aprovado vira durável AGORA (chapters + Storage): a reprovação
-    // do N+1 nunca oculta o N aprovado (mesma lição do contrato de progresso V1).
+    // CHECKPOINT: capítulo aprovado vira durável AGORA (chapters + Storage). A
+    // reprovação do N+1 nunca oculta o N aprovado (mesma lição do contrato de
+    // progresso V1), e a retomada — por queda, cota ou encadeamento — parte daqui.
     await sincronizarCapitulosAprovados({
       projectId,
       editionId,
       dirManuscrito: deps.dirManuscrito,
       estado: await gravador.carregarEstado(),
     });
+    await atualizarProgresso(job.id, {
+      checkpoint: { capitulo: n, total, em: new Date().toISOString() },
+      cap_concluido: n,
+    });
+
+    // Encadeamento: lote cheio e livro incompleto → para no checkpoint e devolve
+    // o job à fila. Nunca "concluído": o trabalho continua na próxima execução.
+    if (devolverAFilaNoCheckpoint({ lote, novosCaps, capitulo: n, total })) {
+      const progresso = {
+        fase: "ESCRITA",
+        etapa: `checkpoint no capítulo ${n}/${total} — execução encadeada continua no ${n + 1}`,
+        cap_atual: n,
+        proximo_capitulo: n + 1,
+      };
+      await atualizarProgresso(job.id, progresso);
+      return {
+        continuar: {
+          motivo: `lote de ${lote} capítulo(s) concluído no checkpoint do capítulo ${n}`,
+          proximoCapitulo: n + 1,
+          progresso,
+        },
+      };
+    }
   }
 
   // Livro migrado com capítulos legado pulados: o manuscrito NÃO está todo

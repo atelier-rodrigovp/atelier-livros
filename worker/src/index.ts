@@ -373,7 +373,22 @@ async function processarJob(job: Job) {
   try {
     // Engine V2 (D2/ADR-001): único ponto de desvio — engine_mode='v2' roteia
     // para o pipeline V2; todo o resto segue na V1 byte-idêntica.
-    await executarJobRoteado(job, heartbeat, executarJob);
+    const roteado = await executarJobRoteado(job, heartbeat, executarJob);
+    // Execução encadeada (V2): a execução parou num CHECKPOINT limpo e ainda há
+    // capítulos. O job volta à fila — nunca `done`, que apagaria o trabalho
+    // restante da vista do usuário — e o picker o retoma sozinho.
+    if (roteado?.continuar) {
+      const { data: cur } = await sb.from("jobs").select("progresso").eq("owner", OWNER).eq("id", job.id).single();
+      await finalizar(job.id, {
+        status: "queued",
+        erro: null,
+        progresso: { ...((cur?.progresso as Record<string, unknown>) ?? {}), ...roteado.continuar.progresso },
+        locked_by: null,
+        locked_at: null,
+      });
+      console.log(`[job ${job.id}] ${roteado.continuar.motivo} — continua no capítulo ${roteado.continuar.proximoCapitulo}`);
+      return;
+    }
     const { data: current } = job.payload?.reconciliacao_legada
       ? await sb.from("jobs").select("payload,progresso").eq("owner", OWNER).eq("id", job.id).single()
       : { data: null };
@@ -518,6 +533,55 @@ async function processarJob(job: Job) {
       };
       await finalizar(job.id, { status: "queued", erro: null, progresso, locked_by: null, locked_at: null });
       console.log(`[job ${job.id}] ${dependency} indisponível — retry ${decisao.state.count} em ${Math.round(decisao.delayMs / 1000)}s`);
+      return;
+    }
+    // Engine V2: erro ESTRUTURADO. A escada de correção (v2/correcao.ts) já rodou
+    // dentro da execução e esgotou suas estratégias — aqui só resta classificar o
+    // desfecho honestamente, em vez de reciclar tentativas no catch-all e morrer
+    // como `error` sem dizer de que tipo de falha se tratava.
+    if (e?.name === "ErroEngine") {
+      const { classificarFalha } = await import("./v2/correcao.js");
+      const classe = classificarFalha({ codigo: String(e.codigo ?? ""), classe: e.classe });
+      const { data: cur } = await sb.from("jobs").select("progresso").eq("owner", OWNER).eq("id", job.id).single();
+      const progressoAtual = (cur?.progresso as Record<string, unknown>) ?? {};
+      if (classe === "qualidade" || classe === "decisao_humana" || classe === "configuracao") {
+        await finalizar(job.id, {
+          status: "paused",
+          erro: String(e.message).slice(0, 2000),
+          progresso: {
+            ...progressoAtual,
+            quality_status: classe === "qualidade" ? "blocked_quality" : "aguardando_decisao",
+            engine_erro_codigo: e.codigo,
+            engine_erro_classe: classe,
+            resumo:
+              classe === "qualidade"
+                ? "Bloqueado por qualidade (escada de correção esgotada)"
+                : "Aguardando decisão do autor",
+          },
+          locked_by: null,
+          locked_at: null,
+        });
+        console.error(`[job ${job.id}] ErroEngine ${e.codigo} (${classe}) — pausado: ${String(e.message).slice(0, 200)}`);
+        return;
+      }
+      // Infraestrutura: backoff sem queimar tentativa (o trabalho no disco está íntegro).
+      const anterior = (progressoAtual.infrastructure_retry ?? null) as InfrastructureRetryState | null;
+      const decisao = decideInfrastructureRetry(anterior, `engine-v2:${e.codigo}`);
+      await finalizar(job.id, {
+        status: decisao.action === "blocked" ? "paused" : "queued",
+        erro: decisao.action === "blocked" ? decisao.reason : null,
+        progresso: {
+          ...progressoAtual,
+          quality_status: decisao.action === "blocked" ? "blocked_infrastructure" : undefined,
+          engine_erro_codigo: e.codigo,
+          engine_erro_classe: classe,
+          retry_at: decisao.action === "blocked" ? undefined : decisao.retryAt,
+          infrastructure_retry: decisao.state,
+        },
+        locked_by: null,
+        locked_at: null,
+      });
+      console.log(`[job ${job.id}] ErroEngine ${e.codigo} (infraestrutura) — ${decisao.action}`);
       return;
     }
     const msg = String(e?.message ?? e).slice(0, 2000);
