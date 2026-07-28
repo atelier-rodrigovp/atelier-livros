@@ -75,6 +75,21 @@ de `dod-conferencia.test.ts` provam cada um desses modos de reprovação.
 A regressão completa continua rodando e não foi substituída: a conferência por ID
 é evidência **adicional**.
 
+### Auditoria bullet a bullet (fase 2, segunda passada)
+
+A matriz abaixo foi montada por amostragem na primeira passada. Estes cinco
+bullets não tinham verificação individual e agora têm:
+
+| bullet | onde decide | teste | estado |
+|---|---|---|---|
+| saída incompleta de papel não vira aprovação | `parseProsa`, `validarSaidaContextualizador`, `validarSaidaAuditor`, `validarParecer`, `validarParecerConformidade`, `validarParecerIdioma`, `validarExtracaoProsa` | `saida-papel.test.ts` (18) | ok — 7 papéis, cada um com caso negativo próprio |
+| modelo, contrato, hash e versão registrados | `papeis.ts#executarPapel` → `iniciarRun` | `papeis.test.ts` (5 novos) | ok |
+| worker fail-closed sem tabela/migration | `release.ts#tabelaAutorizacaoAusente` | `release-allowlist.test.ts` (6 novos) | ok — inclui os casos que NÃO são tabela ausente |
+| nenhuma chave administrativa no front | `src/lib/supabase.ts` (anon) | `segurancaFront.test.ts` (7) | ok — varredura permanente de `src/` |
+| erro de Storage não vira sucesso visual | `storage.ts#downloadText` | `storage.test.ts` (5) | **defeito corrigido** — devolvia `""` para falha e para vazio |
+| erro de Supabase/auth não vira sucesso visual | `autorizacaoV2.ts#interpretarAutorizacao` | `autorizacaoV2.test.ts` (13) | ok |
+| toda ação anunciada é executável | `resolveOperationalState.ts` (`IdAcao`) | `EstadoOperacional.test.tsx` (46) | ok — 11 cenários, exaustivo |
+
 ### Matriz de fiação (auditoria da fase 2)
 
 | garantia | produtor | consumidor | decisão | persistência | interface | teste | estado |
