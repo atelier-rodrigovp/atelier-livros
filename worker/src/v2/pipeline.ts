@@ -12,6 +12,7 @@ import { compilarPacote, type Instrucao, type SecaoContexto } from "./compilador
 import { rodarGatesCapitulo } from "./gates.js";
 import type { Gravador } from "./gravador.js";
 import { hashJsonCanonico } from "./hash.js";
+import { gateRotacaoPov, renderizarArcoParaCapitulo } from "./arco.js";
 import { entradasDaFicha, gateRevelacaoRepetida, renderizarLedger } from "./ledger.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
@@ -30,6 +31,7 @@ import {
 } from "./tarefas.js";
 import {
   ErroEngine,
+  type ArcoFundacao,
   type ContratoCompilado,
   type MapaModelos,
   type Parecer,
@@ -57,11 +59,13 @@ export interface DepsPipeline {
   maxCorrecoes?: number; // default 2 — tentativas de correção dirigida por capítulo
   /** Docs factuais do projeto (ex.: dossie-factual.md) — entram no pacote do revisor e do auditor. */
   docsFactuais?: SecaoContexto[];
-  /** Fundação da obra (bíblia/mapa/estrutura) — seções camada 6 por papel. */
+  /** Fundação da obra (bíblia/mapa/estrutura/arco) — seções camada 6 por papel. */
   fundacao?: {
     biblia?: string;
     mapaPersonagens?: string;
     estrutura?: { capitulo: number; fio: string; resumo_estrutural: string }[];
+    /** Grade de arco (fundação v3). Ausente = fundação v2: gates de arco são no-op. */
+    arco?: ArcoFundacao;
   };
 }
 
@@ -289,8 +293,17 @@ export async function escreverCapitulo(
         fonte: "estrutura.json",
       }]
     : [];
-  const secoesPlanejamento = [...secBiblia, ...secMapa, ...secEstruturaLivro];
-  const secoesJulgamento = [...secBiblia, ...secMapa];
+  // Recorte do arco para ESTE capítulo (ato, promessas em aberto, fios vivos,
+  // marcos). A fundação v2 não tem arco: a seção simplesmente não existe.
+  const secArco: SecaoContexto[] = fundacao?.arco
+    ? [{
+        titulo: `ARCO DO CAPÍTULO ${capitulo}`,
+        texto: renderizarArcoParaCapitulo(fundacao.arco, capitulo),
+        fonte: "estrutura.json#arco",
+      }]
+    : [];
+  const secoesPlanejamento = [...secBiblia, ...secMapa, ...secEstruturaLivro, ...secArco];
+  const secoesJulgamento = [...secBiblia, ...secMapa, ...secArco];
 
   /** Compilação bloqueada em qualquer etapa → bloqueio registrado + status "bloqueado". */
   const bloquearPorCompilacao = async (
@@ -361,7 +374,7 @@ export async function escreverCapitulo(
       pacote: comp.pacote!,
       // Anti-ghostwriting é rígido de propósito; 3 tentativas com erro citando o trecho.
       maxTentativas: 3,
-      tarefa: tarefaArquitetoCena(capitulo, deps.contrato.contrato),
+      tarefa: tarefaArquitetoCena(capitulo, deps.contrato.contrato, Boolean(fundacao?.arco)),
       parse: (t) => {
         const spec = extrairJson(t) as SceneSpec;
         // Boilerplate é responsabilidade do código, não do modelo: normaliza
@@ -381,6 +394,16 @@ export async function escreverCapitulo(
           throw new Error(
             `revelação já entregue ao leitor: ${gRev.evidencia}. ` +
               `Escolha uma informação nova que ainda NÃO esteja no ledger, ou avance a que já existe (aprofunde/complique), sem reapresentá-la como novidade.`
+          );
+        }
+        // Rotação de POV do contrato: declarada no schema desde sempre e nunca
+        // aplicada. Roda aqui (planejamento) porque é onde ainda dá para trocar
+        // o fio sem jogar prosa fora.
+        const gRot = gateRotacaoPov(capitulo, spec, fichasAnteriores, deps.contrato.contrato);
+        if (!gRot.passou) {
+          throw new Error(
+            `rotação de fios violada: ${gRot.evidencia}. ` +
+              `Reveja "fios_avancados"/"fios_ausentes": alterne o fio ou retome o que está parado.`
           );
         }
         return spec;

@@ -18,6 +18,7 @@ import { compilarPacote, type SecaoContexto } from "./compilador.js";
 import { executarPapel } from "./papeis.js";
 import { tarefaCanarioVoz, tarefaEditorEstrutural, tarefaRevisorCanario } from "./tarefas.js";
 import { gerarFundacaoV2, materializarFundacao } from "./fundacao.js";
+import { parsearArco } from "./arco.js";
 import { reconstruirLedger } from "./ledger.js";
 import {
   briefingParaFundacao,
@@ -44,6 +45,7 @@ import { exigirReleaseAtual } from "./release.js";
 import { conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
 import {
   ErroEngine,
+  type ArcoFundacao,
   type ContratoCompilado,
   type EstadoCanonico,
   type MapaModelos,
@@ -350,11 +352,14 @@ async function prepararProjetoV2(job: Job): Promise<{
     path.join(dirProjeto, "mapa-personagens.json")
   );
   let estruturaFundacao: { capitulo: number; fio: string; resumo_estrutural: string }[] | undefined;
+  let arcoFundacao: ArcoFundacao | undefined;
   try {
     const cru = JSON.parse(await lerPrimeiro(path.join(dirProjeto, "estrutura.json")) || "null") as
       | { estrutura?: { capitulo: number; fio: string; resumo_estrutural: string }[] }
       | null;
     if (Array.isArray(cru?.estrutura)) estruturaFundacao = cru.estrutura;
+    // `arco` só existe na fundação v3; ausente = v2, e os gates de arco são no-op.
+    arcoFundacao = parsearArco(cru) ?? undefined;
   } catch { /* estrutura ausente/ilegível: seções ficam vazias (fundação antiga) */ }
 
   // Edição de ORIGEM: o livro V2 existe para a plataforma (Leitor/tradução/
@@ -376,7 +381,7 @@ async function prepararProjetoV2(job: Job): Promise<{
     instrucoesAutor,
     preferencias,
     idioma,
-    fundacao: { biblia, mapaPersonagens, estrutura: estruturaFundacao },
+    fundacao: { biblia, mapaPersonagens, estrutura: estruturaFundacao, arco: arcoFundacao },
   };
 
   return { proj: proj as Record<string, unknown>, contrato, release, dirProjeto, persistencia, migracaoPendente, gravador, estado, deps, docsFactuais, editionId };
@@ -824,9 +829,18 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
     skill_versao: contrato.contrato.versao,
     release_commit: release.codigo_commit,
   });
-  const { fundacao, runId } = await gerarFundacaoV2(depsF, { ...briefingFundacao, totalCapitulos: totalCaps });
-  await materializarFundacao(depsF, fundacao, totalCaps);
-  await atualizarProgresso(job.id, { fase: "FUNDACAO", etapa: "fundação materializada", fios: fundacao.fios, fundacao_run: runId });
+  const { fundacao, runId, portao } = await gerarFundacaoV2(depsF, { ...briefingFundacao, totalCapitulos: totalCaps });
+  await materializarFundacao(depsF, fundacao, totalCaps, portao);
+  await atualizarProgresso(job.id, {
+    fase: "FUNDACAO",
+    etapa: "fundação materializada",
+    fios: fundacao.fios,
+    fundacao_run: runId,
+    fundacao_schema: fundacao.arco ? "v3" : "v2",
+    portao_retries: portao.retries,
+    ...(portao.reprovacoes.length ? { portao_reprovacoes: portao.reprovacoes } : {}),
+    ...(portao.avisos.length ? { portao_avisos: portao.avisos } : {}),
+  });
 }
 
 /** Edição de tradução (existe e não é origem)? Traduções seguem o pipeline V1. */
@@ -910,9 +924,15 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
     skill: contrato.contrato.id,
     release_commit: release.codigo_commit,
   });
-  const { fundacao, runId } = await gerarFundacaoV2(depsF, { ...briefingFundacao, detalhes, totalCapitulos: totalCaps });
-  await materializarFundacao(depsF, fundacao, totalCaps);
-  await atualizarProgresso(job.id, { fase: "REFINAR_FUNDACAO", etapa: "fundação refinada e materializada", fundacao_run: runId });
+  const { fundacao, runId, portao } = await gerarFundacaoV2(depsF, { ...briefingFundacao, detalhes, totalCapitulos: totalCaps });
+  await materializarFundacao(depsF, fundacao, totalCaps, portao);
+  await atualizarProgresso(job.id, {
+    fase: "REFINAR_FUNDACAO",
+    etapa: "fundação refinada e materializada",
+    fundacao_run: runId,
+    fundacao_schema: fundacao.arco ? "v3" : "v2",
+    portao_retries: portao.retries,
+  });
 }
 
 /**
