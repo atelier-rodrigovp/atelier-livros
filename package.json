@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prontidao": "cd worker && npx tsx scripts/prontidao.ts"
   },
   "dependencies": {
     "@fontsource-variable/fraunces": "^5.0.0",

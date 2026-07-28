@@ -37,3 +37,6 @@ worker/audit-backup/
 # Backups .orig.bak (auditoria antivazamento) e bytecode python
 *.orig.bak
 __pycache__/
+
+# Artefato do comando de prontidão (gerado; não versionado)
+.prontidao/
