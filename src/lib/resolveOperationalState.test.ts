@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveOperationalState, buildResolverInput } from "./resolveOperationalState";
+import { resolveOperationalState, buildResolverInput, classeDeBloqueio, motivoEscritaIndisponivel, ROTULO_CLASSE_BLOQUEIO } from "./resolveOperationalState";
 
 // Chapters 1..n com hash (aprovados+sincronizados).
 const chaptersAte = (n: number) => Array.from({ length: n }, (_, i) => ({ numero: i + 1, text_sha256: `h${i + 1}`, quality_status: "approved" }));
@@ -204,5 +204,76 @@ describe("estados da correção automática (SG6 / cenário 18)", () => {
     expect(st.badge).toBe("Escrevendo — cap 49");
     expect(st.mensagem_humana).toContain("spec do capítulo 49 foi aprovada");
     expect(st.mensagem_humana).toContain("37 anteriores permanecem intactos");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Natureza do bloqueio e botão que explica o próprio cinza (fase 3)
+// ---------------------------------------------------------------------------
+
+describe("classe de bloqueio", () => {
+  it("separa técnico, editorial e decisão humana", () => {
+    expect(classeDeBloqueio("aguardando_cota")).toBe("tecnico");
+    expect(classeDeBloqueio("retry_infra")).toBe("tecnico");
+    expect(classeDeBloqueio("producao_desativada")).toBe("tecnico");
+    expect(classeDeBloqueio("bloqueado_qualidade")).toBe("editorial");
+    expect(classeDeBloqueio("correcao_automatica")).toBe("editorial");
+    expect(classeDeBloqueio("circuit_breaker")).toBe("decisao_humana");
+    expect(classeDeBloqueio("aguardando_decisao")).toBe("decisao_humana");
+  });
+
+  it("estado saudável não tem classe de bloqueio", () => {
+    expect(classeDeBloqueio("executando")).toBeNull();
+    expect(classeDeBloqueio("concluido")).toBeNull();
+    expect(classeDeBloqueio("sem_escrita")).toBeNull();
+  });
+
+  it("toda classe tem rótulo legível para o autor", () => {
+    for (const c of ["tecnico", "editorial", "decisao_humana", "ausencia_de_prova"] as const) {
+      expect(ROTULO_CLASSE_BLOQUEIO[c].length).toBeGreaterThan(20);
+    }
+  });
+
+  it("pendência de fundação vira AUSÊNCIA DE PROVA, não 'nada acontecendo'", () => {
+    const st = resolveOperationalState({
+      job: { status: "running", erro: null, progresso: { fase: "ESCRITA", cap_atual: 2, fundacao_status: "reprovada", fundacao_blockers: ["ARCO_INCOMPLETO"] } },
+      chapters: [{ numero: 1 }],
+      totalCapitulos: 12,
+      workerOnline: true,
+    });
+    expect(st.aviso_fundacao).toContain("Fundação");
+    expect(st.classe_bloqueio).toBe("ausencia_de_prova");
+  });
+});
+
+describe("botão indisponível explica o motivo", () => {
+  it("execução em andamento", () => {
+    expect(motivoEscritaIndisponivel(true, false, "executando")).toContain("em andamento");
+  });
+
+  it("produção pausada", () => {
+    expect(motivoEscritaIndisponivel(false, true, "pausado_manual")).toContain("pausada");
+  });
+
+  it("correção automática dispensa clique", () => {
+    expect(motivoEscritaIndisponivel(false, false, "correcao_automatica")).toContain("sem clique");
+  });
+
+  it("disponível não inventa motivo", () => {
+    expect(motivoEscritaIndisponivel(false, false, "na_fila")).toBeNull();
+  });
+
+  it("todo botão desabilitado do resolvedor carrega motivo", () => {
+    // A regra vale para o resolvedor inteiro, não só para o caso que eu lembrei
+    // de testar: qualquer botão futuro que nasça cinza sem explicação cai aqui.
+    const st = resolveOperationalState({
+      job: { status: "paused", erro: null, progresso: { fase: "ESCRITA", cap_atual: 3, quality_status: "blocked_quality", quality_cap: 3, quality_categoria: "decisao_autoral" } },
+      chapters: [{ numero: 1 }, { numero: 2 }],
+      totalCapitulos: 12,
+      workerOnline: true,
+    });
+    for (const b of st.botoes.filter((x) => !x.habilitado)) {
+      expect(b.motivo_indisponivel, `botão ${b.id} sem motivo`).toBeTruthy();
+    }
   });
 });

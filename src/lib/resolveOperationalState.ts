@@ -88,10 +88,29 @@ export interface OperationalButton {
   id: string;
   label: string;
   habilitado: boolean;
+  /**
+   * Por que está indisponível. Botão cinza sem explicação faz o autor achar que
+   * a tela travou; com o motivo, ele sabe o que precisa acontecer antes.
+   * Obrigatório sempre que `habilitado` é false.
+   */
+  motivo_indisponivel: string | null;
 }
+
+/**
+ * De que NATUREZA é o impedimento. Sem isto o autor não distingue "a engine
+ * quebrou" de "o capítulo não passou no gate" — reações opostas diante de
+ * badges parecidos.
+ */
+export type ClasseBloqueio =
+  | "tecnico" // infra, cota, worker fora do ar: passa sozinho ou é problema de máquina
+  | "editorial" // gate reprovou o texto: a engine está tentando corrigir
+  | "decisao_humana" // a engine parou de propósito e espera o autor
+  | "ausencia_de_prova"; // nada falhou; falta evidência (ex.: fundação pendente)
 
 export interface OperationalState {
   situacao: Situacao;
+  /** Natureza do impedimento; null quando nada está impedido. */
+  classe_bloqueio: ClasseBloqueio | null;
   badge: string;
   tone: Tone;
   mensagem_humana: string;
@@ -184,7 +203,64 @@ function traduzirMensagem(pg: ProgressoEscrita, capitulo: number | null): string
   return "";
 }
 
+/**
+ * Natureza do impedimento, derivada da situação. Central de propósito: cada
+ *  do resolvedor monta seu objeto inline, e espalhar a classificação por
+ * eles seria convite a divergência.
+ */
+export function classeDeBloqueio(s: Situacao): ClasseBloqueio | null {
+  switch (s) {
+    case "aguardando_cota":
+    case "retry_infra":
+    case "producao_desativada":
+      return "tecnico";
+    case "bloqueado_qualidade":
+    case "correcao_automatica":
+    case "aguardando_correcao":
+      return "editorial";
+    case "circuit_breaker":
+    case "aguardando_decisao":
+    case "pausado_manual":
+      return "decisao_humana";
+    default:
+      return null;
+  }
+}
+
+/** Como cada natureza de impedimento é dita ao autor, em uma linha. */
+export const ROTULO_CLASSE_BLOQUEIO: Record<ClasseBloqueio, string> = {
+  tecnico: "Impedimento técnico — infraestrutura ou cota; passa sozinho, nada a decidir.",
+  editorial: "Impedimento editorial — um gate reprovou o texto; a engine está corrigindo.",
+  decisao_humana: "Decisão sua — a engine parou de propósito e espera você.",
+  ausencia_de_prova: "Falta prova — nada falhou; um artefato ainda não foi comprovado.",
+};
+
+/**
+ * Por que o botão de escrita está indisponível. `null` quando está disponível.
+ * Botão cinza mudo é lido como tela travada.
+ */
+export function motivoEscritaIndisponivel(
+  escrevendo: boolean,
+  pausada: boolean,
+  situacao: Situacao
+): string | null {
+  if (escrevendo) return "Já existe uma execução de escrita em andamento para este projeto.";
+  if (pausada) return "A produção deste projeto está pausada — retome-a para escrever.";
+  if (situacao === "correcao_automatica") {
+    return "A engine está corrigindo um capítulo agora; o fluxo segue sozinho, sem clique.";
+  }
+  return null;
+}
+
 export function resolveOperationalState(input: ResolverInput): OperationalState {
+  const r = resolverInterno(input);
+  // Pendência de fundação não reprovou texto nem quebrou máquina: falta prova.
+  // Sem esta linha ela apareceria como "nada acontecendo".
+  const classe = classeDeBloqueio(r.situacao) ?? (r.aviso_fundacao ? "ausencia_de_prova" : null);
+  return { ...r, classe_bloqueio: classe };
+}
+
+function resolverInterno(input: ResolverInput): Omit<OperationalState, "classe_bloqueio"> {
   const now = input.now ?? Date.now();
   const job = input.job;
   const pg: ProgressoEscrita = (job?.progresso ?? {}) as ProgressoEscrita;
@@ -217,7 +293,8 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
 
   // Botões contextuais (§7) montados ao fim conforme a situação.
   const botoes: OperationalButton[] = [];
-  const add = (id: string, label: string, habilitado = true) => botoes.push({ id, label, habilitado });
+  const add = (id: string, label: string, habilitado = true, motivo: string | null = null) =>
+    botoes.push({ id, label, habilitado, motivo_indisponivel: habilitado ? null : motivo });
 
   const base = {
     contadores: cont,
@@ -354,7 +431,12 @@ export function resolveOperationalState(input: ResolverInput): OperationalState 
     add("corrigir", `Corrigir capítulo ${capituloBloqueado ?? ""}`.trim());
     add("ver_diagnostico", "Ver diagnóstico");
     if (cont.produzidos > cont.sincronizados) add("reconciliar", "Reconciliar aprovados");
-    add("continuar", `Continuar a partir do ${(capituloBloqueado ?? 0) + 1}`, false); // só após o bloqueado ser aprovado
+    add(
+      "continuar",
+      `Continuar a partir do ${(capituloBloqueado ?? 0) + 1}`,
+      false,
+      `o capítulo ${capituloBloqueado ?? "bloqueado"} precisa ser aprovado antes — a escrita não pula capítulo reprovado`
+    );
     return { situacao: "bloqueado_qualidade", badge: capituloBloqueado ? `Correção necessária no cap ${capituloBloqueado}` : "Correção necessária", tone: "danger", mensagem_humana: traduzirMensagem(pg, capituloBloqueado), ...base, blocker_humano: blocker, proxima_acao: `Corrigir capítulo ${capituloBloqueado ?? ""}`.trim(), botoes };
   }
   // 4b. bloqueado por infraestrutura (paused)

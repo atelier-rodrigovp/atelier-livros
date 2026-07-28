@@ -22,7 +22,7 @@ import {
 import { ChevronDown } from "lucide-react";
 import { IDIOMAS, type Job, type Project } from "@/lib/types";
 import { displayProjectStatus, jobStatusBadgeEx } from "@/lib/status";
-import { resolveOperationalState, buildResolverInput, toneToVariant, escritaGovernaCartao } from "@/lib/resolveOperationalState";
+import { resolveOperationalState, buildResolverInput, toneToVariant, escritaGovernaCartao, motivoEscritaIndisponivel, ROTULO_CLASSE_BLOQUEIO } from "@/lib/resolveOperationalState";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -800,6 +800,12 @@ export default function Projeto() {
                     {st.blocker_humano ? (
                       <p className="text-xs text-amber-700 dark:text-amber-400">{st.blocker_humano}</p>
                     ) : null}
+                    {/* De que NATUREZA é o impedimento. Sem isto, "aguardando cota"
+                        e "capítulo reprovado" chegam ao autor com a mesma cara, e
+                        as reações certas são opostas: uma é esperar, outra é ler. */}
+                    {st.classe_bloqueio ? (
+                      <p className="text-xs text-muted-foreground">{ROTULO_CLASSE_BLOQUEIO[st.classe_bloqueio]}</p>
+                    ) : null}
                     {/* SG7: pendência de FUNDAÇÃO em banner próprio — não se mistura ao capítulo. */}
                     {st.aviso_fundacao ? (
                       <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">{st.aviso_fundacao}</p>
@@ -808,7 +814,12 @@ export default function Projeto() {
                       {/* SG6: em correção automática o clique NÃO é necessário — o botão vira
                           ação excepcional ("Tentar agora" antecipa a janela do retry). */}
                       <Button
-                        title={st.situacao === "aguardando_correcao" ? "Opcional: antecipa a tentativa automática (o fluxo segue sozinho sem clique)." : dicaRefino}
+                        title={
+                          motivoEscritaIndisponivel(escrevendo, escritaPausada, st.situacao) ??
+                          (st.situacao === "aguardando_correcao"
+                            ? "Opcional: antecipa a tentativa automática (o fluxo segue sozinho sem clique)."
+                            : dicaRefino)
+                        }
                         disabled={escrevendo || escritaPausada || st.situacao === "correcao_automatica"}
                         onClick={() => enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {})}
                       >
