@@ -452,7 +452,7 @@ export default function NovoProjeto() {
       qaRef.current = Array.isArray(b.qa) ? b.qa : [];
       const itv = b._interview || {};
       if (itv.completo) {
-        toast.success("Fundação validada! Gerando…");
+        toast.success("Entrevista concluída. Revise e aprove o briefing antes de gerar a fundação.");
         nav(`/projeto/${id}`);
         return;
       }

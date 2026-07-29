@@ -27,6 +27,14 @@ export const SKILLS_ESCRITA = [
   "skill-romantasy",
 ] as const;
 
+/**
+ * A V2 para depois de consolidar o briefing: o autor ainda precisa revisar e
+ * aprovar o snapshot na interface. A V1 mantém o encadeamento legado.
+ */
+export function deveEnfileirarFundacaoAposEntrevista(engineMode: string | null | undefined): boolean {
+  return engineMode !== "v2";
+}
+
 // Conceito obrigatório: precisa ter sido PERGUNTADO ao autor (coberto no qa),
 // não apenas inferido pelo agente. `sinonimos` casa com o id `campo` do qa.
 interface CampoObrigatorio {

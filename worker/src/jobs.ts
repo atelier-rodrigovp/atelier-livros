@@ -62,7 +62,7 @@ import { resolveChapterState, deveSincronizar } from "./chapter-state.js";
 import { executePublicationTransaction, type PublicationFile } from "./publication-transaction.js";
 import { advanceEditionStatus, type EditionStatus } from "./state-machine.js";
 import { classifyRunnerOutcome } from "./runner-outcome.js";
-import { promptEntrevista, validarSaidaEntrevista } from "./entrevista.js";
+import { deveEnfileirarFundacaoAposEntrevista, promptEntrevista, validarSaidaEntrevista } from "./entrevista.js";
 import { concluirCorrecoesAprovadas, resumoCorrecaoDoDisco } from "./correcao-fluxo.js";
 import { markDeterministicDetectorApproved, shouldGenerateFoundation } from "./reconciliacao-legada.js";
 
@@ -463,8 +463,12 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
         idioma_origem: b.idioma ?? proj.idioma_origem ?? "pt-BR",
       }).eq("owner", OWNER).eq("id", job.project_id!)
     );
-    // entrevista validada -> dispara a fundação automaticamente
-    await must(sb.from("jobs").insert({ owner: OWNER, tipo: "criar_fundacao", project_id: job.project_id }));
+    // V2 exige aprovação EXPLÍCITA do snapshot consolidado pelo autor. Enfileirar
+    // a fundação aqui pulava exatamente esse portão e fazia a tela anunciar uma
+    // validação que não ocorreu. A V1 preserva o comportamento legado.
+    if (deveEnfileirarFundacaoAposEntrevista(proj.engine_mode)) {
+      await must(sb.from("jobs").insert({ owner: OWNER, tipo: "criar_fundacao", project_id: job.project_id }));
+    }
     await setProgress(job.id, { fase: "ENTREVISTA", completo: true });
   } else {
     const perguntas = resultado.perguntas;

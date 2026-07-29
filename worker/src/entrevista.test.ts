@@ -5,11 +5,20 @@
 import { describe, expect, it } from "vitest";
 import {
   CAMPOS_OBRIGATORIOS,
+  deveEnfileirarFundacaoAposEntrevista,
   obrigatoriosNaoCobertos,
   promptEntrevista,
   validarSaidaEntrevista,
   type QaEntrevista,
 } from "./entrevista.js";
+
+describe("encadeamento depois da entrevista", () => {
+  it("não pula a aprovação autoral na V2", () => {
+    expect(deveEnfileirarFundacaoAposEntrevista("v2")).toBe(false);
+    expect(deveEnfileirarFundacaoAposEntrevista("v1")).toBe(true);
+    expect(deveEnfileirarFundacaoAposEntrevista(null)).toBe(true);
+  });
+});
 
 // qa que cobre os 5 obrigatórios (campo OU texto da pergunta casa o conceito)
 const qaCompleto: QaEntrevista[] = [

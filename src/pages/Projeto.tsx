@@ -38,6 +38,8 @@ import { Switch } from "@/components/ui/switch";
 import { ReviewReport } from "@/components/ReviewReport";
 import { EngineV2Panel } from "@/components/EngineV2Panel";
 import { chaveStorageDocumento, documentosParaExibir } from "@/lib/documentosFundacao";
+import { aprovarBriefingWeb, aprovacaoAindaCorresponde } from "@/lib/briefingAprovacao";
+import { useSession } from "@/hooks/useSession";
 
 interface Edition { id: string; idioma: string; status: string; is_origem: boolean; nota_review: number | null; }
 interface Artifact { id: string; edition_id: string | null; tipo: string; storage_path: string; url_publica: string | null; created_at?: string; meta?: any; }
@@ -66,6 +68,7 @@ function JobStatus({ job, producaoPausada }: { job?: Job; producaoPausada?: bool
 export default function Projeto() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
+  const { session } = useSession();
   const { online: workerOnline, producaoAtiva } = useWorkerStatus();
   const [proj, setProj] = useState<Project | null>(null);
   const [editions, setEditions] = useState<Edition[]>([]);
@@ -76,7 +79,12 @@ export default function Projeto() {
   // Autorizacao e prontidao publicada: sem elas a tela nao distingue "nao posso"
   // de "esta quebrado", nem saude local de producao certificada.
   const [autorizacao, setAutorizacao] = useState<RotuloAutorizacao | null>(null);
+  const [autorizacaoLinhas, setAutorizacaoLinhas] = useState<AutorizacaoV2Row[]>([]);
   const [prontidao, setProntidao] = useState<ProntidaoNaTela | null>(null);
+  const [aprovacaoCorresponde, setAprovacaoCorresponde] = useState(false);
+  const [aprovandoBriefing, setAprovandoBriefing] = useState(false);
+  const [motivoAutorizacao, setMotivoAutorizacao] = useState("");
+  const [alterandoAutorizacao, setAlterandoAutorizacao] = useState(false);
   const [idiomasSel, setIdiomasSel] = useState<string[]>([]);
   const [capaUrls, setCapaUrls] = useState<Record<string, string | null>>({});
   const [capaBrief, setCapaBrief] = useState("");
@@ -146,8 +154,10 @@ export default function Projeto() {
       .from("engine_autorizacoes_v2")
       .select("project_id,modo,autorizado_por,motivo,ativo,revoked_at,created_at")
       .eq("project_id", id);
+    const linhasAut = (rAut.data as AutorizacaoV2Row[] | null) ?? [];
+    setAutorizacaoLinhas(linhasAut);
     setAutorizacao(
-      rotularAutorizacao(interpretarAutorizacao((rAut.data as AutorizacaoV2Row[] | null) ?? null, rAut.error))
+      rotularAutorizacao(interpretarAutorizacao(linhasAut, rAut.error))
     );
 
     // Mesma convencao da telemetria: linha em `jobs` com tipo dedicado.
@@ -157,6 +167,20 @@ export default function Projeto() {
     for (const c of (chs as { edition_id: string }[]) ?? []) counts[c.edition_id] = (counts[c.edition_id] ?? 0) + 1;
     setChapters(counts);
   }, [id]);
+
+  useEffect(() => {
+    let ativo = true;
+    if (!proj) {
+      setAprovacaoCorresponde(false);
+      return;
+    }
+    aprovacaoAindaCorresponde(proj.briefing_aprovado, proj.briefing).then((corresponde) => {
+      if (ativo) setAprovacaoCorresponde(corresponde);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [proj]);
 
   useEffect(() => {
     carregar();
@@ -233,6 +257,76 @@ export default function Projeto() {
     const { error } = await supabase.from("projects").update({ briefing: novo }).eq("id", id);
     if (error) { toast.error(error.message); return; }
     setProj((p) => (p ? { ...p, briefing: novo } : p));
+  }
+
+  async function aprovarBriefingAtual() {
+    if (!id || !proj || !session?.user) return;
+    const entrevistaCompleta = (proj.briefing as { _interview?: { completo?: boolean } })._interview?.completo === true;
+    if (!entrevistaCompleta) {
+      toast.error("Conclua a entrevista antes de aprovar o briefing.");
+      return;
+    }
+    setAprovandoBriefing(true);
+    try {
+      const por = session.user.email ?? session.user.id;
+      const aprovacao = await aprovarBriefingWeb(proj.briefing, por);
+      const { error } = await supabase.from("projects").update({ briefing_aprovado: aprovacao }).eq("id", id);
+      if (error) throw error;
+      setProj((atual) => (atual ? { ...atual, briefing_aprovado: aprovacao } : atual));
+      setAprovacaoCorresponde(true);
+      toast.success("Briefing aprovado. Alterações posteriores exigirão nova aprovação.");
+    } catch (erro) {
+      toast.error(`Não foi possível aprovar o briefing: ${(erro as Error).message}`);
+    } finally {
+      setAprovandoBriefing(false);
+    }
+  }
+
+  async function autorizarProjetoV2() {
+    if (!id || !session?.user || !motivoAutorizacao.trim()) {
+      toast.error("Explique por que este projeto está sendo autorizado.");
+      return;
+    }
+    setAlterandoAutorizacao(true);
+    try {
+      const { error } = await supabase.from("engine_autorizacoes_v2").insert({
+        owner: session.user.id,
+        project_id: id,
+        modo: "producao",
+        autorizado_por: session.user.email ?? session.user.id,
+        motivo: motivoAutorizacao.trim(),
+        ativo: true,
+      });
+      if (error) throw error;
+      setMotivoAutorizacao("");
+      await carregar();
+      toast.success("Projeto autorizado para produção. O certificado de release continua sendo exigido.");
+    } catch (erro) {
+      toast.error(`Não foi possível autorizar: ${(erro as Error).message}`);
+    } finally {
+      setAlterandoAutorizacao(false);
+    }
+  }
+
+  async function revogarAutorizacaoV2() {
+    if (!id) return;
+    setAlterandoAutorizacao(true);
+    try {
+      const ativa = autorizacaoLinhas.find((linha) => linha.ativo && !linha.revoked_at);
+      if (!ativa) throw new Error("não existe autorização ativa");
+      const { error } = await supabase
+        .from("engine_autorizacoes_v2")
+        .update({ ativo: false, revoked_at: new Date().toISOString() })
+        .eq("project_id", id)
+        .eq("ativo", true);
+      if (error) throw error;
+      await carregar();
+      toast.success("Autorização revogada. O histórico foi preservado.");
+    } catch (erro) {
+      toast.error(`Não foi possível revogar: ${(erro as Error).message}`);
+    } finally {
+      setAlterandoAutorizacao(false);
+    }
   }
   // Uma so porta para "escrever": os quatro ids do resolvedor que significam
   // "toque a escrita" apontam para ca, em vez de repetir a chamada em cada um.
@@ -377,6 +471,23 @@ export default function Projeto() {
   }
 
   if (!proj) return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  const entrevistaCompleta =
+    (proj.briefing as { _interview?: { completo?: boolean } } | null)?._interview?.completo === true;
+  const autorizacaoAtiva = autorizacao?.autorizado === true;
+  const releaseCertificado =
+    prontidao?.indisponivel === null &&
+    prontidao.producao.startsWith("RELEASE_PRODUCAO_CERTIFICADO");
+  const podeGerarFundacaoV2 =
+    proj.engine_mode !== "v2" ||
+    (entrevistaCompleta && aprovacaoCorresponde && autorizacaoAtiva && releaseCertificado);
+  const pendenciasFundacaoV2 = proj.engine_mode === "v2"
+    ? [
+        !entrevistaCompleta ? "concluir a entrevista" : null,
+        !aprovacaoCorresponde ? "aprovar o briefing atual" : null,
+        !autorizacaoAtiva ? "autorizar este projeto" : null,
+        !releaseCertificado ? "publicar um certificado de release válido para o código em execução" : null,
+      ].filter((item): item is string => Boolean(item))
+    : [];
   const hasActiveJob = jobs.some((j) => j.status === "queued" || j.status === "running");
   // Header pelo MESMO resolvedor único (S7): a escrita governa quando ativa/bloqueada;
   // senão, o ciclo de vida do projeto. Mesma OperationalState do dashboard e da aba.
@@ -618,6 +729,89 @@ export default function Projeto() {
               <CardDescription>Documentos gerados pela skill arquiteto-de-enredo.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
+              {proj.engine_mode === "v2" && (
+                <div className="space-y-4 rounded-lg border p-4">
+                  <div>
+                    <p className="font-medium">Portões antes da fundação</p>
+                    <p className="text-xs text-muted-foreground">
+                      A Engine V2 só aceita a fundação quando entrevista, aprovação autoral,
+                      autorização do projeto e certificado de release correspondem ao estado atual.
+                    </p>
+                  </div>
+                  <div className="grid gap-2 text-xs sm:grid-cols-2">
+                    <p><Badge variant={entrevistaCompleta ? "default" : "destructive"}>
+                      {entrevistaCompleta ? "Entrevista concluída" : "Entrevista incompleta"}
+                    </Badge></p>
+                    <p><Badge variant={aprovacaoCorresponde ? "default" : "destructive"}>
+                      {aprovacaoCorresponde ? "Briefing atual aprovado" : "Briefing sem aprovação válida"}
+                    </Badge></p>
+                    <p><Badge variant={autorizacaoAtiva ? "default" : "destructive"}>
+                      {autorizacao?.titulo ?? "Autorização desconhecida"}
+                    </Badge></p>
+                    <p><Badge variant={releaseCertificado ? "default" : "destructive"}>
+                      {releaseCertificado ? "Release certificado" : "Release não certificado"}
+                    </Badge></p>
+                  </div>
+                  <details className="text-xs">
+                    <summary className="cursor-pointer font-medium">Revisar briefing que será aprovado</summary>
+                    <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-muted p-3">
+                      {JSON.stringify(proj.briefing ?? {}, null, 2)}
+                    </pre>
+                  </details>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant={aprovacaoCorresponde ? "outline" : "default"}
+                      disabled={!entrevistaCompleta || aprovandoBriefing}
+                      onClick={aprovarBriefingAtual}
+                    >
+                      {aprovandoBriefing && <Loader2 className="h-4 w-4 animate-spin" />}
+                      {aprovacaoCorresponde ? "Reaprovar briefing atual" : "Aprovar briefing atual"}
+                    </Button>
+                    {!entrevistaCompleta && (
+                      <Button size="sm" variant="outline" onClick={() => nav(`/novo-projeto?projeto=${proj.id}`)}>
+                        Retomar entrevista
+                      </Button>
+                    )}
+                  </div>
+                  <div className="space-y-2 rounded border p-3">
+                    <p className="font-medium">{autorizacao?.titulo ?? "Autorização indisponível"}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {autorizacao?.detalhe ?? "A consulta de autorização ainda não retornou."}
+                    </p>
+                    {autorizacaoAtiva ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={alterandoAutorizacao}
+                        onClick={revogarAutorizacaoV2}
+                      >
+                        Revogar autorização
+                      </Button>
+                    ) : (
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Input
+                          value={motivoAutorizacao}
+                          onChange={(evento) => setMotivoAutorizacao(evento.target.value)}
+                          placeholder="Motivo auditável da autorização"
+                        />
+                        <Button
+                          size="sm"
+                          disabled={alterandoAutorizacao || !motivoAutorizacao.trim()}
+                          onClick={autorizarProjetoV2}
+                        >
+                          Autorizar projeto
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  {!podeGerarFundacaoV2 && (
+                    <p className="rounded bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                      Fundação bloqueada: {pendenciasFundacaoV2.join("; ")}.
+                    </p>
+                  )}
+                </div>
+              )}
               {(() => {
                 const jf = jobMaisRecente(jobs, "criar_fundacao");
                 const pg = (jf?.progresso ?? {}) as any;
@@ -645,7 +839,15 @@ export default function Projeto() {
                   return (
                     <div className="space-y-3">
                       <p className="text-destructive">Falha ao gerar a fundação: {jf.erro?.slice(0, 200)}</p>
-                      <Button size="sm" variant="outline" onClick={() => enfileira("criar_fundacao", {})}>Tentar de novo</Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!podeGerarFundacaoV2}
+                        title={pendenciasFundacaoV2.join("; ")}
+                        onClick={() => enfileira("criar_fundacao", {})}
+                      >
+                        Tentar de novo
+                      </Button>
                     </div>
                   );
                 }
@@ -669,7 +871,14 @@ export default function Projeto() {
                   return (
                     <div className="space-y-3">
                       <p className="text-muted-foreground">A fundação ainda não foi gerada.</p>
-                      <Button size="sm" onClick={() => enfileira("criar_fundacao", {})}>Gerar fundação</Button>
+                      <Button
+                        size="sm"
+                        disabled={!podeGerarFundacaoV2}
+                        title={pendenciasFundacaoV2.join("; ")}
+                        onClick={() => enfileira("criar_fundacao", {})}
+                      >
+                        Gerar fundação
+                      </Button>
                     </div>
                   );
                 }

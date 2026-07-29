@@ -101,6 +101,13 @@ export interface Project {
   idioma_origem: string;
   status: ProjectStatus;
   briefing: Record<string, unknown>;
+  briefing_aprovado: {
+    schema: "briefing-aprovado/v1";
+    hash: string;
+    aprovado_por: string;
+    aprovado_em: string;
+    briefing: Record<string, unknown>;
+  } | null;
   skill_escrita: string | null;
   engine_mode: string | null;
   paginas_alvo: number | null;
