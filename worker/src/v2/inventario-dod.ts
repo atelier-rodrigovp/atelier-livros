@@ -126,6 +126,8 @@ export const INVENTARIO_DOD: GarantiaDoD[] = [
   { fatia: "R", escopo: "local", id: "R-03", garantia: "`MODELO_POR_PAPEL` é conjunto fechado: exceção nova quebra o teste", testes: ["src/v2/cascata-pipeline.test.ts"] },
   { fatia: "R", escopo: "local", id: "R-04", garantia: "o worker carimba SHA e horário do código com que subiu", testes: ["src/versao-codigo.test.ts"] },
   { fatia: "R", escopo: "local", id: "R-05", garantia: "worktree suja é declarada, nunca escondida atrás do SHA", testes: ["src/versao-codigo.test.ts"] },
+  { fatia: "R", escopo: "local", id: "R-06", garantia: "worker no mesmo SHA do repositório, worktree limpa, NÃO bloqueia", testes: ["../src/lib/versaoWorker.test.ts"] },
+  { fatia: "R", escopo: "local", id: "R-07", garantia: "worker em SHA diferente do repositório bloqueia, nomeando os dois SHAs", testes: ["../src/lib/versaoWorker.test.ts"] },
 ];
 
 /** Fatias que precisam estar comprovadas para a implementação ser aprovada. */

@@ -6,6 +6,7 @@ import { useSession } from "@/hooks/useSession";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
 import { enqueueJob, supabase } from "@/lib/supabase";
 import { jobAtivoReal, jobStatusBadgeEx, tipoLabel } from "@/lib/status";
+import { compararVersaoWorker, type CarimboWorker } from "@/lib/versaoWorker";
 import { cn } from "@/lib/utils";
 import type { Job } from "@/lib/types";
 
@@ -179,6 +180,14 @@ export default function Configuracoes() {
 
   // Badge do worker: parado / pausado / ocioso (ligado, sem tarefa) / produzindo (com tarefa real).
   const estado = !online ? "parado" : !ativo ? "pausado" : trabalhando ? "produzindo" : "ocioso";
+
+  // Que código o worker no ar realmente executa. Só faz sentido comparar com o
+  // worker vivo E com um commit conhecido no build — sem os dois, a tela cala
+  // em vez de afirmar igualdade que não pode verificar.
+  const versao =
+    online && __COMMIT_SHA__
+      ? compararVersaoWorker(heartbeat?.status?.codigo as CarimboWorker | undefined, __COMMIT_SHA__)
+      : null;
   const cfg = {
     produzindo: { cor: "bg-emerald-500", texto: "Produzindo", pulse: true },
     ocioso: { cor: "bg-emerald-500/60", texto: "Ocioso", pulse: false },
@@ -228,6 +237,19 @@ export default function Configuracoes() {
               </span>
             )}
           </div>
+
+          {versao?.bloqueia && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-destructive">
+                Código em execução diverge do repositório
+              </p>
+              <p className="mt-1 text-sm">{versao.mensagem}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                O worker só passa a valer um commit depois de reiniciar. Até lá, ele produz com a régua
+                da versão que está no ar.
+              </p>
+            </div>
+          )}
 
           {estado === "parado" && (
             <>

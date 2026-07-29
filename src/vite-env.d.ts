@@ -7,3 +7,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** Commit de que esta interface foi construída (injetado em vite.config.ts). */
+declare const __COMMIT_SHA__: string;

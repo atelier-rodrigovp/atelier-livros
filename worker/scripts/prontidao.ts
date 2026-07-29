@@ -24,6 +24,8 @@ import { capturarHead, rodarComando } from "../src/v2/execucao.js";
 import { DIR_EVIDENCIAS, validarEvidencia, type FingerprintsCodigo, type TipoEvidencia } from "../src/v2/evidencia-externa.js";
 import { LIMITACOES_RECALL, resumoLimitacoes } from "../src/limitacoes-conhecidas.js";
 import { fatiasDoInventario, INVENTARIO_DOD } from "../src/v2/inventario-dod.js";
+import { compararVersaoWorker } from "../../src/lib/versaoWorker.js";
+import { workerOnline } from "../../src/lib/status.js";
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(AQUI, "..", "..");
@@ -67,6 +69,8 @@ interface Relatorio {
   nivel2: { itens: Item[] };
   nivel3: { executado: boolean; itens: Item[] };
   regressao: { itens: Item[] };
+  /** O codigo que o worker no ar executa, comparado com o HEAD acima. */
+  versao_worker: Item;
   externas: { itens: Item[] };
   /** Dívida reportada mas não bloqueante (bundle, lint warning). */
   avisos: string[];
@@ -503,6 +507,50 @@ ${build.stderr}`.slice(-500),
 }
 
 // ---------------------------------------------------------------------------
+// O código que o worker no ar realmente executa
+// ---------------------------------------------------------------------------
+
+/**
+ * O worker carimba o SHA com que subiu (`worker_heartbeats.status.codigo`);
+ * aqui esse carimbo vira BLOQUEIO. Sem isto, "commit não é produção" continua
+ * sendo uma frase: um worker de anteontem produz capítulo com a régua de
+ * anteontem e nada na saída deste comando diz isso.
+ *
+ * Worker OFFLINE não é bloqueio, é ausência de prova: se nada está no ar, nada
+ * produz com código velho.
+ */
+async function versaoDoWorkerNoAr(): Promise<Item> {
+  const item = "código do worker no ar × HEAD do repositório";
+  let shaRepo: string;
+  try {
+    shaRepo = capturarHead(RAIZ);
+  } catch (e) {
+    return { item, ok: null, evidencia: `HEAD indisponível: ${(e as Error).message}` };
+  }
+  let hb: { last_seen?: string; status?: { codigo?: unknown } } | null;
+  try {
+    const { sb } = await import("../src/supabase.js");
+    const { data, error } = await sb
+      .from("worker_heartbeats")
+      .select("last_seen,status")
+      .order("last_seen", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    hb = data as typeof hb;
+  } catch (e) {
+    // Sem credencial ou sem rede: ausência de prova, nunca verde por omissão.
+    return { item, ok: null, evidencia: `heartbeat ilegível: ${(e as Error).message.slice(0, 120)}` };
+  }
+  if (!workerOnline(hb as never)) {
+    const quando = hb?.last_seen ? `último sinal ${hb.last_seen}` : "nenhum heartbeat";
+    return { item, ok: null, evidencia: `worker offline (${quando}) — nada em execução para comparar` };
+  }
+  const c = compararVersaoWorker(hb?.status?.codigo as never, shaRepo);
+  return { item, ok: !c.bloqueia, evidencia: c.mensagem };
+}
+
+// ---------------------------------------------------------------------------
 // Evidência externa — o que a máquina local não pode provar
 // ---------------------------------------------------------------------------
 
@@ -620,10 +668,11 @@ console.log("Regressão local completa…");
 const reg = regressao(suiteRaiz);
 console.log("Evidências externas…\n");
 const ext = externas();
+const versaoWorker = await versaoDoWorkerNoAr();
 
 const bloqueios: string[] = [];
 const naoComprovados: string[] = [];
-for (const i of [...n1.itens, ...n2.itens, ...n3.itens, ...reg.itens, ...ext.itens]) {
+for (const i of [...n1.itens, ...n2.itens, ...n3.itens, ...reg.itens, versaoWorker, ...ext.itens]) {
   if (i.ok === false) bloqueios.push(`${i.item}: ${i.evidencia}`);
   if (i.ok === null) naoComprovados.push(`${i.item}: ${i.evidencia}`);
 }
@@ -657,6 +706,10 @@ if (!ext.aprovadas.migracoes_remotas) bloqueiosProducao.push("MIGRACOES_REMOTAS"
 if (!ext.aprovadas.integracao_real) bloqueiosProducao.push("INTEGRACAO_REAL");
 if (!ext.aprovadas.ui_autenticada) bloqueiosProducao.push("DOWNLOAD_AUTENTICADO");
 if (!ext.aprovadas.provedor_real) bloqueiosProducao.push("PROVEDOR_REAL");
+// Worker rodando codigo que nao e o do repositorio bloqueia producao: a regua
+// em execucao nao e a regua auditada. Offline (ok === null) nao bloqueia — se
+// nada esta no ar, nada produz com codigo velho.
+if (versaoWorker.ok === false) bloqueiosProducao.push("CODIGO_DO_WORKER");
 
 const releaseProducao = bloqueiosProducao.length === 0 ? "RELEASE_PRODUCAO_CERTIFICADO" : "RELEASE_PRODUCAO_BLOQUEADO";
 
@@ -690,6 +743,7 @@ const relatorio: Relatorio = {
   nivel2: { itens: n2.itens },
   nivel3: { executado: n3.executado, itens: n3.itens },
   regressao: { itens: reg.itens },
+  versao_worker: versaoWorker,
   externas: { itens: ext.itens },
   avisos: reg.avisos,
   bloqueios_producao: bloqueiosProducao,
@@ -707,6 +761,7 @@ secao("NÍVEL 1 — fiação e mutação", n1.itens);
 secao("NÍVEL 2 — acurácia", n2.itens);
 secao("NÍVEL 3 — ciclo real", n3.itens);
 secao("REGRESSÃO LOCAL (DoD completa)", reg.itens);
+secao("CÓDIGO EM EXECUÇÃO", [versaoWorker]);
 secao("VERIFICAÇÃO EXTERNA (fora do alcance desta máquina)", ext.itens);
 
 if (reg.avisos.length) {
