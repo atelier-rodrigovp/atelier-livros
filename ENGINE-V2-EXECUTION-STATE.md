@@ -17,7 +17,7 @@ chamar modelo de prosa; nunca escrever capítulo.**
 - [x] D5. Encadeamento real: `max_novos_caps=1` não produz falso `done`; retoma até fechamento/Meta9
 - [x] D6. Cruzamento macro × micro por campos estruturados (plantio, reforço, pagamento, fios, clímax, marcos, atos, tensão)
 - [x] D7-01 (local). Documentos V2: materialização, caminho canônico, índice, hash e consumo pela interface
-- [ ] D7-02 (**externo, PENDENTE**). Upload no Storage real e download em sessão autenticada — nenhum teste local prova isto
+- [x] D7-02 (externo, **COMPROVADO** 2026-07-28). Upload no Storage real e download em sessão autenticada, com hash conferido nas duas pontas
 
 ### Fatias abertas do plano original
 - [x] E — entrevista determinística e aprovação do briefing
@@ -33,12 +33,17 @@ chamar modelo de prosa; nunca escrever capítulo.**
 ## Estados formais exigidos na entrega
 
 ```
-implementacao    IMPLEMENTACAO_APROVADA
-regressao        REGRESSAO_APROVADA
-integracao_mock  INTEGRACAO_MOCK_APROVADA
-acuracia         ACURACIA_AGUARDANDO_ROTULAGEM_HUMANA
-release          RELEASE_BLOQUEADO
-canarios_novos   BLOQUEADOS_AGUARDANDO_AUTOR
+implementacao_local  IMPLEMENTACAO_LOCAL_APROVADA
+regressao_local      REGRESSAO_LOCAL_APROVADA
+integracao_mock      INTEGRACAO_MOCK_APROVADA
+acuracia             ACURACIA_AGUARDANDO_ROTULAGEM
+migracoes_remotas    MIGRACOES_REMOTAS_COMPROVADAS
+integracao_real      INTEGRACAO_REAL_APROVADA
+ui_autenticada       UI_AUTENTICADA_APROVADA
+provedor_real        PROVEDOR_REAL_APROVADO
+release_producao     RELEASE_PRODUCAO_BLOQUEADO: CALIBRACAO_HUMANA
+canarios_novos       BLOQUEADOS_AGUARDANDO_AUTOR
+prova_literaria      PROVA_LITERARIA_NAO_EXECUTADA
 ```
 
 ## Próxima tarefa
@@ -90,6 +95,21 @@ bullets não tinham verificação individual e agora têm:
 | erro de Supabase/auth não vira sucesso visual | `autorizacaoV2.ts#interpretarAutorizacao` | `autorizacaoV2.test.ts` (13) | ok |
 | toda ação anunciada é executável | `resolveOperationalState.ts` (`IdAcao`) | `EstadoOperacional.test.tsx` (46) | ok — 11 cenários, exaustivo |
 
+### O que a prova de D7-02 NÃO prova
+
+A materialização foi feita por `v2-materializar-documentos.ts`, um script de
+custo zero que reconstrói a fundação a partir dos documentos já em disco. Isso
+prova o CAMINHO (`documentosDaFundacao` → `chaveStorage` → Storage → download
+autenticado com hash conferido), não prova que **`criar_fundacao` sobe os
+documentos sozinho numa rodada real**.
+
+A distinção é concreta: a fundação deste projeto foi gerada por código ANTERIOR
+ao D7 — o estado persistido não tem `indice` nem `storage_falhas`, e o Storage
+estava vazio de documentos V2. O código atual (`materializarFundacao`) faz o
+upload, mas isso nunca foi observado numa execução de ponta a ponta.
+
+**Continua NÃO COMPROVADO** e não deve ser marcado como fechado.
+
 ### Matriz de fiação (auditoria da fase 2)
 
 | garantia | produtor | consumidor | decisão | persistência | interface | teste | estado |
@@ -108,11 +128,11 @@ bullets não tinham verificação individual e agora têm:
 | memória da prosa | `extrator_memoria` | ledger | exige payoff | `memoria_prosa` | painel | H-01..02 | local ok |
 | revalidação transitiva | grafo de dependência | `revalidarVizinhanca` | reabre dependentes | `engine_state` | afetados | K-01..03 | local ok |
 | escada de correção | `correcao.ts` | worker | muda estratégia | `correcao-ledger.json` | tentativas | C-01..02, D2-01..02 | local ok |
-| histórico append-only | worker | triggers do banco | recusa update/delete | `engine_eventos_v2` | — | P-01..02 | local ok; **banco real não comprovado** |
-| RLS e owner | migration | Postgres | isola por dono | políticas | — | D4-01 | local ok; **banco real não comprovado** |
+| histórico append-only | worker | triggers do banco | recusa update/delete | `engine_eventos_v2` | — | P-01..02 | **comprovado no banco real**: update e delete BARRADOS |
+| RLS e owner | migration | Postgres | isola por dono | políticas | — | D4-01 | **comprovado**: 4 tabelas, 7 policies, 7 triggers, RLS em todas |
 | certificado × autorização | `release.ts` | todo ponto de entrada | fail-closed | `engine_autorizacoes_v2` | — | M-01..03, D3-01 | local ok |
 | documentos V2 (contrato) | `documentosDaFundacao` | índice + tela | caminho e hash | índice | lista de docs | D7-01 | local ok |
-| documentos V2 (real) | worker | Supabase Storage | upload e download | Storage | download | — | **D7-02 externo, não comprovado** |
+| documentos V2 (real) | `v2-materializar-documentos` | Supabase Storage | upload e download | Storage | download | D7-02 | **comprovado**: 5 artefatos, hash idêntico disco → Storage → navegador |
 | desvio V1/V2 | `executarJobRoteado` | log | rota declarada | log | badge da engine | roteamento.test | local ok |
 
 DoD local executada em 2026-07-28 sobre o HEAD `74db809` (capturado pelo próprio
@@ -167,6 +187,6 @@ seguinte.
    (garantia `D7-02`).
 5. **PROVEDOR_REAL** — smoke do provedor, sem escrita literária.
 
-Cada um vira um documento em `evidencias-externas/` vinculado ao commit e aos
+Cada um vira um documento em `.evidencias/` (fora do Git) vinculado ao commit e aos
 hashes do que estava valendo. Ausente = NÃO COMPROVADO, que não é zero nem
 sucesso. Push continua dependendo de autorização.

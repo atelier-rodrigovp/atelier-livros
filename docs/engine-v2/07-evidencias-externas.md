@@ -4,6 +4,10 @@ O que a máquina local não pode provar. Cada evidência é um documento
 `evidencia-externa/v2` (schema em `worker/src/v2/evidencia-externa.ts`) que o
 `npm run prontidao` lê para decidir os estados de produção.
 
+> **Pasta unica.** Existiu por um tempo uma `evidencias-externas/` versionada ao
+> lado desta. Duas pastas para a mesma coisa e convite a evidencia orfa: este
+> documento virou `docs/engine-v2/`, e TODA evidencia vive em `.evidencias/`.
+
 ## Onde vivem: FORA do Git
 
 Em **`.evidencias/`**, na raiz do repositório, ignorado pelo `.gitignore`.
