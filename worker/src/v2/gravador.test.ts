@@ -171,6 +171,17 @@ describe("Gravador — aprovarCapitulo", () => {
 });
 
 describe("Gravador — bloqueios e fase", () => {
+  it("[DOD:H-04] extração de memória bem-sucedida resolve o bloqueio incompleto do capítulo", async () => {
+    await gravador.registrarMemoriaIncompleta(1);
+    await gravador.registrarMemoriaIncompleta(1);
+    let estado = await disco.lerEstado("proj-1");
+    expect(estado?.doc.bloqueios.filter((b) => b.codigo === "MEMORIA_PROSA_INCOMPLETA")).toHaveLength(1);
+
+    await gravador.registrarMemoriaDaProsa(1, [], []);
+    estado = await disco.lerEstado("proj-1");
+    expect(estado?.doc.bloqueios.some((b) => b.codigo === "MEMORIA_PROSA_INCOMPLETA")).toBe(false);
+  });
+
   it("registrar/remover bloqueio de capítulo alterna status e restaura o anterior", async () => {
     const caminho = escreverCapitulo("capitulo-01.md", "Prosa.");
     await gravador.registrarCapituloEscrito(1, caminho, { palavras: 1 });

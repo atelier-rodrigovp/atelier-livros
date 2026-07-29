@@ -682,17 +682,25 @@ export async function executarEscritaV2(job: Job): Promise<ResultadoRoteado | vo
       return { continuar: { ...paradaLote, progresso } };
     }
 
-    // Trechos anteriores estritamente relevantes: cauda do capítulo anterior (gancho/continuidade local).
+    // Gates de repetição recebem TODOS os capítulos anteriores completos. O
+    // pacote do modelo continua pequeno: só a cauda de N-1 entra como contexto
+    // de continuidade. Garantia determinística não pode degradar com a janela.
     const anteriores: { numero: number; trecho: string }[] = [];
     const trechos: { titulo: string; texto: string; fonte: string }[] = [];
-    if (n > 1) {
-      const prev = path.join(deps.dirManuscrito, `capitulo-${String(n - 1).padStart(2, "0")}.md`);
+    for (let anterior = 1; anterior < n; anterior++) {
+      const prev = path.join(deps.dirManuscrito, `capitulo-${String(anterior).padStart(2, "0")}.md`);
       try {
         const t = await fs.readFile(prev, "utf8");
-        anteriores.push({ numero: n - 1, trecho: t });
-        trechos.push({ titulo: `FINAL DO CAPÍTULO ${n - 1} (continuidade imediata)`, texto: t.split(/\n{2,}/).slice(-3).join("\n\n"), fonte: `capitulo-${n - 1}` });
+        anteriores.push({ numero: anterior, trecho: t });
+        if (anterior === n - 1) {
+          trechos.push({
+            titulo: `FINAL DO CAPÍTULO ${anterior} (continuidade imediata)`,
+            texto: t.split(/\n{2,}/).slice(-3).join("\n\n"),
+            fonte: `capitulo-${anterior}`,
+          });
+        }
       } catch {
-        /* capítulo anterior fora do disco: o contextualizador cobre a continuidade */
+        /* arquivo ausente: estado/hash-bound e contextualizador continuam fail-closed */
       }
     }
 

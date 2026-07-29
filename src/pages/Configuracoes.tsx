@@ -251,6 +251,18 @@ export default function Configuracoes() {
             </div>
           )}
 
+          {__BUILD_DIRTY__ && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                Interface construída sobre arquivos modificados
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                O SHA sozinho não descreve este build. Certificados de prontidão ficam bloqueados
+                até a interface ser gerada a partir de um commit limpo.
+              </p>
+            </div>
+          )}
+
           {estado === "parado" && (
             <>
               <p className="text-sm text-muted-foreground">

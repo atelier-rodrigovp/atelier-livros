@@ -40,6 +40,7 @@ import { EngineV2Panel } from "@/components/EngineV2Panel";
 import { chaveStorageDocumento, documentosParaExibir } from "@/lib/documentosFundacao";
 import { aprovarBriefingWeb, aprovacaoAindaCorresponde } from "@/lib/briefingAprovacao";
 import { useSession } from "@/hooks/useSession";
+import { avaliarPrecondicoesFundacao } from "@/lib/precondicoesFundacaoV2";
 
 interface Edition { id: string; idioma: string; status: string; is_origem: boolean; nota_review: number | null; }
 interface Artifact { id: string; edition_id: string | null; tipo: string; storage_path: string; url_publica: string | null; created_at?: string; meta?: any; }
@@ -162,7 +163,10 @@ export default function Projeto() {
 
     // Mesma convencao da telemetria: linha em `jobs` com tipo dedicado.
     const rPront = await supabase.from("jobs").select("payload").eq("tipo", "prontidao_v2").limit(1).maybeSingle();
-    setProntidao(lerProntidaoPublicada((rPront.data as { payload?: unknown } | null)?.payload ?? null));
+    setProntidao(lerProntidaoPublicada(
+      (rPront.data as { payload?: unknown } | null)?.payload ?? null,
+      { shaEsperado: __COMMIT_SHA__ || undefined, buildSujo: __BUILD_DIRTY__ }
+    ));
     const counts: Record<string, number> = {};
     for (const c of (chs as { edition_id: string }[]) ?? []) counts[c.edition_id] = (counts[c.edition_id] ?? 0) + 1;
     setChapters(counts);
@@ -477,17 +481,15 @@ export default function Projeto() {
   const releaseCertificado =
     prontidao?.indisponivel === null &&
     prontidao.producao.startsWith("RELEASE_PRODUCAO_CERTIFICADO");
-  const podeGerarFundacaoV2 =
-    proj.engine_mode !== "v2" ||
-    (entrevistaCompleta && aprovacaoCorresponde && autorizacaoAtiva && releaseCertificado);
-  const pendenciasFundacaoV2 = proj.engine_mode === "v2"
-    ? [
-        !entrevistaCompleta ? "concluir a entrevista" : null,
-        !aprovacaoCorresponde ? "aprovar o briefing atual" : null,
-        !autorizacaoAtiva ? "autorizar este projeto" : null,
-        !releaseCertificado ? "publicar um certificado de release válido para o código em execução" : null,
-      ].filter((item): item is string => Boolean(item))
-    : [];
+  const precondicoesFundacaoV2 = avaliarPrecondicoesFundacao({
+    engineMode: proj.engine_mode,
+    entrevistaCompleta,
+    briefingAprovadoAtual: aprovacaoCorresponde,
+    projetoAutorizado: autorizacaoAtiva,
+    releaseCertificado,
+  });
+  const podeGerarFundacaoV2 = precondicoesFundacaoV2.podeGerar;
+  const pendenciasFundacaoV2 = precondicoesFundacaoV2.pendencias;
   const hasActiveJob = jobs.some((j) => j.status === "queued" || j.status === "running");
   // Header pelo MESMO resolvedor único (S7): a escrita governa quando ativa/bloqueada;
   // senão, o ciclo de vida do projeto. Mesma OperationalState do dashboard e da aba.

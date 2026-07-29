@@ -622,6 +622,7 @@ export type GateUniversal =
   | "violacao_conhecimento"
   | "pov_impossivel"
   | "repeticao_quase_literal"
+  | "repeticao_semantica"
   | "estado_inconsistente"
   | "skill_ou_contexto_invalido"
   | "fora_do_schema"
@@ -630,6 +631,7 @@ export type GateUniversal =
   | "revelacao_repetida"
   | "rotacao_pov_violada"
   | "promessa_nao_paga"
+  | "memoria_prosa_incompleta"
   /** Ficha contradiz a grade de arco (ato, tensão-alvo, promessa tocada, marco). */
   | "ficha_fora_do_arco"
   | "fundacao_estrutura_incoerente"

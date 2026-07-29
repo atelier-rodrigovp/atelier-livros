@@ -54,6 +54,21 @@ export async function fichasAprovadasDoLivro(entrada: {
 export async function avaliarFechamentoLivro(entrada: EntradaFechamento): Promise<ResultadoFechamento> {
   const fichas = await fichasAprovadasDoLivro(entrada);
   const memoria = entrada.estado.doc.memoria_prosa ?? [];
+  const memoriaIncompleta = entrada.estado.doc.bloqueios.filter(
+    (b) => b.codigo === "MEMORIA_PROSA_INCOMPLETA"
+  );
+  if (memoriaIncompleta.length) {
+    return {
+      passou: false,
+      gates: [{
+        gate: "memoria_prosa_incompleta",
+        passou: false,
+        evidencia: memoriaIncompleta
+          .map((b) => `${b.alvo}: ${b.detalhe}`)
+          .join(" · "),
+      }],
+    };
+  }
 
   // CRUZAMENTO DAS TRÊS FONTES (fatia H). A fundação declara; as fichas marcam;
   // a PROSA planta. Silêncio de uma nunca vale como conformidade das outras: uma

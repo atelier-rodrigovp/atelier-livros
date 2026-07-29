@@ -388,6 +388,42 @@ describe("executarMeta9", () => {
     expect(estado?.doc.avaliacao?.nota).toBe(9.1);
   });
 
+  it("[DOD:K-05] Meta9 reavalia dependente distante e não o reescreve quando continua válido", async () => {
+    const prosaCap2 = [
+      "## Capítulo 2",
+      "",
+      "Marina atravessou o pátio do consulado sob a chuva. O envelope seguia lacrado no bolso. Quando o sino tocou, ela percebeu a janela aberta no terceiro andar.",
+    ].join("\n");
+    await semearCapituloAprovado(2, prosaCap2);
+
+    provedor.enfileirar("revisor_literario", avaliacao(7, [{
+      capitulo: 1,
+      problemas: ["final sem consequência"],
+      instrucoes: ["feche com consequência concreta"],
+    }]));
+    // Reescrita principal do capítulo 1.
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_REESCRITA);
+    provedor.enfileirar("revisor_literario", parecerCapitulo());
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+    // Reavaliação transitiva do capítulo 2: sem resposta de escritor.
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("revisor_literario", parecerCapitulo());
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+    // Nova avaliação do livro.
+    provedor.enfileirar("revisor_literario", avaliacao(9.2));
+
+    const r = await executarMeta9(deps({ meta: 9 }));
+    expect(r).toMatchObject({ atingiu: true, nota: 9.2 });
+    expect(provedor.chamadas.filter((c) => c.papel === "escritor")).toHaveLength(1);
+    expect(readFileSync(path.join(dir, "manuscrito", "capitulo-02.md"), "utf8")).toBe(prosaCap2);
+
+    const estado = await disco.lerEstado("proj-1");
+    expect(estado?.doc.revalidacoes?.some((onda) =>
+      onda.origem === 1 && onda.afetados.some((afetado) => afetado.capitulo === 2)
+    )).toBe(true);
+  });
+
   it("orçamento esgotado: reescreve, não atinge a meta, bloqueia e lança META_NAO_ATINGIDA", async () => {
     provedor.enfileirar("revisor_literario", avaliacao(7, [{ capitulo: 1, problemas: ["final fraco"], instrucoes: ["feche melhor"] }]));
     provedor.enfileirar("contextualizador", CTX_OK);

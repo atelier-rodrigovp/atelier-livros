@@ -15,7 +15,13 @@ import type { ProvedorModelo } from "./provedor.js";
 import { rodarGatesCapitulo } from "./gates.js";
 import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
 import { tarefaAvaliadorLivro, tarefaSinteseArco } from "./tarefas.js";
-import { capitulosAfetados, construirGrafo, decidirRevalidacao } from "./revalidacao.js";
+import {
+  capitulosAfetados,
+  construirGrafo,
+  decidirRevalidacao,
+  executarOndaRevalidacao,
+  type CapituloAfetado,
+} from "./revalidacao.js";
 import { ErroEngine, type ContratoCompilado, type MapaModelos, type Parecer, type ResultadoGate, type SceneSpec } from "./tipos.js";
 import type { CapituloEstado } from "./tipos.js";
 
@@ -600,6 +606,176 @@ function depsPipelineDe(deps: DepsMeta9): DepsPipeline {
   };
 }
 
+async function revalidarDependentesDoLote(entrada: {
+  deps: DepsMeta9;
+  depsPipeline: DepsPipeline;
+  total: number;
+  origens: number[];
+  lote: {
+    snapshots: SnapshotReescritaMeta[];
+    tentativas: Map<number, TentativaReescritaMeta>;
+  };
+  reportar: (etapa: string, dados?: Record<string, unknown>) => Promise<void>;
+}): Promise<void> {
+  const { deps, depsPipeline, total, origens, lote, reportar } = entrada;
+  const estadoDeps = await deps.gravador.carregarEstado();
+  const fichasParaGrafo: { capitulo: number; ficha: SceneSpec }[] = [];
+  for (let n = 1; n <= total; n++) {
+    const ficha = await deps.persistencia.lerFichaMaisRecente(deps.projectId, n);
+    if (ficha) fichasParaGrafo.push({ capitulo: n, ficha });
+  }
+  const grafo = construirGrafo({
+    fichas: fichasParaGrafo,
+    memoria: estadoDeps.doc.memoria_prosa ?? [],
+  });
+  const origensSet = new Set(origens);
+  const porCapitulo = new Map<number, CapituloAfetado>();
+  const afetadosPorOrigem = new Map<number, CapituloAfetado[]>();
+  for (const origem of origens) {
+    const daOrigem = capitulosAfetados(grafo, origem).filter((a) => !origensSet.has(a.capitulo));
+    afetadosPorOrigem.set(origem, daOrigem);
+    for (const afetado of daOrigem) {
+      const atual = porCapitulo.get(afetado.capitulo);
+      if (!atual) {
+        porCapitulo.set(afetado.capitulo, structuredClone(afetado));
+        continue;
+      }
+      atual.distancia = Math.min(atual.distancia, afetado.distancia);
+      for (const motivo of afetado.motivos) {
+        if (!atual.motivos.some((m) =>
+          m.canal === motivo.canal && m.chave === motivo.chave && m.via === motivo.via
+        )) atual.motivos.push(motivo);
+      }
+    }
+  }
+  const afetados = [...porCapitulo.values()].sort((a, b) => a.capitulo - b.capitulo);
+  const decisao = decidirRevalidacao(afetados);
+  for (const origem of origens) {
+    await deps.gravador.registrarRevalidacao(
+      origem,
+      decisao.acao,
+      afetadosPorOrigem.get(origem) ?? []
+    );
+  }
+  if (decisao.acao === "decisao_humana") {
+    throw new ErroEngine({
+      codigo: "META_CASCATA_ACIMA_DO_TETO",
+      classe: "qualidade",
+      mensagem: decisao.motivo,
+      detalhe: { origens, afetados: afetados.map((a) => a.capitulo) },
+    });
+  }
+  if (decisao.acao !== "reabrir") return;
+
+  const fichasAfetadas = new Map<number, SceneSpec>();
+  const estadoAntesDaOnda = await deps.gravador.carregarEstado();
+  for (const afetado of afetados) {
+    const caminho = path.join(deps.dirManuscrito, nomeCapitulo(afetado.capitulo));
+    if (!existsSync(caminho)) {
+      throw new ErroEngine({
+        codigo: "GATE_ARTEFATO_AUSENTE",
+        classe: "qualidade",
+        mensagem: `revalidação transitiva: ${nomeCapitulo(afetado.capitulo)} ausente`,
+      });
+    }
+    const texto = readFileSync(caminho, "utf8");
+    if (!lote.snapshots.some((s) => s.capitulo === afetado.capitulo)) {
+      lote.snapshots.push({
+        capitulo: afetado.capitulo,
+        caminho,
+        texto,
+        estado: snapshotAprovado(
+          afetado.capitulo,
+          texto,
+          estadoAntesDaOnda.doc.capitulos[String(afetado.capitulo)]
+        ),
+      });
+    }
+    const ficha = await deps.persistencia.lerFichaMaisRecente(deps.projectId, afetado.capitulo);
+    if (!ficha) {
+      throw new ErroEngine({
+        codigo: "FICHA_AUSENTE",
+        classe: "qualidade",
+        mensagem: `revalidação transitiva: ficha do capítulo ${afetado.capitulo} ausente`,
+      });
+    }
+    fichasAfetadas.set(afetado.capitulo, ficha);
+  }
+
+  await reportar("REVALIDACAO_TRANSITIVA", {
+    origens,
+    afetados: afetados.map((a) => a.capitulo),
+  });
+  const onda = await executarOndaRevalidacao(afetados, {
+    reavaliar: async (capitulo) => {
+      const snapshot = lote.snapshots.find((s) => s.capitulo === capitulo)!;
+      const vizinhanca = vizinhancaDoCapitulo(deps.dirManuscrito, capitulo);
+      const resultado = await escreverCapitulo(depsPipeline, capitulo, {
+        fichaExistente: fichasAfetadas.get(capitulo)!,
+        textoBase: snapshot.texto,
+        somenteRevalidacao: true,
+        anteriores: vizinhanca.anteriores,
+        trechosAnteriores: vizinhanca.trechosAnteriores,
+      });
+      lote.tentativas.set(capitulo, {
+        status: resultado.status === "necessita_decisao_humana" ? "bloqueado" : resultado.status,
+        text_hash: resultado.textHash,
+        review_id: resultado.reviewId,
+      });
+      return {
+        capitulo,
+        continuaValido: resultado.status === "aprovado" || resultado.status === "aprovado_com_excecao",
+        problemas: [
+          ...resultado.problemas,
+          ...resultado.gatesFalhos.map((g) => `${g.gate}: ${g.evidencia ?? "sem evidência"}`),
+        ],
+      };
+    },
+    reescrever: async (capitulo, problemas) => {
+      const snapshot = lote.snapshots.find((s) => s.capitulo === capitulo)!;
+      const vizinhanca = vizinhancaDoCapitulo(deps.dirManuscrito, capitulo);
+      const correcoes = (problemas.length ? problemas : ["dependência transitiva deixou de ser válida"])
+        .map((problema) => ({
+          local: `capítulo ${capitulo}`,
+          problema,
+          instrucao: "reescreva apenas o necessário para restaurar a dependência, preservando fatos, voz e eventos válidos",
+        }));
+      const resultado = await escreverCapitulo(depsPipeline, capitulo, {
+        fichaExistente: fichasAfetadas.get(capitulo)!,
+        textoBase: snapshot.texto,
+        reescritaDirigida: { correcoes },
+        anteriores: vizinhanca.anteriores,
+        trechosAnteriores: vizinhanca.trechosAnteriores,
+      });
+      lote.tentativas.set(capitulo, {
+        status: resultado.status === "necessita_decisao_humana" ? "bloqueado" : resultado.status,
+        text_hash: resultado.textHash,
+        review_id: resultado.reviewId,
+      });
+      return {
+        capitulo,
+        continuaValido: resultado.status === "aprovado" || resultado.status === "aprovado_com_excecao",
+        problemas: [
+          ...resultado.problemas,
+          ...resultado.gatesFalhos.map((g) => `${g.gate}: ${g.evidencia ?? "sem evidência"}`),
+        ],
+      };
+    },
+  });
+  if (onda.status === "decisao_humana") {
+    throw new ErroEngine({
+      codigo: "META_REVALIDACAO_TRANSITIVA",
+      classe: "qualidade",
+      mensagem: onda.motivo,
+      detalhe: { mantidos: onda.mantidos, reescritos: onda.reescritos },
+    });
+  }
+  await reportar("REVALIDACAO_TRANSITIVA_CONCLUIDA", {
+    mantidos: onda.mantidos,
+    reescritos: onda.reescritos,
+  });
+}
+
 /**
  * Executa a meta-nota: consolida → avalia → (se abaixo da meta) reescreve os piores capítulos
  * apontados e reavalia, até atingir a meta, esgotar o orçamento de iterações ou uma reescrita
@@ -741,6 +917,7 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
     const estadoAntesDoLote = await deps.gravador.carregarEstado();
     const snapshots: SnapshotReescritaMeta[] = [];
     const fichas = new Map<number, Awaited<ReturnType<PersistenciaV2["lerFichaMaisRecente"]>>>();
+    const origensReescritas: number[] = [];
     for (const alvo of piores) {
       const caminho = path.join(deps.dirManuscrito, nomeCapitulo(alvo.capitulo));
       if (!existsSync(caminho)) {
@@ -804,52 +981,10 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
         // A meta-nota é um funil de melhora: uma exceção nova não substitui uma
         // versão já aprovada. Canários e estado final exigem aprovação plena.
         if (r.status === "aprovado") {
-          // REVALIDAÇÃO TRANSITIVA (fatia K): a vizinhança cobre continuidade
-          // local; o grafo de dependências cobre o capítulo 11 que depende do
-          // que o 4 estabeleceu. Reabrir ≠ reescrever: a lista aqui é de
-          // capítulos cuja aprovação foi INVALIDADA e que serão REAVALIADOS.
-          const estadoDeps = await deps.gravador.carregarEstado();
-          const fichasParaGrafo: { capitulo: number; ficha: SceneSpec }[] = [];
-          for (let n = 1; n <= total; n++) {
-            const f = await deps.persistencia.lerFichaMaisRecente(deps.projectId, n);
-            if (f) fichasParaGrafo.push({ capitulo: n, ficha: f });
-          }
-          const grafo = construirGrafo({
-            fichas: fichasParaGrafo,
-            memoria: estadoDeps.doc.memoria_prosa ?? [],
-          });
-          const afetados = capitulosAfetados(grafo, alvo.capitulo);
-          const decisaoRev = decidirRevalidacao(afetados);
-          await deps.gravador.registrarRevalidacao(alvo.capitulo, decisaoRev.acao, afetados);
-          if (decisaoRev.acao === "decisao_humana") {
-            const motivo = `reescrita do capítulo ${alvo.capitulo}: ${decisaoRev.motivo}`;
-            await restaurarLote(lotePendente, motivo);
-            lotePendente = null;
-            await deps.gravador.registrarBloqueio("META_CASCATA_ACIMA_DO_TETO", "livro", motivo);
-            throw new ErroEngine({
-              codigo: "META_CASCATA_ACIMA_DO_TETO",
-              classe: "qualidade",
-              mensagem: `meta ${meta} não atingida: ${motivo}; melhor versão aprovada restaurada`,
-              detalhe: { capitulo: alvo.capitulo, afetados: afetados.map((a) => a.capitulo) },
-            });
-          }
-
-          const vizinhos = revalidarVizinhanca(deps.dirManuscrito, alvo.capitulo, total, deps.contrato);
-          if (vizinhos.length) {
-            const detalhe = vizinhos
-              .map((v) => `cap ${v.capitulo}: ${v.gates.map((g) => `${g.gate} (${g.evidencia ?? "sem evidência"})`).join(", ")}`)
-              .join(" · ");
-            const motivo = `reescrita do capítulo ${alvo.capitulo} quebrou a vizinhança — ${detalhe}`;
-            await restaurarLote(lotePendente, motivo);
-            lotePendente = null;
-            await deps.gravador.registrarBloqueio("META_VIZINHANCA_QUEBRADA", "livro", motivo);
-            throw new ErroEngine({
-              codigo: "META_VIZINHANCA_QUEBRADA",
-              classe: "qualidade",
-              mensagem: `meta ${meta} não atingida: ${motivo}; melhor versão aprovada restaurada`,
-              detalhe: { capitulo: alvo.capitulo, vizinhos },
-            });
-          }
+          // A onda transitiva roda uma vez depois de todas as reescritas
+          // principais deste lote. Assim o mesmo dependente não é julgado duas
+          // vezes e um alvo ainda pendente não é reescrito fora de ordem.
+          origensReescritas.push(alvo.capitulo);
           continue;
         }
 
@@ -886,6 +1021,28 @@ export async function executarMeta9(deps: DepsMeta9): Promise<ResultadoMeta9> {
           "livro",
           `capítulo ${alvo.capitulo}: tentativa falhou; melhor versão aprovada restaurada`
         );
+        throw erro;
+      }
+    }
+
+    if (origensReescritas.length) {
+      try {
+        if (!lotePendente) throw new Error("lote de meta-nota ausente antes da revalidação transitiva");
+        await revalidarDependentesDoLote({
+          deps,
+          depsPipeline,
+          total,
+          origens: origensReescritas,
+          lote: lotePendente,
+          reportar,
+        });
+      } catch (erro) {
+        if (lotePendente) {
+          const motivo = `revalidação transitiva falhou: ${erro instanceof Error ? erro.message : String(erro)}`;
+          await restaurarLote(lotePendente, motivo);
+          lotePendente = null;
+          await deps.gravador.registrarBloqueio("META_REVALIDACAO_TRANSITIVA", "livro", motivo);
+        }
         throw erro;
       }
     }

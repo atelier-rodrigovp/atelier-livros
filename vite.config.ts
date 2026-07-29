@@ -15,6 +15,14 @@ const COMMIT_SHA = (() => {
     return "";
   }
 })();
+const BUILD_DIRTY = (() => {
+  try {
+    return execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" }).trim().length > 0;
+  } catch {
+    // Sem git não dá para provar limpeza: fail-closed.
+    return true;
+  }
+})();
 
 export default defineConfig({
   // Em GitHub Pages o site é servido em /atelier-livros/. No Netlify (raiz) fica "/".
@@ -23,7 +31,10 @@ export default defineConfig({
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
   },
-  define: { __COMMIT_SHA__: JSON.stringify(COMMIT_SHA) },
+  define: {
+    __COMMIT_SHA__: JSON.stringify(COMMIT_SHA),
+    __BUILD_DIRTY__: JSON.stringify(BUILD_DIRTY),
+  },
   test: {
     environment: "jsdom",
     globals: true,

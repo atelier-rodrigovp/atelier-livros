@@ -39,7 +39,7 @@ describe("fronteira projects -> fundação V2", () => {
     expect(p.briefing).toEqual(briefing);
   });
 
-  it("remoção da coluna/SELECT não degrada para null silencioso", () => {
+  it("[DOD:E-05] remoção da coluna/SELECT não degrada para null silencioso", () => {
     const semCampo = linha();
     delete semCampo.briefing_aprovado;
     expect(() => lerProjetoFundacao(semCampo)).toThrow(/engine_v2_fluxo\.sql/);

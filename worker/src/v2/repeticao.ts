@@ -134,6 +134,26 @@ function tokensConteudo(t: string): Set<string> {
   return new Set(normalizar(t).split(" ").filter((x) => x.length > 3 && !vazias.has(x)));
 }
 
+/**
+ * Localiza no texto atual a frase que melhor sustenta o enunciado da ficha.
+ * Sem qualquer sobreposição de conteúdo devolve vazio: ausência de evidência
+ * nunca pode virar bloqueio semântico.
+ */
+export function localizarTrechoSemantico(texto: string, enunciado: string): string {
+  const alvo = tokensConteudo(enunciado);
+  if (!alvo.size) return "";
+  let melhor = "";
+  let maior = 0;
+  for (const frase of frasesDe(texto)) {
+    const similaridade = jaccard(alvo, tokensConteudo(frase));
+    if (similaridade > maior) {
+      melhor = frase;
+      maior = similaridade;
+    }
+  }
+  return maior > 0 ? melhor.slice(0, 240) : "";
+}
+
 export interface AchadoSemantico {
   capituloAnterior: number;
   /** O que está sendo reapresentado. */

@@ -29,6 +29,13 @@ export interface ProntidaoNaTela {
   indisponivel: string | null;
 }
 
+export interface ContextoLeituraProntidao {
+  /** SHA do código embutido nesta interface. */
+  shaEsperado?: string;
+  /** Build feito sobre arquivos rastreados modificados não pode usar certificado. */
+  buildSujo?: boolean;
+}
+
 const DESCONHECIDO: ProntidaoNaTela = {
   local: "DESCONHECIDO",
   producao: "DESCONHECIDO",
@@ -40,7 +47,10 @@ const DESCONHECIDO: ProntidaoNaTela = {
  * Ausência de dado NUNCA vira estado saudável: sem publicação, a tela diz
  * "desconhecido" e explica, em vez de omitir a linha e parecer que está tudo bem.
  */
-export function lerProntidaoPublicada(payload: unknown): ProntidaoNaTela {
+export function lerProntidaoPublicada(
+  payload: unknown,
+  contexto: ContextoLeituraProntidao = {}
+): ProntidaoNaTela {
   if (!payload || typeof payload !== "object") return DESCONHECIDO;
   const p = payload as PayloadProntidao;
   if (p.schema !== SCHEMA_PRONTIDAO_PUBLICADA) {
@@ -49,6 +59,34 @@ export function lerProntidaoPublicada(payload: unknown): ProntidaoNaTela {
   const local = p.estados?.implementacao_local ?? "DESCONHECIDO";
   const producao = p.estados?.release_producao ?? "DESCONHECIDO";
   const bloqueios = Array.isArray(p.bloqueios_producao) ? p.bloqueios_producao : [];
+  if (contexto.buildSujo) {
+    return {
+      local,
+      producao,
+      bloqueios,
+      indisponivel: "esta interface foi construída com arquivos rastreados modificados; o certificado vale apenas para um commit limpo",
+    };
+  }
+  if (contexto.shaEsperado) {
+    if (typeof p.head !== "string" || !/^[0-9a-f]{40}$/.test(p.head)) {
+      return {
+        local,
+        producao,
+        bloqueios,
+        indisponivel: "a prontidão publicada não declara um SHA completo e verificável",
+      };
+    }
+    if (p.head !== contexto.shaEsperado) {
+      return {
+        local,
+        producao,
+        bloqueios,
+        indisponivel:
+          `prontidão vencida: certifica ${p.head.slice(0, 7)}, ` +
+          `mas esta interface executa ${contexto.shaEsperado.slice(0, 7)}`,
+      };
+    }
+  }
 
   // Publicação sem bloqueio listado E sem certificado é contraditória: preferimos
   // dizer que não dá para afirmar a dizer que está liberado.

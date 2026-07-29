@@ -112,4 +112,23 @@ describe("prontidão publicada", () => {
     expect(commitDaProntidao({ ...payload, head: "nao-e-sha" })).toBeNull();
     expect(commitDaProntidao(null)).toBeNull();
   });
+
+  it("[DOD:R-08] prontidão de outro SHA ou build sujo nunca libera a interface", () => {
+    const outroSha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const divergente = lerProntidaoPublicada(payload, { shaEsperado: outroSha });
+    expect(divergente.indisponivel).toContain("prontidão vencida");
+    expect(divergente.indisponivel).toContain("190868d");
+    expect(divergente.indisponivel).toContain("aaaaaaa");
+
+    const sujo = lerProntidaoPublicada(payload, {
+      shaEsperado: payload.head,
+      buildSujo: true,
+    });
+    expect(sujo.indisponivel).toContain("arquivos rastreados modificados");
+
+    expect(lerProntidaoPublicada(payload, {
+      shaEsperado: payload.head,
+      buildSujo: false,
+    }).indisponivel).toBeNull();
+  });
 });

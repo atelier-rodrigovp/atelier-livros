@@ -13,7 +13,7 @@ import {
 } from "./entrevista.js";
 
 describe("encadeamento depois da entrevista", () => {
-  it("não pula a aprovação autoral na V2", () => {
+  it("[DOD:E-04] não pula a aprovação autoral na V2", () => {
     expect(deveEnfileirarFundacaoAposEntrevista("v2")).toBe(false);
     expect(deveEnfileirarFundacaoAposEntrevista("v1")).toBe(true);
     expect(deveEnfileirarFundacaoAposEntrevista(null)).toBe(true);

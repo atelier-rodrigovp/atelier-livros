@@ -20,7 +20,7 @@ import {
   validarParecerConformidade,
   type ParecerConformidade,
 } from "./conformidade.js";
-import { entradasDaFicha, gateRevelacaoRepetida, renderizarLedger } from "./ledger.js";
+import { entradasDaFicha, gateRevelacaoRepetida, renderizarLedger, revelacoesDaFicha } from "./ledger.js";
 import { decidirIdioma, medirIdioma, resumoIdioma, validarParecerIdioma, type ParecerIdioma } from "./idioma.js";
 import { derivarMemoriaDaProsa, validarExtracaoProsa, type ExtracaoProsa } from "./memoria-prosa.js";
 import { executarPapel } from "./papeis.js";
@@ -29,6 +29,13 @@ import type { ProvedorModelo } from "./provedor.js";
 import { aplicarDelta, precisaEscalar, validarDelta, type DeltaDecisao } from "./cascata.js";
 import { acharSinalMedido, conferirParecer, exigirDisposicaoCompleta, hidratarOcorrenciasCitadas, normalizarParecerBruto, validarParecer } from "./revisor.js";
 import { medirSinais, resumoSinais } from "./sinais.js";
+import {
+  decidirManeirismo,
+  detectarRepeticaoSemantica,
+  localizarTrechoSemantico,
+  medirManeirismosDoLivro,
+  repeticaoSemanticaBloqueia,
+} from "./repeticao.js";
 import { validarSpec } from "./spec.js";
 import {
   tarefaArquitetoCena,
@@ -236,6 +243,12 @@ export async function escreverCapitulo(
      */
     textoBase?: string;
     /**
+     * Reavalia o texto-base sem qualquer correção automática. Todos os gates e
+     * papéis de julgamento rodam; o escritor só será chamado por uma etapa
+     * posterior se este veredito reprovar.
+     */
+    somenteRevalidacao?: boolean;
+    /**
      * Reescrita dirigida (meta-nota): sobre o textoBase, aplica as correções do avaliador
      * em modo "reescrita" como 1ª ação, seguindo depois o fluxo normal. Exige textoBase.
      */
@@ -258,7 +271,9 @@ export async function escreverCapitulo(
   // texto está adequado e o veredito é que estava errado. Corrigir a prosa aqui
   // mudaria o hash e destruiria justamente o que se quer rejulgar.
   const maxCorrecoes =
-    opts?.correcaoDirigida?.estrategia === "julgamento_alternativo" ? 0 : (deps.maxCorrecoes ?? 2);
+    opts?.somenteRevalidacao || opts?.correcaoDirigida?.estrategia === "julgamento_alternativo"
+      ? 0
+      : (deps.maxCorrecoes ?? 2);
 
   if (opts?.textoBase && !opts.fichaExistente) {
     throw new ErroEngine({
@@ -392,6 +407,7 @@ export async function escreverCapitulo(
   // e de quem JULGA; o gate roda contra o ledger inteiro, mesmo que o pacote tenha
   // degradado para janela.
   const ledger = estadoParaSpec.doc.ledger_revelacoes ?? [];
+  const memoriaProsa = estadoParaSpec.doc.memoria_prosa ?? [];
   const ledgerRender = renderizarLedger(ledger, opts?.fichaExistente);
   const secLedger: SecaoContexto[] = [
     {
@@ -531,7 +547,21 @@ export async function escreverCapitulo(
       fonte: "contextualizador",
     });
   }
-  const repeticoesRecentes = ctx.repeticoes_recentes;
+  // Camada acumulativa: os textos anteriores chegam completos, mas só sinais
+  // que atravessaram cinco capítulos entram como prevenção. Sem calibração
+  // humana são sinais para escritor/revisor, nunca bloqueio automático.
+  const sinaisManeirismoAnteriores = medirManeirismosDoLivro(
+    (opts?.anteriores ?? []).map((a) => ({ numero: a.numero, texto: a.trecho }))
+  )
+    .map((sinal) => {
+      const decisao = decidirManeirismo(sinal, { calibrados: {}, excecoesDoAutor: [] });
+      return decisao.acao === "sinalizar"
+        ? `MANEIRISMO ACUMULADO [${sinal.padrao}]: ${decisao.motivo}; exemplos: ` +
+            sinal.ocorrencias.slice(0, 2).map((o) => `cap ${o.capitulo}: "${o.trecho}"`).join(" · ")
+        : null;
+    })
+    .filter((sinal): sinal is string => sinal !== null);
+  const repeticoesRecentes = [...ctx.repeticoes_recentes, ...sinaisManeirismoAnteriores];
 
   // -------------------------------------------------------------------------
   // 3. ESCRITA (escritor) — o PIPELINE grava o arquivo, nunca o modelo
@@ -575,13 +605,37 @@ export async function escreverCapitulo(
   // -------------------------------------------------------------------------
   // 4. GATES UNIVERSAIS — com UMA rodada de correção dirigida por passagem
   // -------------------------------------------------------------------------
-  const rodarGates = (): ResultadoGate[] =>
-    rodarGatesCapitulo({
+  const acharRepeticoesSemanticas = () =>
+    revelacoesDaFicha(ficha).flatMap((novoEnunciado) =>
+      detectarRepeticaoSemantica({
+        capitulo,
+        novoEnunciado,
+        trechoAtual: localizarTrechoSemantico(texto, novoEnunciado),
+        ledger,
+        memoria: memoriaProsa,
+      })
+    );
+
+  const rodarGates = (): ResultadoGate[] => {
+    const resultados = rodarGatesCapitulo({
       texto,
       contrato: deps.contrato.contrato,
       ficha,
       anteriores: opts?.anteriores,
-    }).filter((g) => !g.passou);
+    });
+    const repeticoesSemanticas = acharRepeticoesSemanticas().filter(repeticaoSemanticaBloqueia);
+    resultados.push({
+      gate: "repeticao_semantica",
+      passou: repeticoesSemanticas.length === 0,
+      evidencia: repeticoesSemanticas.length
+        ? repeticoesSemanticas.slice(0, 3).map((a) =>
+            `cap ${a.capituloAnterior} (${Math.round(a.similaridade * 100)}%): ` +
+            `"${a.trechoAtual}" repete "${a.trechoAnterior}"`
+          ).join(" · ")
+        : undefined,
+    });
+    return resultados.filter((g) => !g.passou);
+  };
 
   const corrigirComEscritor = async (
     correcoes: { local: string; problema: string; instrucao: string }[],
@@ -647,12 +701,35 @@ export async function escreverCapitulo(
   for (;;) {
     // 5. Sinais medidos + parecer do revisor literário
     const sinais = medirSinais(texto, deps.contrato.contrato);
+    const sinaisManeirismoAtuais = medirManeirismosDoLivro([
+      ...(opts?.anteriores ?? []).map((a) => ({ numero: a.numero, texto: a.trecho })),
+      { numero: capitulo, texto },
+    ])
+      .map((sinal) => {
+        const decisao = decidirManeirismo(sinal, { calibrados: {}, excecoesDoAutor: [] });
+        return decisao.acao === "sinalizar"
+          ? `MANEIRISMO ACUMULADO [${sinal.padrao}]: ${decisao.motivo}; exemplos: ` +
+              sinal.ocorrencias.slice(0, 3).map((o) => `cap ${o.capitulo}: "${o.trecho}"`).join(" · ")
+          : null;
+      })
+      .filter((sinal): sinal is string => sinal !== null);
+    const sinaisSemanticosNaoBloqueantes = acharRepeticoesSemanticas()
+      .filter((achado) => !repeticaoSemanticaBloqueia(achado))
+      .map((achado) =>
+        `REPETIÇÃO SEMÂNTICA A JULGAR: cap ${achado.capituloAnterior}, ` +
+        `"${achado.enunciadoAtual}" versus "${achado.enunciadoAnterior}" (evidência incompleta)`
+      );
+    const repeticoesParaJulgamento = [
+      ...repeticoesRecentes,
+      ...sinaisManeirismoAtuais,
+      ...sinaisSemanticosNaoBloqueantes,
+    ];
     const secaoTexto: SecaoContexto = { titulo: "TEXTO A AVALIAR", texto, fonte: "manuscrito" };
 
     const compRev = compilar("revisor_literario", alvoCap, {
       ficha,
       fatos: [...secoesJulgamento, ...secLedger, ...docsFactuais, ...fatos, secaoTexto],
-      repeticoesRecentes,
+      repeticoesRecentes: repeticoesParaJulgamento,
     });
     if (!compRev.ok) return bloquearPorCompilacao(compRev.bloqueios);
     const rRev = await executarPapel<Parecer>({
