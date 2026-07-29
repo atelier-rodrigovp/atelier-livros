@@ -19,10 +19,58 @@ sozinho). Fail-closed confirmado: `v2-materializar-documentos` volta a recusar.
 |---|---|
 | 1. normalização determinística | **CONCLUÍDO** — `normalizarParecerBruto` ligada ao `parse` do revisor |
 | 2. citação por índice | **CONCLUÍDO** — formato aditivo + hidratação na gravação |
-| 3. timeouts por papel | não iniciado |
-| 4. esforço por papel | investigado: `--effort` EXISTE (`low, medium, high, xhigh, max`), validado no CLI real |
+| 3. timeouts por papel | **CONCLUÍDO** — `EXECUCAO_POR_PAPEL` |
+| 4. esforço por papel | **CONCLUÍDO** — `--effort` por papel, fail-closed no aviso do CLI |
 | 5. cascata de julgamento | não iniciado |
 | 6. pins de modelo | não iniciado |
+
+### Fatias 3+4 — esforço e timeout como propriedade do papel
+
+`EXECUCAO_POR_PAPEL` (em `tipos.ts`, ao lado de `CLASSE_POR_PAPEL`) declara os
+10 papéis. Os dois `timeoutMs: 900000` soltos em `fundacao.ts` sumiram — a
+exceção virou tabela.
+
+CLI instalado: **2.1.220 (Claude Code)**. Flag: `--effort <low|medium|high|xhigh|max>`.
+
+**Fail-closed no esforço.** O CLI responde `Unknown --effort value 'x' — ignoring
+it` e SEGUE rodando. `conferirEsforcoAplicado` transforma isso em erro do run
+(`PROVEDOR_CONFIGURACAO`), e trata separadamente o CLI antigo que não conhece a
+flag, nomeando a versão instalada. Sem isso, a engine rodaria no padrão
+acreditando estar em `high` — mesma família do Storage que devolvia string vazia
+para falha e para conteúdo vazio.
+
+**Registro no run** (aditivo, sem DDL): `evidencias` passa a levar
+`esforco_solicitado` e `cli_versao` ao lado de `modelo_executado`.
+
+#### Medianas relidas do banco (a regra dos 4× tem uma armadilha)
+
+```sql
+select papel, count(*),
+       percentile_cont(0.5) within group (order by extract(epoch from (finished_at-started_at))) as mediana,
+       percentile_cont(0.95) within group (order by extract(epoch from (finished_at-started_at))) as p95
+from public.engine_runs where engine_version='2.0.0' and finished_at is not null group by papel;
+```
+
+| papel | mediana | p95 | máx | timeout |
+|---|---|---|---|---|
+| revisor_literario | 271 | 417 | 600 | 600 |
+| escritor | 85 | 205 | 2341 | 300 |
+| auditor_factual | 62 | 147 | 2304 | 300 |
+| **arquiteto_enredo** | **54** | **1106** | **1621** | **1200** |
+| contextualizador | 30 | 57 | 71 | 120 |
+| editor_estrutural | 12 | 26 | 29 | 300 |
+| arquiteto_cena | 4 | 44 | 330 | 180 |
+
+A regra "4× a mediana, piso 120 s" descreve o caso típico, e quem estoura
+timeout é a CAUDA. Em `arquiteto_enredo` a regra daria 216 s e **recriaria o
+bug** — a mediana é 54 s e o p95 é 1106 s. Onde a cauda for larga, dimensione
+pelo p95. Fica registrado ao lado da tabela, no código.
+
+**Aberto:** o máximo observado do `arquiteto_enredo` foi 1621 s, acima dos
+1200 s decididos. Cobre o p95, não o pior caso visto.
+
+**Dívida explícita:** regressão completa segue reservada para a fatia 6. Aqui
+rodou a suíte inteira do worker: 103 arquivos, 1367 testes, zero pulados.
 
 ### Fatia 2 — evidência por índice (emenda do autor aplicada)
 

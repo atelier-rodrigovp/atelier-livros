@@ -36,6 +36,42 @@ export const CLASSE_POR_PAPEL: Record<Papel, ClasseCapacidade> = {
   julgamento_idioma: "julgamento",
 };
 
+/** Níveis que o CLI aceita em `--effort`. Valor fora daqui é erro, não aviso. */
+export type EsforcoModelo = "low" | "medium" | "high" | "xhigh" | "max";
+
+export interface ExecucaoPapel {
+  esforco: EsforcoModelo;
+  timeoutMs: number;
+}
+
+/**
+ * Esforço e timeout POR PAPEL — configuração como dado, não número mágico.
+ *
+ * Antes: todo papel rodava no esforço padrão do CLI e com o mesmo teto de 600 s
+ * (mais dois `timeoutMs: 900000` soltos em `fundacao.ts`). `arquiteto_enredo`
+ * falhava metade das vezes por `timeout após 300000ms` — não era capacidade do
+ * modelo, era o relógio.
+ *
+ * REGRA PARA PAPEL NOVO: timeout ≈ 4× a duração MEDIANA medida, com piso de
+ * 120 s. Atenção ao aplicá-la: a mediana descreve o caso típico, e o que estoura
+ * timeout é a CAUDA. `arquiteto_enredo` tem mediana de 54 s e p95 de 1106 s —
+ * a regra daria 216 s e recriaria o bug. Onde a cauda for larga, dimensione pelo
+ * p95, que é de onde vêm os 1200 s desta tabela.
+ */
+export const EXECUCAO_POR_PAPEL: Record<Papel, ExecucaoPapel> = {
+  // Cauda larga: mediana 54 s, p95 1106 s, máximo observado 1621 s.
+  arquiteto_enredo: { esforco: "high", timeoutMs: 1_200_000 },
+  escritor: { esforco: "high", timeoutMs: 300_000 },
+  revisor_literario: { esforco: "high", timeoutMs: 600_000 },
+  auditor_factual: { esforco: "medium", timeoutMs: 300_000 },
+  arquiteto_cena: { esforco: "medium", timeoutMs: 180_000 },
+  conformidade_ficha: { esforco: "medium", timeoutMs: 180_000 },
+  julgamento_idioma: { esforco: "medium", timeoutMs: 180_000 },
+  editor_estrutural: { esforco: "medium", timeoutMs: 300_000 },
+  contextualizador: { esforco: "low", timeoutMs: 120_000 },
+  extrator_memoria: { esforco: "low", timeoutMs: 120_000 },
+};
+
 export interface MapaModelos {
   raciocinio: string;
   fatos: string;

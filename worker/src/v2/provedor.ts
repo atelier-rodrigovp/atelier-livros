@@ -3,9 +3,9 @@
 // Provedor primário: claude CLI (plano MAX). A interface permite religar provedores hosted
 // no futuro sem tocar o núcleo (decisão D3).
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { LimiteMaxError, limiteMaxRetryAt } from "../limite-max.js";
-import type { ClasseCapacidade, Papel } from "./tipos.js";
+import type { ClasseCapacidade, EsforcoModelo, Papel } from "./tipos.js";
 
 export interface ChamadaModelo {
   papel: Papel;
@@ -13,6 +13,8 @@ export interface ChamadaModelo {
   modelo: string;                 // nome concreto vindo da config (nunca hardcoded no núcleo)
   prompt: string;                 // pacote compilado (F4) — o provedor não adiciona nada
   timeoutMs?: number;
+  /** Nivel de esforco do CLI para este papel (EXECUCAO_POR_PAPEL). */
+  esforco?: EsforcoModelo;
 }
 
 export interface RespostaModelo {
@@ -28,6 +30,8 @@ export interface RespostaModelo {
 export interface ProvedorModelo {
   nome: string;
   chamar(c: ChamadaModelo): Promise<RespostaModelo>;
+  /** Versão do binário, gravada no run. Opcional: mocks não precisam. */
+  versao?(): string;
 }
 
 export class ErroProvedor extends Error {
@@ -36,7 +40,10 @@ export class ErroProvedor extends Error {
       | "PROVEDOR_FALHOU"
       | "PROVEDOR_TIMEOUT"
       | "PROVEDOR_SAIDA_VAZIA"
-      | "PROVEDOR_MODELO_DIVERGENTE",
+      | "PROVEDOR_MODELO_DIVERGENTE"
+      // Esforço pedido não foi aplicado, ou o CLI não conhece a flag. É
+      // configuração, não instabilidade: repetir a chamada não resolve.
+      | "PROVEDOR_CONFIGURACAO",
     mensagem: string,
     public readonly detalhe?: unknown
   ) {
@@ -79,8 +86,43 @@ export function classificarErroCli(mensagem: string, detalhe?: unknown): Error {
 }
 
 /** Chamada deliberadamente sem ferramentas: o modelo recebe texto e devolve texto. */
-export function argumentosClaudeCli(modelo: string): string[] {
-  return ["-p", "--model", modelo, "--output-format", "json", "--tools", ""];
+export function argumentosClaudeCli(modelo: string, esforco?: EsforcoModelo): string[] {
+  const base = ["-p", "--model", modelo, "--output-format", "json", "--tools", ""];
+  // `--effort` e opcional no argumento para nao quebrar chamadas antigas, mas
+  // todo papel passa o seu: ver EXECUCAO_POR_PAPEL.
+  return esforco ? [...base, "--effort", esforco] : base;
+}
+
+/** O CLI AVISA e segue quando o nivel e invalido; para a engine isso e erro. */
+const SEPARADOR_LINHA = new RegExp("\r?\n");
+const RE_ESFORCO_IGNORADO = /Unknown --effort value/i;
+/** CLI antigo nao conhece a flag: nao pode cair em silencio no comportamento velho. */
+const RE_FLAG_DESCONHECIDA = /(?:unknown|unrecognized|invalid) option[^\r\n]*--effort/i;
+
+/**
+ * Falha fechado no esforco.
+ *
+ * O CLI responde `Unknown --effort value 'x' — ignoring it` e CONTINUA rodando.
+ * Sem esta checagem, a engine roda no esforco padrao acreditando que roda em
+ * `high`, e ninguem descobre — mesma familia do Storage que devolvia string
+ * vazia para falha e para conteudo vazio.
+ */
+export function conferirEsforcoAplicado(saida: string, esforco: EsforcoModelo | undefined, versaoCli: string): void {
+  if (!esforco) return;
+  if (RE_FLAG_DESCONHECIDA.test(saida)) {
+    throw new ErroProvedor(
+      "PROVEDOR_CONFIGURACAO",
+      `o CLI instalado (${versaoCli}) nao conhece a flag --effort; a Engine V2 exige um CLI que a aceite (>= 2.1). ` +
+        `Atualize o Claude Code ou remova o esforco de EXECUCAO_POR_PAPEL — rodar no padrao em silencio nao e opcao.`
+    );
+  }
+  if (RE_ESFORCO_IGNORADO.test(saida)) {
+    throw new ErroProvedor(
+      "PROVEDOR_CONFIGURACAO",
+      `o CLI (${versaoCli}) ignorou --effort ${esforco} e usou o padrao. Valores aceitos: low, medium, high, xhigh, max. ` +
+        `O run e invalido: nao da para afirmar em que esforco a saida foi produzida.`
+    );
+  }
 }
 
 /**
@@ -113,6 +155,22 @@ export function exigirModeloExecutado(
 export class ProvedorClaudeCli implements ProvedorModelo {
   nome = "claude-cli";
   constructor(private readonly bin: string, private readonly cwd?: string) {}
+
+  private _versao?: string;
+  /**
+   * Versao do CLI, resolvida uma vez por processo e gravada no run: sem ela nao
+   * da para dizer, depois, com que binario um capitulo foi produzido.
+   */
+  versao(): string {
+    if (this._versao) return this._versao;
+    try {
+      const r = spawnSync(this.bin, ["--version"], { encoding: "utf8", timeout: 15_000 });
+      this._versao = (r.stdout ?? "").trim().split(SEPARADOR_LINHA)[0] || "desconhecida";
+    } catch {
+      this._versao = "desconhecida";
+    }
+    return this._versao;
+  }
 
   private executar(args: string[], stdin: string, timeoutMs: number): Promise<{ code: number; out: string; err: string }> {
     return new Promise((resolve) => {
@@ -148,9 +206,13 @@ export class ProvedorClaudeCli implements ProvedorModelo {
   }
 
   async chamar(c: ChamadaModelo): Promise<RespostaModelo> {
-    const args = argumentosClaudeCli(c.modelo);
+    const args = argumentosClaudeCli(c.modelo, c.esforco);
     const timeoutMs = c.timeoutMs ?? 600000;
     const r = await this.executar(args, c.prompt, timeoutMs);
+    // Antes de qualquer classificacao de erro: o esforco pedido foi aplicado?
+    // Um run em esforco errado e invalido mesmo tendo terminado com sucesso.
+    conferirEsforcoAplicado(`${r.err}
+${r.out}`, c.esforco, this.versao());
     if (r.code === -1 && /timeout/.test(r.err)) {
       throw new ErroProvedor("PROVEDOR_TIMEOUT", `claude CLI: ${r.err}`);
     }

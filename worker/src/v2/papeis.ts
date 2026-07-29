@@ -8,7 +8,7 @@ import type { Gravador } from "./gravador.js";
 import { renderizarPacote, type PacoteCompilado } from "./compilador.js";
 import { resolverModelo } from "./config.js";
 import { ErroProvedor, type ProvedorModelo, type RespostaModelo } from "./provedor.js";
-import { ErroEngine, type MapaModelos, type Papel } from "./tipos.js";
+import { ErroEngine, EXECUCAO_POR_PAPEL, type MapaModelos, type Papel } from "./tipos.js";
 
 export interface ExecucaoPapel<T> {
   papel: Papel;
@@ -61,6 +61,10 @@ function registrarFalhaInfra(escopo: string, papel: Papel): number {
 
 export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPapel<T>> {
   const { capacidade, modelo } = resolverModelo(e.papel, e.mapa);
+  const execucao = EXECUCAO_POR_PAPEL[e.papel];
+  // Versao do CLI vai para o run: sem ela nao da para dizer, depois, com que
+  // binario um capitulo foi produzido.
+  const versaoCli = typeof e.provedor.versao === "function" ? e.provedor.versao() : "nao-informada";
   const max = e.maxTentativas ?? 2;
   let parent: string | null | undefined = e.parentRunId;
   let ultimoErro = "";
@@ -90,7 +94,18 @@ export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPa
 
     let resposta: RespostaModelo;
     try {
-      resposta = await e.provedor.chamar({ papel: e.papel, capacidade, modelo, prompt, timeoutMs: e.timeoutMs });
+      // Esforco e timeout sao propriedade do PAPEL (EXECUCAO_POR_PAPEL), nao
+      // parametro de quem chama. `e.timeoutMs` sobrevive so como override
+      // explicito; sem ele, a tabela decide — era daqui que vinham os
+      // `timeout apos 300000ms` do arquiteto_enredo.
+      resposta = await e.provedor.chamar({
+        papel: e.papel,
+        capacidade,
+        modelo,
+        prompt,
+        timeoutMs: e.timeoutMs ?? execucao.timeoutMs,
+        esforco: execucao.esforco,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await e.gravador.falharRun(runId, { codigo: "PROVEDOR_FALHOU", classe: "infra", mensagem: msg });
@@ -149,11 +164,14 @@ export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPa
         output_hash: hashJsonCanonico(resposta.texto),
         tokens_in: resposta.tokensIn,
         tokens_out: resposta.tokensOut,
-        evidencias: [{
-          tipo: "metrica",
-          referencia: "modelo_executado",
-          detalhe: resposta.modeloExecutado,
-        }],
+        evidencias: [
+          { tipo: "metrica", referencia: "modelo_executado", detalhe: resposta.modeloExecutado },
+          // Sem o esforco gravado, a medicao de qualidade de amanha nao consegue
+          // dizer em que nivel cada capitulo foi produzido — e o experimento
+          // vira anedota.
+          { tipo: "metrica", referencia: "esforco_solicitado", detalhe: execucao.esforco },
+          { tipo: "metrica", referencia: "cli_versao", detalhe: versaoCli },
+        ],
       });
       return { valor, runId, resposta, tentativas: tentativa };
     } catch (err) {

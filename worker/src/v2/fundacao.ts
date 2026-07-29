@@ -221,7 +221,6 @@ export async function gerarFundacaoV2(
       pacote: comp.pacote!,
       tarefa: correcao ? `${tarefaMacro}\n\n## CORREÇÃO DO PORTÃO\n${correcao}` : tarefaMacro,
       parse: parseFundacaoMacro,
-      timeoutMs: 900000,
     });
     const av = avaliarMacroFundacao(
       r.valor,
@@ -273,7 +272,6 @@ export async function gerarFundacaoV2(
       pacote: comp.pacote!,
       tarefa: correcao ? `${tarefaMicro}\n\n## CORREÇÃO DO PORTÃO\n${correcao}` : tarefaMicro,
       parse: parseEstruturaMicro,
-      timeoutMs: 900000,
     });
     const completa: FundacaoV2 = { ...macro, estrutura: r.valor };
     const av = avaliarFundacaoV2(
