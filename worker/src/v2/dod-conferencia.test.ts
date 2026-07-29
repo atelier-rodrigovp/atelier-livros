@@ -214,10 +214,10 @@ describe("garantia de escopo externo", () => {
 });
 
 describe("o inventário real", () => {
-  it("tem 47 garantias, todas com ID único", () => {
-    expect(INVENTARIO_DOD).toHaveLength(47);
+  it("tem 52 garantias, todas com ID único", () => {
+    expect(INVENTARIO_DOD).toHaveLength(52);
     const ids = INVENTARIO_DOD.map((g) => g.id);
-    expect(new Set(ids).size).toBe(47);
+    expect(new Set(ids).size).toBe(52);
   });
 
   it("garantia externa não declara teste local (mock não prova integração real)", () => {

@@ -110,7 +110,7 @@ describe("a decisão julga nos DOIS sentidos", () => {
     expect(() => exigirDisposicaoCompleta(validarParecer(consolidado), [medido()])).not.toThrow();
   });
 
-  it("ACRESCENTA violação que a triagem não viu", () => {
+  it("[DOD:R-01] ACRESCENTA violação que a triagem não viu", () => {
     // Sem este caminho a cascata só saberia perdoar.
     const p = parecer([{ sinal: "gnomico", valor: 6, disposicao: "falso_positivo", evidencia: "supercontou", falsos_positivos: 6 }]);
     const d = validarDelta(

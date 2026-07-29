@@ -120,6 +120,12 @@ export const INVENTARIO_DOD: GarantiaDoD[] = [
   // --- Q: prontidão ---------------------------------------------------------
   { fatia: "Q", escopo: "local", id: "Q-01", garantia: "testes rodam da raiz e de `worker` sem depender do diretório corrente", testes: ["src/v2/rotulagem-csv.test.ts"] },
   { fatia: "Q", escopo: "local", id: "Q-02", garantia: "ciclo completo interface → worker → gates → Storage → Leitor passa com mock", testes: ["src/v2/integracao-mock.test.ts"] },
+  // --- R: fila de custo por capítulo (cascata, pins, versão do código) -------
+  { fatia: "R", escopo: "local", id: "R-01", garantia: "a decisão da cascata ACRESCENTA violação que a triagem descartou (não só derruba)", testes: ["src/v2/cascata.test.ts"] },
+  { fatia: "R", escopo: "local", id: "R-02", garantia: "`veredito_sugerido` da decisão não derruba gate universal", testes: ["src/v2/cascata-pipeline.test.ts"] },
+  { fatia: "R", escopo: "local", id: "R-03", garantia: "`MODELO_POR_PAPEL` é conjunto fechado: exceção nova quebra o teste", testes: ["src/v2/cascata-pipeline.test.ts"] },
+  { fatia: "R", escopo: "local", id: "R-04", garantia: "o worker carimba SHA e horário do código com que subiu", testes: ["src/versao-codigo.test.ts"] },
+  { fatia: "R", escopo: "local", id: "R-05", garantia: "worktree suja é declarada, nunca escondida atrás do SHA", testes: ["src/versao-codigo.test.ts"] },
 ];
 
 /** Fatias que precisam estar comprovadas para a implementação ser aprovada. */

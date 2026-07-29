@@ -167,6 +167,71 @@ Ou seja: o processo no ar não tem NENHUMA das seis fatias, nem os quatro commit
 de 28/07 18:20 em diante. **Commit não é produção.** Religar o worker com o
 código novo é ação de produção e fica com o autor — não foi feito aqui.
 
+### Fatia 6c — regressão inteira, e a projeção de custo COMO projeção
+
+**Regressão local, tudo verde** (`npm run prontidao`, 172,8 s):
+
+| | |
+|---|---|
+| suíte da raiz (inclui interface) | 1621 passaram, 0 falharam, 0 pulados |
+| suíte a partir de `worker/` | 1415 passaram, 0 falharam, 0 pulados |
+| typecheck raiz / worker | sem erros |
+| build de produção | concluído |
+| lint | 0 erros, 3 avisos (pré-existentes, react-refresh) |
+| SQL/RLS local | 80 passaram |
+| ciclo determinístico com ProvedorMock | 22 passaram |
+| **DoD por execução** | **51/51 garantias locais** (1 externa fora do alcance local) |
+
+O inventário passou de 47 para **52 garantias**: a fila de custo criou a fatia
+**R** (R-01 a R-05 — acrescentar na cascata, gate universal por cima do delta,
+conjunto fechado de exceções, SHA no arranque, worktree suja declarada).
+
+**Quatro evidências externas EXPIRARAM, e isso é o mecanismo funcionando.**
+`MIGRACOES_REMOTAS`, `INTEGRACAO_REAL`, `UI_AUTENTICADA` e `PROVEDOR_REAL`
+voltaram a `[FALHA] fingerprints.worker_hash mudou desde a verificação`. Seis
+fatias mexeram no código do worker; evidência colhida contra o código antigo não
+vale para o novo. **D7-02, que estava comprovado, está expirado** e precisa ser
+refeito depois que o código assentar.
+
+#### A projeção de custo é PROJEÇÃO — e não fecha em 50 %
+
+Linha de base lida do banco, só runs `status='ok'` (não de memória):
+
+| papel | runs | média tokens_out |
+|---|---:|---:|
+| `revisor_literario` | 150 | **24.522** |
+| `arquiteto_enredo` | 4 | 10.291 |
+| `escritor` | 162 | 6.984 |
+| `auditor_factual` | 127 | 5.891 |
+| `arquiteto_cena` | 59 | 4.954 |
+| `contextualizador` | 66 | 2.951 |
+| `editor_estrutural` | 3 | 829 |
+
+Capítulo limpo ≈ **45.300 tokens de saída**, e o revisor sozinho é **54 %** deles.
+É por isso que a fila inteira aponta para ele. (`conformidade_ficha`,
+`extrator_memoria` e `julgamento_idioma` não têm run nenhum — papéis novos,
+nunca executados em produção. A média deles é desconhecida, não zero.)
+
+**O que a fila faz com esse número, em projeção:**
+
+| fatia | direção | efeito projetado |
+|---|---|---|
+| 1 — normalizar antes de reprovar | ↓ | poupa um run INTEIRO do revisor (24,5 k) quando o formato falha. Frequência não medida. |
+| 2 — evidência por índice | ↓ | encurta a saída do revisor. **Teto registrado:** se os campos `evidencia` continuarem longos, a economia para antes dos 30 %. |
+| 3+4 — esforço por papel | ↓ | `low` nos papéis baratos corta tokens de raciocínio. Não medido. |
+| 6a — cascata | ↑ ~3 % | a 2ª passada escreve um delta (centenas de tokens), não um parecer (24,5 k). **Não é economia: é o jeito barato de comprar um segundo julgamento que antes não existia.** |
+| 6b — pins | ↑ | ~11 k dos 45 k por capítulo sobem de faixa (`arquiteto_cena` e `editor_estrutural` sonnet→opus; `auditor_factual` haiku→sonnet). Deliberado: é o teto de julgamento subindo. |
+
+**Conclusão honesta: não há projeção de metade.** Três fatias empurram para
+baixo, duas empurram para cima de propósito, e nenhuma das duas direções foi
+medida. Dizer "reduzimos 50 %" aqui seria inventar.
+
+**O que falta para virar MEDIÇÃO:** rodar capítulo com o provedor real e comparar
+`engine_runs.tokens_out` por papel contra a tabela acima, com o mesmo projeto e a
+mesma skill. É uma comparação de duas linhas de SQL — e depende de escrever
+capítulo, que está proibido. Enquanto isso, o número acima é projeção, não
+resultado.
+
 ### Fatia 5 — A1 fechado, A2 com parecer
 
 **A1 — medição confiável. FECHADO.**

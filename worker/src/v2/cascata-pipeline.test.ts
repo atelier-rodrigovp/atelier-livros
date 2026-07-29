@@ -158,7 +158,7 @@ describe("escalada só quando há o que decidir", () => {
 });
 
 describe("veredito_sugerido é SUGESTÃO — gate universal reprova por cima", () => {
-  it("delta sugerindo aprovado NÃO salva capítulo com contradição bloqueante", async () => {
+  it("[DOD:R-02] delta sugerindo aprovado NÃO salva capítulo com contradição bloqueante", async () => {
     // A emenda: a decisão ajusta sinais e sugere veredito; contradição factual,
     // POV, conhecimento indevido e idioma decidem depois e por cima.
     enfileirarCiclo(parecerBase({ verdict: "aprovado", correcoes: [] }), AUDITOR_CONTRADIZ);
@@ -188,7 +188,7 @@ describe("veredito_sugerido é SUGESTÃO — gate universal reprova por cima", (
 });
 
 describe("MODELO_POR_PAPEL é conjunto FECHADO", () => {
-  it("as exceções são exatamente estas três", () => {
+  it("[DOD:R-03] as exceções são exatamente estas três", () => {
     // Acrescentar uma quarta sem justificar quebra aqui, de propósito.
     expect(Object.keys(MODELO_POR_PAPEL).sort()).toEqual(["auditor_factual", "extrator_memoria", "revisor_decisao"]);
   });

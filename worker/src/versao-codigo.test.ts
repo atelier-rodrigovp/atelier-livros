@@ -12,13 +12,13 @@ import { descreverVersao, lerVersaoCodigo } from "./versao-codigo.js";
 const RAIZ = process.cwd();
 
 describe("versão do código no arranque", () => {
-  it("[DOD:V-01] carimba SHA e horário do processo, lidos do repositório real", () => {
+  it("[DOD:R-04] carimba SHA e horário do processo, lidos do repositório real", () => {
     const v = lerVersaoCodigo(RAIZ, new Date("2026-07-29T12:00:00.000Z"));
     expect(v.sha).toMatch(/^[0-9a-f]{40}$/);
     expect(v.iniciadoEm).toBe("2026-07-29T12:00:00.000Z");
   });
 
-  it("[DOD:V-02] worktree suja é declarada, não escondida atrás do SHA", () => {
+  it("[DOD:R-05] worktree suja é declarada, não escondida atrás do SHA", () => {
     // Não força sujeira: afirma o CONTRATO entre os dois campos, que vale nos
     // dois estados — se há sujos, `sujo` é true; se não há, é false. Um SHA
     // acompanhado de arquivo modificado nunca sai daqui parecendo limpo.
