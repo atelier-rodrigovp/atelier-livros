@@ -76,6 +76,10 @@ export interface EstadoRemoto {
   /** Migrations efetivamente observadas como aplicadas. */
   migrations_applied: string[];
   tabelas: string[];
+  /** Colunas relevantes no formato schema.tabela.coluna:tipo. */
+  columns: string[];
+  /** Constraints relevantes no formato schema.tabela.constraint:tipo. */
+  constraints: string[];
   policies: string[];
   triggers: string[];
   indexes: string[];
@@ -221,8 +225,11 @@ export function validarEvidencia(ev: unknown, esperado: EsperadoEvidencia): Vali
         motivos.push("nenhuma migration observada como aplicada");
       }
       if (!Array.isArray(r.tabelas) || r.tabelas.length === 0) motivos.push("nenhuma tabela observada");
+      if (!Array.isArray(r.columns) || r.columns.length === 0) motivos.push("nenhuma coluna observada");
+      if (!Array.isArray(r.constraints) || r.constraints.length === 0) motivos.push("nenhuma constraint observada");
       if (!Array.isArray(r.policies) || r.policies.length === 0) motivos.push("nenhuma policy observada");
       if (!Array.isArray(r.triggers) || r.triggers.length === 0) motivos.push("nenhum trigger observado");
+      if (!Array.isArray(r.indexes) || r.indexes.length === 0) motivos.push("nenhum índice observado");
     }
   }
 
@@ -248,6 +255,8 @@ export function hashIntrospeccao(dump: Omit<EstadoRemoto, "remote_schema_hash">)
   const canonico = JSON.stringify({
     migrations_applied: [...dump.migrations_applied].sort(),
     tabelas: [...dump.tabelas].sort(),
+    columns: [...dump.columns].sort(),
+    constraints: [...dump.constraints].sort(),
     policies: [...dump.policies].sort(),
     triggers: [...dump.triggers].sort(),
     indexes: [...dump.indexes].sort(),

@@ -38,6 +38,8 @@ const ESPERADO: EsperadoEvidencia = {
 const introspeccao = {
   migrations_applied: ["engine_v2_historico.sql"],
   tabelas: ["engine_eventos_v2"],
+  columns: ["public.projects.briefing_aprovado:jsonb"],
+  constraints: ["public.projects.projects_briefing_aprovado_schema:check"],
   policies: ["engine_eventos_v2_select"],
   triggers: ["engine_eventos_v2_sem_update"],
   indexes: ["engine_eventos_v2_projeto"],

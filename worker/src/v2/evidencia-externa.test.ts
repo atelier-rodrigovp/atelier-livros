@@ -33,6 +33,8 @@ const ESPERADO: EsperadoEvidencia = {
 const introspeccao = {
   migrations_applied: ["engine_v2_historico.sql"],
   tabelas: ["engine_eventos_v2"],
+  columns: ["public.projects.briefing_aprovado:jsonb"],
+  constraints: ["public.projects.projects_briefing_aprovado_schema:check"],
   policies: ["engine_eventos_v2_select"],
   triggers: ["engine_eventos_v2_sem_update"],
   indexes: ["engine_eventos_v2_projeto"],
@@ -62,6 +64,22 @@ function evidencia(over: Partial<EvidenciaExterna> = {}): EvidenciaExterna {
 describe("evidência completa e atual", () => {
   it("vale quando tudo confere", () => {
     expect(validarEvidencia(evidencia(), ESPERADO)).toEqual({ valida: true, motivos: [] });
+  });
+
+  it("não certifica schema remoto sem colunas e constraints introspectadas", () => {
+    const semColunas = { ...introspeccao, columns: [], constraints: [] };
+    const resultado = validarEvidencia(
+      evidencia({
+        remoto: {
+          ...semColunas,
+          remote_schema_hash: hashIntrospeccao(semColunas),
+        },
+      }),
+      ESPERADO
+    );
+    expect(resultado.valida).toBe(false);
+    expect(resultado.motivos).toContain("nenhuma coluna observada");
+    expect(resultado.motivos).toContain("nenhuma constraint observada");
   });
 });
 

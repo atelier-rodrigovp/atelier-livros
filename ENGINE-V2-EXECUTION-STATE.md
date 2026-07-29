@@ -587,3 +587,61 @@ seguinte.
 Cada um vira um documento em `.evidencias/` (fora do Git) vinculado ao commit e aos
 hashes do que estava valendo. Ausente = NÃO COMPROVADO, que não é zero nem
 sucesso. Push continua dependendo de autorização.
+
+## Checkpoint do goal persistente — 2026-07-29
+
+Estado reconciliado diretamente contra Git, Supabase, processo do worker, GitHub
+Actions e `npm run prontidao -- --ciclo`:
+
+- branch publicada: `codex/pre-canary-ready`;
+- código testado: `d022df48fb5356b822ba83ec3b599d415c6cb132`;
+- worker reiniciado e carimbando esse SHA, com `sujo=false`;
+- worker globalmente pausado (`worker_control.enabled=false`);
+- `origin/master` permanece em `2cc31c3`; a interface publicada permanece em
+  `fcb2517`;
+- `supabase/engine_v2_fluxo.sql` foi aplicada no projeto
+  `dzgbatsecbkjmucmigjv`; `projects.briefing_aprovado` é `jsonb` e a constraint
+  `projects_briefing_aprovado_schema` está validada;
+- `engine_autorizacoes_v2`, `engine_eventos_v2`, `engine_preferencias_v2` e
+  `engine_excecoes_admin_v2` existem no banco real;
+- execuções reais observadas em 7 papéis; continuam sem run real:
+  `conformidade_ficha`, `extrator_memoria`, `julgamento_idioma` e
+  `revisor_decisao`;
+- smoke técnico do provedor real: 5/5 passos aprovados, sem prosa e sem projeto;
+- evidência fresca: `.evidencias/provedor_real.json`;
+- pacote humano realmente exportado:
+  `calibracao-humana/rotulos.local.csv` (14 amostras, 596 ocorrências e 182
+  atestações);
+- CI remoto aprovou testes, lint, typecheck e build; o gate final recusou
+  corretamente a ausência de certificado e as 14 amostras humanas pendentes.
+  Foi identificada e corrigida a dependência circular do CI: o modo
+  `--pre-canary` permite apenas o deploy técnico enquanto mantém a release
+  literária explicitamente bloqueada;
+- os três relatórios antigos de canário não satisfazem o critério de release:
+  todos contêm ao menos um capítulo `aprovado_com_excecao`.
+
+Prontidão fresca:
+
+```text
+implementacao_local IMPLEMENTACAO_LOCAL_APROVADA
+regressao_local     REGRESSAO_LOCAL_APROVADA
+integracao_mock     INTEGRACAO_MOCK_APROVADA
+provedor_real       PROVEDOR_REAL_APROVADO
+migracoes_remotas   SCHEMA_REMOTO_INTROSPECTADO; EVIDENCIA_AGUARDA_SHA_LIMPO
+integracao_real     INTEGRACAO_REAL_NAO_COMPROVADA
+ui_autenticada      UI_AUTENTICADA_NAO_COMPROVADA
+acuracia            ACURACIA_AGUARDANDO_ROTULAGEM
+```
+
+Regressão: 1642 testes na raiz, 1425 no worker, 423 no recorte de mutação,
+80 SQL/RLS, zero falhas e zero testes pulados.
+
+Introspecção autenticada observou quatro tabelas V2, 32 colunas relevantes,
+21 constraints, 7 policies, 4 triggers e 10 índices. O formato de evidência foi
+endurecido para incorporar colunas e constraints ao hash remoto; antes dessa
+correção, uma evidência podia permanecer verde mesmo sem a nova coluna.
+
+Próxima ação de máquina: commitar e publicar este endurecimento, reiniciar o
+worker no mesmo SHA e materializar as evidências remotas com worktree limpa.
+Depois, executar o fluxo autenticado sem prosa. Nenhum canário está autorizado
+antes de `PRE_CANARY_READY`.

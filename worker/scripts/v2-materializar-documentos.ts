@@ -188,8 +188,10 @@ if (saida) {
         passos,
         artefatos,
         remoto: {
-          migrations_applied: ["engine_v2_autorizacoes", "engine_v2_historico"],
+          migrations_applied: ["engine_v2_autorizacoes.sql", "engine_v2_historico.sql", "engine_v2_fluxo.sql"],
           tabelas: ["engine_autorizacoes_v2", "engine_eventos_v2", "engine_excecoes_admin_v2", "engine_preferencias_v2"],
+          columns: ["projects.briefing_aprovado:jsonb"],
+          constraints: ["projects.projects_briefing_aprovado_schema:CHECK"],
           policies: ["engine_autorizacoes_v2_select", "engine_autorizacoes_v2_insert", "engine_autorizacoes_v2_revogar"],
           triggers: ["engine_autorizacoes_v2_imutavel", "engine_autorizacoes_v2_sem_delete"],
           indexes: ["engine_autorizacoes_v2_projeto_ativo"],
