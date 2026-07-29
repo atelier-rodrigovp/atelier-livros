@@ -232,6 +232,85 @@ mesma skill. É uma comparação de duas linhas de SQL — e depende de escrever
 capítulo, que está proibido. Enquanto isso, o número acima é projeção, não
 resultado.
 
+### Religamento do worker, e o carimbo virando bloqueio
+
+**O worker foi religado e o codigo novo esta comprovadamente no ar.**
+
+| | |
+|---|---|
+| processo antigo | PID 18188, subiu 28/07 16:57:49, codigo `055f33b` |
+| processo novo | subiu 29/07 15:34:49 UTC, codigo **`1546906`** |
+| log de arranque | `codigo: 1546906 (worktree limpa)` |
+| heartbeat | `status.codigo.sha = 15469063e39f...`, `sujo=false` |
+
+Religado pelo proprio `worker-wrapper.cmd` (que ja roda
+`node --import tsx src\index.ts` a partir de `worker/`, identico ao
+`npm run start`), preservando supervisor, rotacao de log e disjuntor. Efeito
+colateral registrado: o wrapper conta `kill` como falha, entao o contador de
+falhas consecutivas ficou em **3/10** — ele zera sozinho na primeira saida
+limpa, e o disjuntor so abre em 10.
+
+#### O carimbo agora BLOQUEIA
+
+`compararVersaoWorker` (`src/lib/versaoWorker.ts`) e pura e atende aos dois
+consumidores. Quatro estados, nenhum verde por omissao:
+
+| veredicto | bloqueia | quando |
+|---|---|---|
+| `igual` | nao | mesmo SHA, worktree limpa |
+| `divergente` | **sim** | `worker roda codigo de <sha>, repositorio esta em <sha>` |
+| `suja` | **sim** | mesmo SHA, mas com arquivo modificado por cima |
+| `sem_carimbo` | **sim** | worker anterior a 6b, ou dado ausente |
+
+`npm run prontidao` ganhou a secao **CÓDIGO EM EXECUÇÃO**, lendo o heartbeat.
+Worker offline vira *nao comprovado*, nunca bloqueio: se nada esta no ar, nada
+produz com codigo velho. Divergencia entra em `bloqueios_producao` como
+`CODIGO_DO_WORKER`.
+
+A interface compara o carimbo com o commit de que ela **mesma** foi construida
+(injetado por `vite.config.ts`). Sem git no build, a tela diz que nao sabe.
+
+**Os dois casos foram provados ao vivo, nao so em teste:**
+
+1. commit `1546906` com o worker ainda em `aae0b83` →
+   `[FALHA] worker roda código de aae0b83, repositório está em 1546906`,
+   e `CODIGO_DO_WORKER` entrou nos bloqueios de producao;
+2. worker religado → `[OK] worker roda o código do repositório (1546906)`,
+   e o bloqueio saiu da lista.
+
+Consequencia que fica: **todo commit desincroniza o worker ate o reinicio**, e
+agora isso aparece como bloqueio em vez de silencio.
+
+#### O que acontece se `worker_control.enabled` voltar a `true`
+
+Nao mexi — segue `false` desde 29/07 10:58:45 UTC.
+
+**Resposta curta: nada roda.** Ha **zero** jobs em `queued` (16 `paused`, 10
+`error`, 91 `done`, 1 `canceled`), e o picker so reivindica `queued`.
+
+O unico caminho `paused` → `queued` e a reconciliacao legada, que roda **so no
+arranque** e em modo `audit`. Com `enabled=true` ela ja rodou em 28/07 e o
+veredito esta no log: **`elegiveis=0`** — 5 `project_manually_paused`, 4
+`outside_allowlist`.
+
+**O certificado ausente barra os projetos V2, sim — mas a autorizacao barra
+antes.** Ordem das recusas em `release.ts`: autorizacao → certificado.
+
+- Certificado: **ausente** (`worker/release/engine-v2.json` nao existe), mais 14
+  amostras aguardando rotulagem humana.
+- Autorizacao ativa: **uma so** — `Prova V2 — O Farol Cego` (5ac9d614), modo
+  `producao`, com **zero** jobs ativos.
+
+| projeto V2 com job parado | onde para | mensagem |
+|---|---|---|
+| O Índice dos Abduzidos, Canário V2 (×2) | autorizacao | `PROJETO_V2_NAO_AUTORIZADO`: "projeto <id> não tem autorização ativa para a Engine V2. Autorize-o na tela do projeto (ou insira uma linha em engine_autorizacoes_v2). Autorização não substitui certificado: um projeto de produção também exige release certificado." |
+| Prova V2 — O Farol Cego | certificado | `RELEASE_V2_NAO_CERTIFICADA`: "Engine V2 bloqueada para fundação/escrita: certificado não encontrado em ...\workerelease\engine-v2.json · calibração: dan-brown: 4 amostra(s) aguardam validação humana · ..." |
+
+**Achado aberto na tela:** `acaoParaBloqueio` (`src/lib/painelEditorial.ts`) mapeia
+`PROJETO_V2_NAO_AUTORIZADO` para o botao "Autorizar projeto", mas
+`RELEASE_V2_NAO_CERTIFICADA` **nao casa com nenhum padrao** — o bloqueio de
+certificado chega a tela sem acao dirigida. Nao corrigido aqui.
+
 ### Fatia 5 — A1 fechado, A2 com parecer
 
 **A1 — medição confiável. FECHADO.**
