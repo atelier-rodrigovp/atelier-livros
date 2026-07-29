@@ -18,11 +18,39 @@ sozinho). Fail-closed confirmado: `v2-materializar-documentos` volta a recusar.
 | item | estado |
 |---|---|
 | 1. normalização determinística | **CONCLUÍDO** — `normalizarParecerBruto` ligada ao `parse` do revisor |
-| 2. citação por índice | não iniciado |
+| 2. citação por índice | **CONCLUÍDO** — formato aditivo + hidratação na gravação |
 | 3. timeouts por papel | não iniciado |
 | 4. esforço por papel | investigado: `--effort` EXISTE (`low, medium, high, xhigh, max`), validado no CLI real |
 | 5. cascata de julgamento | não iniciado |
 | 6. pins de modelo | não iniciado |
+
+### Fatia 2 — evidência por índice (emenda do autor aplicada)
+
+O modelo escreve `{"indice":3}`; o SISTEMA grava `{"indice":3,"trecho":"…"}`.
+A emenda fecha um buraco que a spec original não via: `engine_reviews` guarda
+`parecer` e `text_hash`, e NÃO guarda a medição — índice sozinho no arquivo é
+ponteiro solto, reconstruível só remedindo com a versão de `sinais.ts` daquele
+dia. `hidratarOcorrenciasCitadas` roda no mesmo ciclo, com o mesmo array de
+medição da validação, como último passo do `parse` (pipeline.ts:673).
+
+Formato ADITIVO: nenhuma linha de `engine_reviews` foi reescrita. Os três
+pareceres reais lidos do banco (`5e7ce9bb`, `19094920`, `678abadb`) validam com
+o schema novo — 3/3.
+
+Rigor: a conferência por texto é aproximada (aspas, separador, prefixo de 60
+chars). Por índice é igualdade de inteiro contra o intervalo medido, sem
+tolerância. Item misto exige que índice e trecho apontem a MESMA ocorrência.
+
+**Teto da estimativa (registrado a pedido do autor):** a economia é na saída do
+revisor, trocando transcrição por inteiro. Se os campos `evidencia` continuarem
+longos, a economia **para antes dos 30%** — o texto do parecer passa a ser
+dominado por justificativa, não por citação. Se a queda medida vier bem abaixo
+de 30%, a próxima investigação começa em `evidencia`, não no índice.
+
+**Dívida explícita:** a regressão completa (`npm test` raiz e worker, `tsc`,
+`build`, `lint`, `npm run prontidao`) fica para a fatia 6, por decisão do autor.
+Nesta fatia rodou o escopo tocado: 101 testes (revisor, índice, normalização,
+pipeline, cotas, sinais) e 1554 na raiz.
 
 ### Linha de base relida do banco (não de memória)
 

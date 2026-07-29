@@ -131,8 +131,19 @@ export function validarParecer(obj: unknown): Parecer {
       }
       for (const [i, o] of (citadas as unknown[]).entries()) {
         const oc = o as Record<string, unknown>;
-        if (typeof oc?.trecho !== "string" || !oc.trecho.trim()) {
-          throw new Error(`sinal "${x.sinal}": ocorrencias_citadas[${i}].trecho obrigatório (citação literal)`);
+        // Forma nova: índice na lista numerada do detector. Forma antiga: trecho
+        // literal (histórico). Uma das duas — nunca nenhuma.
+        const temIndice = typeof oc?.indice === "number";
+        const temTrecho = typeof oc?.trecho === "string" && oc.trecho.trim().length > 0;
+        if (!temIndice && !temTrecho) {
+          throw new Error(
+            `sinal "${x.sinal}": ocorrencias_citadas[${i}] exige "indice" (número da ocorrência medida) ou "trecho" (citação literal)`
+          );
+        }
+        if (temIndice && (!Number.isInteger(oc.indice) || (oc.indice as number) < 1)) {
+          throw new Error(
+            `sinal "${x.sinal}": ocorrencias_citadas[${i}].indice deve ser inteiro ≥ 1 (recebido ${JSON.stringify(oc.indice)})`
+          );
         }
       }
       const falsos = x.falsos_positivos ?? 0;
@@ -267,7 +278,37 @@ function problemasDeCitacao(parecer: Parecer, sinaisMedidos: SinalMedido[]): str
       (exm.length >= 60 && cit.startsWith(exm)) ||
       (cit.length >= 60 && exm.startsWith(cit));
     for (const ocorrencia of disposto.ocorrencias_citadas ?? []) {
-      const cit = normalizarTrechoLiteral(ocorrencia.trecho);
+      // CITAÇÃO POR ÍNDICE — verificação exata. O casamento por texto abaixo é
+      // aproximado por necessidade (aspas, separador, prefixo de 60 chars);
+      // o índice é igualdade de inteiro contra o intervalo medido, sem tolerância.
+      if (typeof ocorrencia.indice === "number") {
+        const i = ocorrencia.indice - 1;
+        if (i < 0 || i >= disponiveis.length) {
+          problemas.push(
+            `sinal "${disposto.sinal}": índice ${ocorrencia.indice} fora do medido (há ${disponiveis.length} ocorrência(s))`
+          );
+          continue;
+        }
+        if (usadas[i]) {
+          problemas.push(`sinal "${disposto.sinal}": índice ${ocorrencia.indice} citado em duplicidade`);
+          continue;
+        }
+        // Item MISTO: se veio índice e trecho, os dois têm de apontar o mesmo
+        // lugar — citar #3 e transcrever a ocorrência 5 é contradição, não erro
+        // de digitação.
+        if (typeof ocorrencia.trecho === "string" && ocorrencia.trecho.trim()) {
+          if (!casa(normalizarTrechoLiteral(ocorrencia.trecho), disponiveis[i])) {
+            problemas.push(
+              `sinal "${disposto.sinal}": índice ${ocorrencia.indice} e trecho citado apontam ocorrências diferentes`
+            );
+            continue;
+          }
+        }
+        usadas[i] = true;
+        continue;
+      }
+
+      const cit = normalizarTrechoLiteral(ocorrencia.trecho ?? "");
       const idx = disponiveis.findIndex((exm, i) => !usadas[i] && casa(cit, exm));
       if (idx >= 0) {
         usadas[idx] = true;
@@ -291,6 +332,42 @@ function problemasDeCitacao(parecer: Parecer, sinaisMedidos: SinalMedido[]): str
  * `conferirParecer` mantém a mesma checagem como segunda rede (fail-closed)
  * caso o parecer incompleto escape por outro caminho.
  */
+/**
+ * HIDRATAÇÃO — resolve `{indice}` para `{indice, trecho}` antes de gravar.
+ *
+ * `engine_reviews` guarda o parecer e o hash do texto, e NÃO guarda a medição.
+ * Um parecer arquivado só com `{"indice":3}` aponta para um array que não existe
+ * em lugar nenhum: reconstruí-lo exigiria remedir o texto com a versão de
+ * `sinais.ts` daquele dia, e detector muda. O "#3" de hoje pode ser outro trecho
+ * amanhã — a conferência ficaria mais rígida em voo e ilegível no arquivo.
+ *
+ * Roda no MESMO ciclo e com o MESMO array de medição usado na validação. Nunca
+ * depois, nunca remedindo. Índice que não resolve é reprovado antes de chegar
+ * aqui (`problemasDeCitacao`); se escapar, esta função lança em vez de gravar
+ * trecho vazio — arquivo com citação vazia é pior que arquivo sem citação.
+ */
+export function hidratarOcorrenciasCitadas(parecer: Parecer, sinaisMedidos: SinalMedido[]): Parecer {
+  const sinais = parecer.sinais.map((disposto) => {
+    if (!disposto.ocorrencias_citadas?.length) return disposto;
+    const medido = acharSinalMedido(disposto.sinal, sinaisMedidos);
+    const exemplos = medido?.exemplos ?? [];
+    const ocorrencias_citadas = disposto.ocorrencias_citadas.map((o) => {
+      if (typeof o.indice !== "number") return o;
+      const trecho = exemplos[o.indice - 1];
+      if (typeof trecho !== "string") {
+        throw new Error(
+          `sinal "${disposto.sinal}": índice ${o.indice} não resolve em nenhuma ocorrência medida — parecer não pode ser gravado`
+        );
+      }
+      // Mantém o índice: quem audita vê a que ocorrência da medição o revisor
+      // se referiu, e o trecho continua legível sem depender do detector.
+      return { ...o, trecho };
+    });
+    return { ...disposto, ocorrencias_citadas };
+  });
+  return { ...parecer, sinais };
+}
+
 export function exigirDisposicaoCompleta(parecer: Parecer, sinaisMedidos: SinalMedido[]): Parecer {
   const omitidos = sinaisMedidos.filter((m) => m.fora_da_cota && !acharDisposto(m.sinal, parecer.sinais));
   if (omitidos.length > 0) {

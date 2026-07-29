@@ -26,7 +26,7 @@ import { derivarMemoriaDaProsa, validarExtracaoProsa, type ExtracaoProsa } from 
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
-import { acharSinalMedido, conferirParecer, exigirDisposicaoCompleta, normalizarParecerBruto, validarParecer } from "./revisor.js";
+import { acharSinalMedido, conferirParecer, exigirDisposicaoCompleta, hidratarOcorrenciasCitadas, normalizarParecerBruto, validarParecer } from "./revisor.js";
 import { medirSinais, resumoSinais } from "./sinais.js";
 import { validarSpec } from "./spec.js";
 import {
@@ -665,7 +665,15 @@ export async function escreverCapitulo(
       // superfluo de "dentro da cota" custavam um retry inteiro do revisor —
       // ~22 mil tokens para reescrever um parecer cujo conteudo ja estava certo.
       // Nenhuma regua muda aqui: a validacao recebe o mesmo julgamento.
-      parse: (t) => exigirDisposicaoCompleta(validarParecer(normalizarParecerBruto(extrairJson(t), sinais)), sinais),
+      // normalizar (escrita) -> validar (schema) -> conferir (medicao) -> HIDRATAR.
+      // A hidratacao e a ultima porque so grava o que ja passou: resolve o
+      // {indice} do modelo para {indice, trecho} usando ESTE array de medicao,
+      // antes de o parecer seguir para engine_reviews e para a correcao dirigida.
+      parse: (t) =>
+        hidratarOcorrenciasCitadas(
+          exigirDisposicaoCompleta(validarParecer(normalizarParecerBruto(extrairJson(t), sinais)), sinais),
+          sinais
+        ),
     });
     runs.push(rRev.runId);
     const parecer = rRev.valor;

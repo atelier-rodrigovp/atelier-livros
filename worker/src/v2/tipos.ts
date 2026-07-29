@@ -174,13 +174,39 @@ export interface SceneSpec {
 
 export type Disposicao = "violacao_confirmada" | "excecao_valida" | "falso_positivo" | "necessita_decisao_humana";
 
+/**
+ * Uma ocorrência julgada pelo revisor.
+ *
+ * O MODELO escreve `{ indice }` — 1-based na lista numerada que o detector já
+ * imprime no prompt. Transcrever o trecho custava a maior parte da saída do
+ * parecer e produzia a maior classe de falha (`citação não corresponde a nenhuma
+ * ocorrência medida`), porque o modelo não reproduz texto caractere a caractere.
+ *
+ * O SISTEMA grava `{ indice, trecho }`: `engine_reviews` guarda o parecer e o
+ * hash do texto, e NÃO guarda a medição — um índice sozinho apontaria para um
+ * array que não existe em lugar nenhum, reconstruível só remedindo o texto com a
+ * versão de `sinais.ts` daquele dia. Detector muda; o "#3" de hoje pode ser outro
+ * trecho amanhã. A hidratação acontece no mesmo ciclo, com o mesmo array de
+ * medição usado na validação — nunca depois, nunca remedindo.
+ *
+ * `{ trecho }` sem índice é a forma antiga: continua válida para LEITURA do
+ * histórico. O produtor não a emite mais.
+ */
+export interface OcorrenciaCitada {
+  /** 1-based na lista de exemplos do detector. Forma que o modelo emite. */
+  indice?: number;
+  /** Trecho literal. Emitido pelo histórico; preenchido pelo sistema na gravação. */
+  trecho?: string;
+  posicao?: string;
+}
+
 export interface SinalDisposto {
   sinal: string;                  // ex.: "gnomico", "personificacao", "dialogo_baixo"
   valor: number | string;         // medição do detector
   disposicao: Disposicao;
   evidencia: string;              // trecho/linha localizados
   /** violacao_confirmada em sinal de contagem exige as ocorrências julgadas reais, citadas uma a uma */
-  ocorrencias_citadas?: { trecho: string; posicao?: string }[];
+  ocorrencias_citadas?: OcorrenciaCitada[];
   /** disposição parcial: nº de ocorrências medidas julgadas falso positivo (citadas + falsos = valor) */
   falsos_positivos?: number;
 }
