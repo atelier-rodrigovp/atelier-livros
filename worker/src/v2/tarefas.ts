@@ -370,3 +370,40 @@ export function tarefaIdioma(capitulo: number, alvo: string, sinais: string): st
     `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
   ].join("\n");
 }
+
+/**
+ * Segunda passada da cascata. O modelo caro NÃO reescreve o parecer — julga um
+ * delta sobre o que a triagem decidiu, e é daí que vem a economia.
+ *
+ * Ele recebe a instrução de julgar nos DOIS sentidos de propósito: um julgador
+ * que só derruba transforma a cascata numa máquina de leniência, e a régua cai
+ * sem ninguém ter decidido derrubá-la.
+ */
+export function tarefaDecisaoCascata(
+  capitulo: number,
+  resumoDosSinais: string,
+  triagem: unknown,
+  gatilho: string
+): string {
+  return [
+    `SEGUNDA PASSADA do julgamento do capítulo ${capitulo}. Motivo da escalada: ${gatilho}`,
+    ``,
+    `A primeira passada (triagem) já julgou. Seu trabalho NÃO é refazer o parecer: é dizer onde ela errou, nos dois sentidos.`,
+    ``,
+    `SINAIS MEDIDOS pelo detector, com as ocorrências numeradas:`,
+    resumoDosSinais,
+    ``,
+    `PARECER DA TRIAGEM:`,
+    JSON.stringify(triagem),
+    ``,
+    `Responda APENAS JSON: { "schema":"delta-decisao/v1", "derrubar":[{"sinal","indice","motivo"}], "acrescentar":[{"sinal","indice","motivo"}], "veredito_sugerido":"aprovado"|"aprovado_com_excecao"|"reprovado"|"necessita_decisao_humana", "observacao": string }`,
+    ``,
+    `- "derrubar": ocorrência que a triagem confirmou como violação e NÃO é defeito real. Detectores por regex supercontam.`,
+    `- "acrescentar": ocorrência que a triagem descartou (ou nem citou) e É defeito real. Este lado é tão importante quanto o outro: se você só derruba, a régua desce sem decisão.`,
+    `- "indice": o NÚMERO da ocorrência na lista acima. Nunca transcreva o trecho.`,
+    `- "motivo": por que, em uma frase concreta. Sem motivo, o item é rejeitado.`,
+    `- "observacao": o que a triagem não viu nos SEIS EIXOS — capítulo competente mas morto, revelação reapresentada em paráfrase, gancho que não puxa. Nenhum detector pega isso; é o principal motivo de você existir.`,
+    `- "veredito_sugerido" é SUGESTÃO: contradição factual, POV violado, conhecimento indevido e idioma reprovam por cima, independentemente do que você sugerir.`,
+    `- Delta vazio é resposta legítima: se a triagem acertou, devolva listas vazias e diga isso na observação.`,
+  ].join("\n");
+}

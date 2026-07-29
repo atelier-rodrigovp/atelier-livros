@@ -36,7 +36,30 @@ export function mapaModelosDoAmbiente(env: NodeJS.ProcessEnv = process.env): Map
   return { ...MODELOS_V2_FIXOS };
 }
 
+/**
+ * EXCECOES ao mapa classe -> modelo. CONJUNTO FECHADO: cada entrada carrega a
+ * razao de existir, e um teste afirma o conjunto exato — acrescentar uma quarta
+ * excecao sem justificar quebra o teste, de proposito.
+ *
+ * Por que precisa existir: o mapa e por CLASSE, e tres papeis da mesma classe
+ * precisam de modelos diferentes. Sem esta tabela, a cascata teria de ser
+ * forcada dentro do enum de classes, que e o que o autor proibiu.
+ */
+export const MODELO_POR_PAPEL: Readonly<Partial<Record<Papel, string>>> = Object.freeze({
+  // Cascata: a 2a passada julga o que a triagem (sonnet) nao viu ou viu demais.
+  // Mesma classe "julgamento", modelo deliberadamente diferente da triagem.
+  revisor_decisao: "claude-opus-5",
+  // Auditoria factual erra caro: contradicao que passa vira furo no livro. Sobe
+  // de haiku para sonnet, enquanto contextualizador — que so seleciona contexto
+  // ja escrito — permanece em haiku.
+  auditor_factual: "claude-sonnet-5",
+  // Extrair o que a prosa APROVADA estabeleceu alimenta o ledger de promessas:
+  // erro aqui contamina todos os capitulos seguintes.
+  extrator_memoria: "claude-sonnet-5",
+});
+
 export function resolverModelo(papel: Papel, mapa: MapaModelos): { capacidade: ClasseCapacidade; modelo: string } {
   const capacidade = CLASSE_POR_PAPEL[papel];
-  return { capacidade, modelo: mapa[capacidade] };
+  // Excecao por papel vence a classe; ausencia cai no mapa, como sempre.
+  return { capacidade, modelo: MODELO_POR_PAPEL[papel] ?? mapa[capacidade] };
 }

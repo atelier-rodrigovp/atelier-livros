@@ -63,6 +63,67 @@ falharam por timeout. Para `arquiteto_enredo`: maior sucesso real 333 s → ~100
 → os **1200 s** da tabela se sustentam. Timeout **mantido em 1200 s**; não foi
 aumentado para cobrir os 1621 s, que não são trabalho.
 
+### Fatia 6a — cascata de julgamento (triagem barata, decisão cara)
+
+Um papel novo, `revisor_decisao`, faz a SEGUNDA passada e emite um **delta** —
+não um parecer novo. É daí que vem a economia: ele não reescreve os seis eixos
+nem as evidências, escreve só o que muda. Núcleo em `worker/src/v2/cascata.ts`.
+
+**A armadilha, e como ficou fechada.** Se o modelo caro só visse as violações
+que a triagem confirmou, ele só poderia DERRUBAR — a cascata viraria máquina de
+leniência e a régua desceria sem ninguém ter decidido descê-la. Por isso o
+gatilho (b) sobe justamente o caso em que a triagem não confirmou nada, e o
+delta tem `acrescentar` com a MESMA exigência de índice do resto do sistema.
+
+**Quatro gatilhos, com a emenda (d) do autor:**
+
+| | quando escala | o que a decisão pode fazer |
+|---|---|---|
+| (a) | triagem confirmou violação | derrubar falso positivo |
+| (b) | triagem descartou sinal com valor ≥ 3 | acrescentar o que ela não viu |
+| (c) | triagem pediu decisão humana | decidir |
+| (d) | a triagem vai FECHAR o capítulo | julgar os seis eixos |
+
+`DESCARTE_QUE_PESA = 3` não é limiar de detector: não muda o que conta como
+defeito, só quando um segundo par de olhos é chamado. Os 47 pareceres gravados
+são bimodais — 15 descartam sinal com valor ≥3 (média de 7,6 ocorrências
+declaradas falso positivo) e ZERO descartam com valor 1–2. Não há faixa
+intermediária para o número cortar arbitrariamente.
+
+**Taxa de escalada recontada COM (d), como o autor pediu: 38/47 = 81 %.**
+14 por violação confirmada, 15 por descarte grande, o resto por fechamento.
+Os 9 que não escalam são reprovados intermediários sem sinal, que vão ser
+corrigidos de qualquer forma. A taxa é alta e isso é aceitável pelo próprio
+argumento da spec: **a economia vem do delta, não da raridade** — a segunda
+passada lê o parecer pronto e escreve poucas linhas, em vez de produzir os seis
+eixos do zero.
+
+**Emenda 2 — a decisão NÃO derruba gate universal.** `veredito_sugerido` é
+sugestão. A cascata roda depois da triagem e ANTES dos gates; contradição
+factual comprovada, POV violado, conhecimento indevido e gate de idioma reprovam
+por cima, independentemente do delta. Teste negativo em
+`cascata-pipeline.test.ts`: delta sugerindo `aprovado` com contradição
+bloqueante presente → o capítulo continua reprovado, e o motivo registrado é a
+contradição, não a opinião da decisão.
+
+**Emenda 3 — `MODELO_POR_PAPEL` é CONJUNTO FECHADO**, com justificativa escrita
+por exceção e um teste que afirma o conjunto exato: acrescentar uma quarta
+exceção sem justificar quebra o teste de propósito. O congelamento e o erro em
+`V2_MODEL_*` divergente seguem intactos.
+
+**O consolidado passa pela MESMA validação da triagem** (`validarParecer` →
+`exigirDisposicaoCompleta` → `conferirParecer`). Não existe segundo caminho de
+validação, e a régua (`sinais.ts`, os três `contrato.json`) não foi tocada —
+`git diff` vazio nesses arquivos, conferido antes do commit.
+
+**Custo colateral, dito por inteiro:** a cascata mudou a sequência de chamadas de
+todo teste de pipeline. Quatro asserções de contagem exata foram atualizadas
+porque a contagem mudou de verdade (10 → 11 papéis; 7 → 8 runs no caminho
+feliz), e o `ProvedorMock` ganhou resposta automática para `revisor_decisao`
+seguindo a disciplina que já existia ali: delta VAZIO, com o veredito lido do
+parecer da triagem que o próprio prompt carrega — não é opinião do mock, e a
+fila enfileirada sempre vence.
+
 ### Fatia 5 — A1 fechado, A2 com parecer
 
 **A1 — medição confiável. FECHADO.**

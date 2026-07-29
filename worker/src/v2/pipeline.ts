@@ -26,6 +26,7 @@ import { derivarMemoriaDaProsa, validarExtracaoProsa, type ExtracaoProsa } from 
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
+import { aplicarDelta, precisaEscalar, validarDelta, type DeltaDecisao } from "./cascata.js";
 import { acharSinalMedido, conferirParecer, exigirDisposicaoCompleta, hidratarOcorrenciasCitadas, normalizarParecerBruto, validarParecer } from "./revisor.js";
 import { medirSinais, resumoSinais } from "./sinais.js";
 import { validarSpec } from "./spec.js";
@@ -39,6 +40,7 @@ import {
   tarefaExtratorMemoria,
   tarefaEscritorCorrecao,
   tarefaRevisor,
+  tarefaDecisaoCascata,
   type ModoCorrecao,
 } from "./tarefas.js";
 import {
@@ -680,6 +682,44 @@ export async function escreverCapitulo(
     const conferencia = conferirParecer(parecer, sinais);
     problemas.push(...conferencia.problemas);
     let verdictEfetivo = conferencia.verdictEfetivo;
+
+    // 5b. CASCATA DE JULGAMENTO. A triagem (modelo barato) ja opinou; a decisao
+    // (modelo caro) e chamada so quando ha o que decidir, e julga nos DOIS
+    // sentidos: derruba confirmacao que e falso positivo E acrescenta violacao
+    // que a triagem nao viu. So derrubar faria disto uma maquina de leniencia.
+    //
+    // O veredito continua tendo UM dono: `verdictEfetivo`, aqui. O delta ajusta
+    // os sinais e SUGERE veredito; os gates universais logo abaixo (contradicao,
+    // POV, conhecimento indevido, idioma) reprovam depois e por cima — sugestao
+    // de "aprovado" nao sobrevive a uma contradicao comprovada.
+    const escalada = precisaEscalar(parecer, sinais, {
+      vaiFechar: verdictEfetivo === "aprovado" || verdictEfetivo === "aprovado_com_excecao",
+    });
+    let parecerFinal = parecer;
+    if (escalada.escalar) {
+      const compDec = compilar("revisor_decisao", alvoCap, { ficha, fatos: [...secoesJulgamento, secaoTexto] });
+      if (!compDec.ok) return bloquearPorCompilacao(compDec.bloqueios);
+      const rDec = await executarPapel<DeltaDecisao>({
+        ...base,
+        papel: "revisor_decisao",
+        alvo: alvoCap,
+        pacote: compDec.pacote!,
+        tarefa: tarefaDecisaoCascata(capitulo, resumoSinais(sinais), parecer, escalada.motivo),
+        parse: (t) => validarDelta(extrairJson(t), sinais),
+        payload: { passada: "decisao", gatilho: escalada.motivo },
+      });
+      runs.push(rDec.runId);
+      // O consolidado volta pela MESMA validacao da triagem: nao existe segundo
+      // caminho de validacao, e o delta nao escapa de nenhuma regra.
+      parecerFinal = hidratarOcorrenciasCitadas(
+        exigirDisposicaoCompleta(validarParecer(aplicarDelta(parecer, rDec.valor, sinais)), sinais),
+        sinais
+      );
+      const conf2 = conferirParecer(parecerFinal, sinais);
+      problemas.push(...conf2.problemas);
+      verdictEfetivo = conf2.verdictEfetivo;
+    }
+
 
     // 6. Auditoria factual — contradição comprovada é GATE universal
     const compAud = compilar("auditor_factual", alvoCap, { ficha, fatos: [...secoesJulgamento, ...docsFactuais, ...fatos, secaoTexto] });

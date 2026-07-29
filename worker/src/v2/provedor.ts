@@ -301,6 +301,22 @@ function respostaAutomatica(c: ChamadaModelo): string | null {
   // honesta quando a suíte não está exercitando a extração. Quem testa a
   // memória derivada da prosa enfileira a sua e esta nem roda.
   if (c.papel === "extrator_memoria") return JSON.stringify({ entradas: [], divergencias: [] });
+  // Decisao da cascata: o delta VAZIO ("a triagem acertou") e a resposta neutra,
+  // e o veredito sugerido sai do parecer da triagem que o PROPRIO prompt carrega
+  // -- nao e opiniao do mock. Assim a suite que nao esta exercitando a cascata
+  // segue com o mesmo julgamento de antes, e quem testa a decisao enfileira a
+  // sua resposta e esta nem roda.
+  if (c.papel === "revisor_decisao") {
+    const veredito = /"verdict"\s*:\s*"([a-z_]+)"/.exec(`${c.prompt ?? ""}`)?.[1];
+    if (!veredito) return null;
+    return JSON.stringify({
+      schema: "delta-decisao/v1",
+      derrubar: [],
+      acrescentar: [],
+      veredito_sugerido: veredito,
+      observacao: "delta vazio: a triagem acertou (resposta automatica do mock)",
+    });
+  }
   if (c.papel !== "conformidade_ficha") return null;
   const prompt = `${c.prompt ?? ""}`;
   // Só a lista "Itens a verificar" — as REGRAS DURAS da tarefa também começam

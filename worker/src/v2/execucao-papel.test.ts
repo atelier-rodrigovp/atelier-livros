@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import { argumentosClaudeCli, conferirEsforcoAplicado, ErroProvedor } from "./provedor.js";
 import { executarPapel } from "./papeis.js";
+import { resolverModelo } from "./config.js";
 import { CLASSE_POR_PAPEL, EXECUCAO_POR_PAPEL, type MapaModelos, type Papel } from "./tipos.js";
 
 const MAPA: MapaModelos = {
@@ -31,9 +32,9 @@ const PACOTE = {
 } as never;
 
 describe("configuração é dado, não número mágico", () => {
-  it("todos os 10 papéis têm esforço e timeout declarados", () => {
+  it("todos os 11 papéis têm esforço e timeout declarados", () => {
     const papeis = Object.keys(CLASSE_POR_PAPEL) as Papel[];
-    expect(papeis).toHaveLength(10);
+    expect(papeis).toHaveLength(11);
     for (const p of papeis) {
       expect(EXECUCAO_POR_PAPEL[p], p).toBeDefined();
       expect(EXECUCAO_POR_PAPEL[p].timeoutMs, p).toBeGreaterThanOrEqual(120_000);
@@ -125,7 +126,9 @@ describe("timeout e esforço chegam ao executor, e ao run", () => {
       versao: () => "2.1.220 (Claude Code)",
       chamar: async (c: Record<string, unknown>) => {
         chamadas.push(c);
-        return { texto: "ok", modeloExecutado: MAPA[CLASSE_POR_PAPEL[papel]] };
+        // Pela MESMA resolucao do sistema: a excecao de MODELO_POR_PAPEL vence a
+        // classe, e o stub nao pode fingir uma divergencia que nao existe.
+        return { texto: "ok", modeloExecutado: resolverModelo(papel, MAPA).modelo };
       },
     } as never;
     const gravador = {

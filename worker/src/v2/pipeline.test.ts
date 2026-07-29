@@ -192,7 +192,7 @@ describe("escreverCapitulo — caminho feliz", () => {
     expect(r.problemas).toEqual([]);
     // 7 papéis no capítulo aprovado: ficha, contexto, escritor, revisor, auditor,
     // conformidade e extrator de memória (este só roda depois da aprovação).
-    expect(r.runs).toHaveLength(7);
+    expect(r.runs).toHaveLength(8); // + revisor_decisao: o capitulo fechou, gatilho (d)
 
     // Arquivo no disco escrito pelo pipeline (não pelo modelo)
     const caminho = path.join(dir, "manuscrito", "capitulo-03.md");
@@ -271,7 +271,7 @@ describe("escreverCapitulo — correção de gate", () => {
 
     const r = await escreverCapitulo(deps, 3);
     expect(r.status).toBe("aprovado");
-    expect(r.runs).toHaveLength(8); // escritor rodou duas vezes (+ conformidade + memória)
+    expect(r.runs).toHaveLength(9); // escritor duas vezes (+ conformidade + memoria + decisao)
 
     // A correção dirigida citou o gate falho e o texto atual
     const chamadasEscritor = provedor.chamadas.filter((c) => c.papel === "escritor");

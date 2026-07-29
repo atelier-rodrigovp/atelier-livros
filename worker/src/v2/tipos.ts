@@ -17,7 +17,8 @@ export type Papel =
   | "editor_estrutural"     // cortes, fusões, ordem, macro-ritmo (propõe; worker aplica)
   | "conformidade_ficha"     // a prosa cumpriu a ficha? (fatia G) — evidência localizada
   | "extrator_memoria"       // o que a PROSA APROVADA estabeleceu (fatia H)
-  | "julgamento_idioma";     // variante-alvo × narração e diálogo (fatia J)
+  | "julgamento_idioma"     // variante-alvo × narração e diálogo (fatia J)
+  | "revisor_decisao";       // 2a passada da cascata: julga o delta, nao reescreve o parecer
 // O "gravador de estado" NÃO é um papel: é código determinístico (gravador.ts).
 
 export type ClasseCapacidade = "raciocinio" | "fatos" | "prosa" | "julgamento";
@@ -34,6 +35,7 @@ export const CLASSE_POR_PAPEL: Record<Papel, ClasseCapacidade> = {
   conformidade_ficha: "julgamento",
   extrator_memoria: "fatos",
   julgamento_idioma: "julgamento",
+  revisor_decisao: "julgamento",
 };
 
 /** Níveis que o CLI aceita em `--effort`. Valor fora daqui é erro, não aviso. */
@@ -75,6 +77,10 @@ export const EXECUCAO_POR_PAPEL: Record<Papel, ExecucaoPapel> = {
   arquiteto_cena: { esforco: "medium", timeoutMs: 180_000 },
   conformidade_ficha: { esforco: "medium", timeoutMs: 180_000 },
   julgamento_idioma: { esforco: "medium", timeoutMs: 180_000 },
+  // Decisao da cascata: julga um DELTA sobre texto ja medido, nao reescreve o
+  // parecer. Esforco alto porque e o julgamento que vale; teto menor que o da
+  // triagem porque a saida e uma fracao dela.
+  revisor_decisao: { esforco: "high", timeoutMs: 300_000 },
   editor_estrutural: { esforco: "medium", timeoutMs: 300_000 },
   contextualizador: { esforco: "low", timeoutMs: 120_000 },
   extrator_memoria: { esforco: "low", timeoutMs: 120_000 },
