@@ -42,32 +42,46 @@ para falha e para conteúdo vazio.
 **Registro no run** (aditivo, sem DDL): `evidencias` passa a levar
 `esforco_solicitado` e `cli_versao` ao lado de `modelo_executado`.
 
-#### Medianas relidas do banco (a regra dos 4× tem uma armadilha)
+#### Como o timeout foi dimensionado (leitura corrigida)
 
-```sql
-select papel, count(*),
-       percentile_cont(0.5) within group (order by extract(epoch from (finished_at-started_at))) as mediana,
-       percentile_cont(0.95) within group (order by extract(epoch from (finished_at-started_at))) as p95
-from public.engine_runs where engine_version='2.0.0' and finished_at is not null group by papel;
-```
+Minha primeira leitura usou o p95 e estava errada: o p95 do `arquiteto_enredo`
+(1106 s) está contaminado por um run que mede o TIMEOUT, não o trabalho.
 
-| papel | mediana | p95 | máx | timeout |
-|---|---|---|---|---|
-| revisor_literario | 271 | 417 | 600 | 600 |
-| escritor | 85 | 205 | 2341 | 300 |
-| auditor_factual | 62 | 147 | 2304 | 300 |
-| **arquiteto_enredo** | **54** | **1106** | **1621** | **1200** |
-| contextualizador | 30 | 57 | 71 | 120 |
-| editor_estrutural | 12 | 26 | 29 | 300 |
-| arquiteto_cena | 4 | 44 | 330 | 180 |
+| run | status | duração | tokens_out |
+|---|---|---|---|
+| `889f9fc9` | falha | 1621 s | **null** |
+| `56d7cad7` | **ok** | **333 s** | **30.706** |
+| `09b70cc7` | ok | 54 s | 4.514 |
 
-A regra "4× a mediana, piso 120 s" descreve o caso típico, e quem estoura
-timeout é a CAUDA. Em `arquiteto_enredo` a regra daria 216 s e **recriaria o
-bug** — a mediana é 54 s e o p95 é 1106 s. Onde a cauda for larga, dimensione
-pelo p95. Fica registrado ao lado da tabela, no código.
+`889f9fc9` estourou aos 300 s e teve `finished_at` carimbado 27 minutos depois
+(09:32:05 → 09:59:05). Não houve 1621 s de trabalho: houve carimbo tardio. Com
+9 runs, esse artefato sozinho levou o p95 a 1106 s.
 
-**Aberto:** o máximo observado do `arquiteto_enredo` foi 1621 s, acima dos
-1200 s decididos. Cobre o p95, não o pior caso visto.
+**Regra corrigida, e escrita no código:** dimensionar pela maior execução
+BEM-SUCEDIDA, com margem ~3×, piso de 120 s, DESCARTANDO durações de runs que
+falharam por timeout. Para `arquiteto_enredo`: maior sucesso real 333 s → ~1000 s
+→ os **1200 s** da tabela se sustentam. Timeout **mantido em 1200 s**; não foi
+aumentado para cobrir os 1621 s, que não são trabalho.
+
+### Achados abertos — resolver ANTES da medição de ganho
+
+**A1 — `finished_at` não é confiável.** Duas provas no mesmo papel:
+
+- `889f9fc9`: erro `timeout após 300000ms`, mas `finished_at` 27 min após o
+  `started_at`. A duração gravada é artefato do carimbo, não do trabalho.
+- `de568246`: preso em `running` desde 2026-07-27 15:37, `finished_at` nulo.
+
+Consequência: **qualquer métrica de duração — inclusive a medição do ganho desta
+fila — é suspeita enquanto isso não for corrigido.** Precede a fatia de medição.
+
+**A2 — o CLI executou modelo diferente do solicitado.** Run `894dba1a`,
+`arquiteto_enredo`: solicitado `claude-sonnet-5`, executados
+`claude-haiku-4-5-20251001, claude-sonnet-5` — dois modelos numa chamada que
+deveria ter um só. `exigirModeloExecutado` pegou e falhou fechado, como devia.
+
+Investigar **quando** o downgrade acontece (limite de cota? roteamento do CLI?)
+**antes de trocar os pins na fatia 6** — trocar pin sem saber disso é calibrar
+contra um modelo que pode não ser o que roda.
 
 **Dívida explícita:** regressão completa segue reservada para a fatia 6. Aqui
 rodou a suíte inteira do worker: 103 arquivos, 1367 testes, zero pulados.

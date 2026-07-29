@@ -52,11 +52,19 @@ export interface ExecucaoPapel {
  * falhava metade das vezes por `timeout após 300000ms` — não era capacidade do
  * modelo, era o relógio.
  *
- * REGRA PARA PAPEL NOVO: timeout ≈ 4× a duração MEDIANA medida, com piso de
- * 120 s. Atenção ao aplicá-la: a mediana descreve o caso típico, e o que estoura
- * timeout é a CAUDA. `arquiteto_enredo` tem mediana de 54 s e p95 de 1106 s —
- * a regra daria 216 s e recriaria o bug. Onde a cauda for larga, dimensione pelo
- * p95, que é de onde vêm os 1200 s desta tabela.
+ * REGRA PARA PAPEL NOVO: dimensione pela maior execução BEM-SUCEDIDA, com
+ * margem de ~3×, e piso de 120 s.
+ *
+ * Descarte a duração de run que falhou por timeout: ela mede o timeout, não o
+ * trabalho. O caso que ensina isso está no banco — o run `889f9fc9` do
+ * `arquiteto_enredo` aparece com 1621 s e `tokens_out` nulo: estourou aos 300 s
+ * e o `finished_at` foi carimbado 27 minutos depois. Não houve 1621 s de
+ * trabalho; houve um carimbo tardio. Com 9 runs, um artefato desses sozinho
+ * levou o p95 a 1106 s e quase justificou um teto inventado.
+ *
+ * O maior sucesso REAL do papel é o run `56d7cad7`: 333 s para 30.706 tokens.
+ * 3× isso dá ~1000 s — e é daí que vêm os 1200 s desta tabela, não da cauda
+ * contaminada.
  */
 export const EXECUCAO_POR_PAPEL: Record<Papel, ExecucaoPapel> = {
   // Cauda larga: mediana 54 s, p95 1106 s, máximo observado 1621 s.

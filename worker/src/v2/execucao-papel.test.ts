@@ -47,7 +47,7 @@ describe("configuração é dado, não número mágico", () => {
     }
   });
 
-  it("arquiteto_enredo tem folga para a cauda medida (p95 = 1106 s)", () => {
+  it("arquiteto_enredo: 1200 s = ~3x o maior SUCESSO real (333 s / 30.706 tokens)", () => {
     expect(EXECUCAO_POR_PAPEL.arquiteto_enredo.timeoutMs).toBe(1_200_000);
   });
 });
