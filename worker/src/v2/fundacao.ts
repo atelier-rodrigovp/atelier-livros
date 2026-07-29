@@ -39,7 +39,14 @@ export interface FundacaoV2 {
   perfil_voz: string;
   biblia: string;
   mapa_personagens: PersonagemMapa[];
-  estrutura: { capitulo: number; fio: string; resumo_estrutural: string }[];
+  estrutura: {
+    capitulo: number;
+    /** Fio principal/POV do capítulo, usado pela rotação. */
+    fio: string;
+    /** Todos os fios que o capítulo avança; inclui o principal. */
+    fios_avancados?: string[];
+    resumo_estrutural: string;
+  }[];
   fios: string[];
   promessa_editorial: string;
   /**
@@ -80,6 +87,14 @@ export function parseEstruturaMicro(texto: string): FundacaoV2["estrutura"] {
       if (!Number.isInteger(e?.capitulo) || typeof e?.fio !== "string" || typeof e?.resumo_estrutural !== "string") {
         throw new Error("item de estrutura inválido (esperado {capitulo:int, fio:string, resumo_estrutural:string})");
       }
+      if (
+        e.fios_avancados !== undefined &&
+        (!Array.isArray(e.fios_avancados) ||
+          e.fios_avancados.some((fio) => typeof fio !== "string") ||
+          !e.fios_avancados.includes(e.fio))
+      ) {
+        throw new Error("fios_avancados inválido (esperado string[] contendo o fio principal)");
+      }
     }
     return bruto as FundacaoV2["estrutura"];
   });
@@ -105,6 +120,14 @@ export function parseFundacao(texto: string, opts: { exigirEstrutura?: boolean }
     for (const e of f.estrutura) {
       if (!Number.isInteger(e.capitulo) || typeof e.fio !== "string" || typeof e.resumo_estrutural !== "string") {
         throw new Error("item de estrutura inválido");
+      }
+      if (
+        e.fios_avancados !== undefined &&
+        (!Array.isArray(e.fios_avancados) ||
+          e.fios_avancados.some((fio) => typeof fio !== "string") ||
+          !e.fios_avancados.includes(e.fio))
+      ) {
+        throw new Error("fios_avancados inválido");
       }
     }
     if (!Array.isArray(f.fios) || f.fios.length < 1) throw new Error("fios vazios");

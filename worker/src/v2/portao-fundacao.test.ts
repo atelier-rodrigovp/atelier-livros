@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { FundacaoV2 } from "./fundacao.js";
+import { parseEstruturaMicro, type FundacaoV2 } from "./fundacao.js";
 import {
   avaliarFundacaoV2,
   avaliarMacroFundacao,
@@ -132,6 +132,26 @@ function fundacao(over: Partial<FundacaoV2> = {}): FundacaoV2 {
 }
 
 describe("portão da fundação — estrutura x total de capítulos", () => {
+  it("parse da micro preserva múltiplos fios e exige que o principal esteja incluído", () => {
+    expect(parseEstruturaMicro(JSON.stringify({
+      estrutura: [{
+        capitulo: 1,
+        fio: "investigacao",
+        fios_avancados: ["investigacao", "conspiracao"],
+        resumo_estrutural: "a pista liga a investigação à conspiração",
+      }],
+    }))[0].fios_avancados).toEqual(["investigacao", "conspiracao"]);
+
+    expect(() => parseEstruturaMicro(JSON.stringify({
+      estrutura: [{
+        capitulo: 1,
+        fio: "investigacao",
+        fios_avancados: ["conspiracao"],
+        resumo_estrutural: "a pista liga a investigação à conspiração",
+      }],
+    }))).toThrow(/fios_avancados inválido/);
+  });
+
   it("fundação íntegra passa", () => {
     const av = avaliarFundacaoV2(fundacao(), contrato, 12, ["dossie-factual.md"]);
     expect(av.bloqueios).toEqual([]);
@@ -455,11 +475,23 @@ describe("macro × micro por campo estruturado", () => {
     expect(mensagens(f)).toContain("escalada[1] no capítulo 88");
   });
 
-  it("[DOD:D6-01] CLÍMAX de fio num capítulo que a micro deu a OUTRO fio reprova", () => {
+  it("[DOD:D6-01] CLÍMAX ausente dos fios avançados pela micro reprova", () => {
     const f = base();
     // cap 9 pertence a "conspiracao" na estrutura coerente
     f.arco!.fios[0].climax = 9;
-    expect(mensagens(f)).toContain('entregou esse capítulo ao fio "conspiracao"');
+    expect(mensagens(f)).toContain('não o inclui em fios_avancados');
+  });
+
+  it("[DOD:D6-01] convergência de dois fios no mesmo capítulo é representável e verificável", () => {
+    const f = base();
+    f.arco!.fios[0].climax = 9;
+    const cap9 = f.estrutura.find((e) => e.capitulo === 9)!;
+    cap9.fios_avancados = ["conspiracao", "investigacao"];
+    expect(mensagens(f)).not.toContain('fio "investigacao" clímax no capítulo 9');
+
+    // Prova de consumo: remover apenas o fio secundário muda o veredito.
+    cap9.fios_avancados = ["conspiracao"];
+    expect(mensagens(f)).toContain('fio "investigacao" clímax no capítulo 9');
   });
 
   it("[DOD:D6-01] MARCO de arco em capítulo inexistente reprova", () => {

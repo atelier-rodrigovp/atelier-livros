@@ -40,7 +40,7 @@ import { EngineV2Panel } from "@/components/EngineV2Panel";
 import { chaveStorageDocumento, documentosParaExibir } from "@/lib/documentosFundacao";
 import { aprovarBriefingWeb, aprovacaoAindaCorresponde } from "@/lib/briefingAprovacao";
 import { useSession } from "@/hooks/useSession";
-import { avaliarPrecondicoesFundacao } from "@/lib/precondicoesFundacaoV2";
+import { avaliarPrecondicoesEscrita, avaliarPrecondicoesFundacao } from "@/lib/precondicoesFundacaoV2";
 
 interface Edition { id: string; idioma: string; status: string; is_origem: boolean; nota_review: number | null; }
 interface Artifact { id: string; edition_id: string | null; tipo: string; storage_path: string; url_publica: string | null; created_at?: string; meta?: any; }
@@ -335,6 +335,10 @@ export default function Projeto() {
   // Uma so porta para "escrever": os quatro ids do resolvedor que significam
   // "toque a escrita" apontam para ca, em vez de repetir a chamada em cada um.
   function escreverAgora() {
+    if (!podeEscreverV2) {
+      toast.error(`Escrita bloqueada: ${pendenciasEscritaV2.join("; ")}.`);
+      return;
+    }
     void enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {});
   }
 
@@ -490,7 +494,22 @@ export default function Projeto() {
   });
   const podeGerarFundacaoV2 = precondicoesFundacaoV2.podeGerar;
   const pendenciasFundacaoV2 = precondicoesFundacaoV2.pendencias;
-  const hasActiveJob = jobs.some((j) => j.status === "queued" || j.status === "running");
+  const fundacaoConcluidaV2 = jobMaisRecente(jobs, "criar_fundacao")?.status === "done";
+  const precondicoesEscritaV2 = avaliarPrecondicoesEscrita({
+    engineMode: proj.engine_mode,
+    fundacaoConcluida: fundacaoConcluidaV2,
+    projetoAutorizado: autorizacaoAtiva,
+    releaseCertificado,
+  });
+  const podeEscreverV2 = precondicoesEscritaV2.podeEscrever;
+  const pendenciasEscritaV2 = precondicoesEscritaV2.pendencias;
+  const motivoBloqueioEscritaV2 = podeEscreverV2
+    ? null
+    : `Antes de escrever: ${pendenciasEscritaV2.join("; ")}.`;
+  const activeJob = jobs
+    .filter((j) => j.status === "queued" || j.status === "running")
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0] ?? null;
+  const hasActiveJob = activeJob !== null;
   // Header pelo MESMO resolvedor único (S7): a escrita governa quando ativa/bloqueada;
   // senão, o ciclo de vida do projeto. Mesma OperationalState do dashboard e da aba.
   const sincronizadosProj = origem ? chapters[origem.id] ?? 0 : 0;
@@ -498,7 +517,12 @@ export default function Projeto() {
   const stProjeto = resolveOperationalState(buildResolverInput({ jobs, chapters: chapterRowsProj, totalCapitulos: Number(proj.total_capitulos ?? 0), workerOnline, producaoPausada: (proj.briefing as any)?.producao_pausada === true, producaoGlobalAtiva: producaoAtiva }));
   const sb = escritaGovernaCartao(stProjeto.situacao)
     ? { label: stProjeto.badge, variant: toneToVariant(stProjeto.tone), pulse: stProjeto.situacao === "executando" }
-    : displayProjectStatus({ projectStatus: proj.status, hasActiveJob, workerOnline });
+    : displayProjectStatus({
+        projectStatus: proj.status,
+        hasActiveJob,
+        workerOnline,
+        activeJobType: activeJob?.tipo ?? null,
+      });
   // Dados da saga: estado da SÉRIE inteira (idêntico em qualquer volume aberto).
   // Conta volumes distintos já criados (este + irmãos), não o nº do volume atual.
   const serieTotal = Number((proj.briefing as any)?.serie_total ?? 0);
@@ -989,6 +1013,17 @@ export default function Projeto() {
                 // chapters sincronizados são aprovados+hash (o worker só sincroniza aprovados).
                 const chapterRows = Array.from({ length: sincronizados }, (_, i) => ({ numero: i + 1, text_sha256: "synced", quality_status: "approved" }));
                 const st = resolveOperationalState(buildResolverInput({ jobs, chapters: chapterRows, totalCapitulos: Number(proj.total_capitulos ?? total), workerOnline, producaoPausada: (proj.briefing as any)?.producao_pausada === true, producaoGlobalAtiva: producaoAtiva }));
+                const idsEscrita = new Set(["iniciar_escrita", "tentar_agora", "corrigir", "continuar"]);
+                const stInterface = motivoBloqueioEscritaV2
+                  ? {
+                      ...st,
+                      botoes: st.botoes.map((botao) =>
+                        idsEscrita.has(botao.id)
+                          ? { ...botao, habilitado: false, motivo_indisponivel: motivoBloqueioEscritaV2 }
+                          : botao
+                      ),
+                    }
+                  : st;
                 // Nota oficial = avaliação independente (nota_review). Auto-nota da
                 // escrita fica separada e rotulada como provisória.
                 const notaOficial = origem?.nota_review != null ? Number(origem.nota_review) : null;
@@ -1054,13 +1089,14 @@ export default function Projeto() {
                           ação excepcional ("Tentar agora" antecipa a janela do retry). */}
                       <Button
                         title={
+                          motivoBloqueioEscritaV2 ??
                           motivoEscritaIndisponivel(escrevendo, escritaPausada, st.situacao) ??
                           (st.situacao === "aguardando_correcao"
                             ? "Opcional: antecipa a tentativa automática (o fluxo segue sozinho sem clique)."
                             : dicaRefino)
                         }
-                        disabled={escrevendo || escritaPausada || st.situacao === "correcao_automatica"}
-                        onClick={() => enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {})}
+                        disabled={!podeEscreverV2 || escrevendo || escritaPausada || st.situacao === "correcao_automatica"}
+                        onClick={escreverAgora}
                       >
                         {escrevendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenLine className="h-4 w-4" />}
                         {st.situacao === "aguardando_correcao"
@@ -1088,7 +1124,7 @@ export default function Projeto() {
                         as ações com handler NESTA tela — controle sem handler
                         seria botão que o autor clica e nada acontece. */}
                     <EstadoOperacional
-                      estado={st}
+                      estado={stInterface}
                       autorizacao={autorizacao ?? undefined}
                       prontidao={prontidao ?? undefined}
                       acoes={{

@@ -12,6 +12,18 @@ export interface PrecondicoesFundacao {
   modo: "release_certificada" | "pre_canario";
 }
 
+export interface EntradaPrecondicoesEscrita {
+  engineMode: string | null | undefined;
+  fundacaoConcluida: boolean;
+  projetoAutorizado: boolean;
+  releaseCertificado: boolean;
+}
+
+export interface PrecondicoesEscrita {
+  podeEscrever: boolean;
+  pendencias: string[];
+}
+
 /**
  * A fundação é uma pré-condição da prova real e da calibração; exigir o
  * certificado final aqui criava um ciclo impossível (certificado exige canário,
@@ -31,4 +43,21 @@ export function avaliarPrecondicoesFundacao(entrada: EntradaPrecondicoesFundacao
     pendencias,
     modo: entrada.releaseCertificado ? "release_certificada" : "pre_canario",
   };
+}
+
+/**
+ * A exceção pré-canário termina na fundação. Prosa V2 exige as três provas
+ * simultaneamente também na interface; o worker continua sendo a autoridade
+ * fail-closed, mas o autor não deve descobrir o bloqueio só depois do clique.
+ */
+export function avaliarPrecondicoesEscrita(entrada: EntradaPrecondicoesEscrita): PrecondicoesEscrita {
+  if (entrada.engineMode !== "v2") {
+    return { podeEscrever: true, pendencias: [] };
+  }
+  const pendencias = [
+    !entrada.fundacaoConcluida ? "concluir a fundação" : null,
+    !entrada.projetoAutorizado ? "autorizar este projeto" : null,
+    !entrada.releaseCertificado ? "obter o certificado final de release" : null,
+  ].filter((item): item is string => Boolean(item));
+  return { podeEscrever: pendencias.length === 0, pendencias };
 }

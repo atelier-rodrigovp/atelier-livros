@@ -148,6 +148,13 @@ export const TIPOS_V2 = new Set([
   "avaliar",
 ]);
 
+/**
+ * Controle determinístico usado pelos dois engines. Entrevista não produz prosa
+ * nem fundação e não deve ser anunciada como vazamento para a V1 só porque o
+ * handler histórico vive em jobs.ts.
+ */
+export const TIPOS_COMPARTILHADOS_V1_V2 = new Set(["entrevistar"]);
+
 export async function engineModeDoProjeto(projectId: string): Promise<string> {
   const { sb, OWNER } = await import("../supabase.js");
   const { data, error } = await sb
@@ -192,6 +199,13 @@ export async function executarJobRoteado(
     // Job exclusivo V2 (wizard): cena curta de amostra da voz antes da fundação.
     return executarCanarioVoz(job);
   }
+  if (job.project_id && TIPOS_COMPARTILHADOS_V1_V2.has(job.tipo)) {
+    const modo = await engineModeDoProjeto(job.project_id);
+    if (modo === "v2") {
+      registrarHandlerCompartilhado(job);
+      return executarV1(job, hb);
+    }
+  }
   if (job.project_id && TIPOS_V2.has(job.tipo)) {
     const modo = await engineModeDoProjeto(job.project_id);
     if (modo === "v2") {
@@ -212,7 +226,7 @@ export async function executarJobRoteado(
   // Projeto V2 cujo TIPO de job não tem implementação V2 (gerar_epub, traduzir,
   // gerar_capa…) cai aqui legitimamente — mas nunca em silêncio. Rota calada é
   // como um livro V2 seria montado por código V1 sem ninguém notar.
-  if (job.project_id && !TIPOS_V2.has(job.tipo)) {
+  if (job.project_id && !TIPOS_V2.has(job.tipo) && !TIPOS_COMPARTILHADOS_V1_V2.has(job.tipo)) {
     const modo = await engineModeDoProjeto(job.project_id).catch(() => "desconhecido");
     if (modo === "v2") registrarDesvioV1(job, `tipo '${job.tipo}' não tem implementação V2`);
   }
@@ -222,6 +236,11 @@ export async function executarJobRoteado(
 /** Toda vez que um projeto V2 executa por código V1, isso vai para o log. */
 export function registrarDesvioV1(job: Pick<Job, "id" | "tipo">, motivo: string): void {
   console.log(`[engine-v2] job ${job.id} (${job.tipo}) roteado para a V1 — ${motivo}`);
+}
+
+/** Handler comum não é desvio: deixa explícito que nenhum engine de prosa atuou. */
+export function registrarHandlerCompartilhado(job: Pick<Job, "id" | "tipo">): void {
+  console.log(`[engine-v2] job ${job.id} (${job.tipo}) executado pelo handler compartilhado V1/V2 — controle determinístico, sem prosa`);
 }
 
 async function atualizarProgresso(jobId: string, progresso: Record<string, unknown>): Promise<void> {

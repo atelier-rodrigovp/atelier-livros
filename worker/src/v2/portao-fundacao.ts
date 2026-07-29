@@ -408,8 +408,15 @@ export function gateMacroMicroCoerentes(f: FundacaoV2): BloqueioFundacao[] {
   if (!f.arco) return out;
 
   const capitulos = new Set(f.estrutura.map((e) => e.capitulo));
-  const fioDoCapitulo = new Map(f.estrutura.map((e) => [e.capitulo, normalizarNome(e.fio)]));
-  const fiosNaEstrutura = new Set(f.estrutura.map((e) => normalizarNome(e.fio)));
+  const fiosDoCapitulo = new Map(
+    f.estrutura.map((e) => [
+      e.capitulo,
+      new Set([e.fio, ...(e.fios_avancados ?? [])].map(normalizarNome)),
+    ])
+  );
+  const fiosNaEstrutura = new Set(
+    f.estrutura.flatMap((e) => [e.fio, ...(e.fios_avancados ?? [])].map(normalizarNome))
+  );
   const nomesDoFio = (fio: { id: string; nome: string }) => [normalizarNome(fio.nome), normalizarNome(fio.id)];
   const problemas: string[] = [];
 
@@ -421,15 +428,15 @@ export function gateMacroMicroCoerentes(f: FundacaoV2): BloqueioFundacao[] {
   }
   // Fio declarado na micro que a macro não conhece: a micro inventou subtrama.
   const fiosDaMacro = new Set(f.arco.fios.flatMap(nomesDoFio));
-  for (const nome of new Set(f.estrutura.map((e) => normalizarNome(e.fio)))) {
+  for (const nome of fiosNaEstrutura) {
     if (nome && fiosDaMacro.size > 0 && !fiosDaMacro.has(nome)) {
       problemas.push(`estrutura usa o fio "${nome}", que a grade de arco não declara`);
     }
   }
 
   // 2. FIOS — abertura, escalada, clímax e fechamento caem em capítulos reais,
-  //    e no capítulo cujo fio é o próprio (o marco de um fio não pode cair num
-  //    capítulo que a micro entregou a outro fio).
+  //    e entre os fios avançados naquele capítulo. `fio` é apenas o principal:
+  //    clímax e fechamento frequentemente fazem vários fios convergirem.
   for (const fio of f.arco.fios) {
     const marcos: [string, number][] = [
       ["abre", fio.abre],
@@ -443,10 +450,11 @@ export function gateMacroMicroCoerentes(f: FundacaoV2): BloqueioFundacao[] {
         problemas.push(`fio "${fio.nome}" ${rotulo} no capítulo ${cap}, que a estrutura não declara`);
         continue;
       }
-      const fioDaMicro = fioDoCapitulo.get(cap);
-      if (fioDaMicro && !nomesDoFio(fio).includes(fioDaMicro)) {
+      const fiosDaMicro = fiosDoCapitulo.get(cap);
+      if (fiosDaMicro && !nomesDoFio(fio).some((nome) => fiosDaMicro.has(nome))) {
         problemas.push(
-          `fio "${fio.nome}" ${rotulo} no capítulo ${cap}, mas a estrutura entregou esse capítulo ao fio "${fioDaMicro}"`
+          `fio "${fio.nome}" ${rotulo} no capítulo ${cap}, mas a estrutura não o inclui em fios_avancados ` +
+          `(declarou: ${[...fiosDaMicro].join(", ") || "nenhum"})`
         );
       }
     }

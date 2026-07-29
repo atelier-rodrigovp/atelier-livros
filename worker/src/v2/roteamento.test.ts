@@ -4,7 +4,12 @@
 // quando é legítimo, sai audível.
 
 import { describe, expect, it, vi } from "vitest";
-import { registrarDesvioV1, TIPOS_V2 } from "./integracao.js";
+import {
+  registrarDesvioV1,
+  registrarHandlerCompartilhado,
+  TIPOS_COMPARTILHADOS_V1_V2,
+  TIPOS_V2,
+} from "./integracao.js";
 
 describe("tipos que a V2 implementa", () => {
   it("cobre escrita, fundação, revisão, avaliação e refino", () => {
@@ -19,6 +24,11 @@ describe("tipos que a V2 implementa", () => {
     for (const t of ["gerar_epub", "gerar_capa", "traduzir", "importar_vendas", "ping"]) {
       expect(TIPOS_V2.has(t), t).toBe(false);
     }
+  });
+
+  it("classifica entrevista como controle compartilhado, não como desvio V1", () => {
+    expect(TIPOS_COMPARTILHADOS_V1_V2.has("entrevistar")).toBe(true);
+    expect(TIPOS_V2.has("entrevistar")).toBe(false);
   });
 });
 
@@ -39,6 +49,19 @@ describe("desvio para a V1 é audível", () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
     registrarDesvioV1({ id: "job-2", tipo: "revisar" }, "revisão de tradução não tem pipeline V2");
     expect(String(spy.mock.calls[0][0])).toMatch(/—\s+\S/);
+    spy.mockRestore();
+  });
+});
+
+describe("handler compartilhado é auditável sem fingir engine de prosa", () => {
+  it("nomeia V1/V2, controle determinístico e ausência de prosa", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    registrarHandlerCompartilhado({ id: "job-entrevista", tipo: "entrevistar" });
+    const linha = String(spy.mock.calls[0][0]);
+    expect(linha).toContain("handler compartilhado V1/V2");
+    expect(linha).toContain("controle determinístico");
+    expect(linha).toContain("sem prosa");
+    expect(linha).not.toContain("roteado para a V1");
     spy.mockRestore();
   });
 });
