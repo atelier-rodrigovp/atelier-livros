@@ -16,6 +16,7 @@ import { falhasAvaliacaoCega, type RelatorioLab } from "./lab/relatorio.js";
 import { ordenarAmostrasCegas, type AvaliacaoCega } from "./lab/avaliar.js";
 import type { ExecucaoLab } from "./lab/rodar.js";
 import { ENGINE_V2_VERSION, ErroEngine, type MapaModelos } from "./tipos.js";
+import { capturarHead, worktreeLimpa } from "./execucao.js";
 
 export const SCHEMA_CERTIFICADO_RELEASE_V2 = "engine-v2-release/v2" as const;
 export const SCHEMA_AVALIACAO_HUMANA_RELEASE = "human-blind-evaluation/v1" as const;
@@ -609,6 +610,18 @@ export interface LiberacaoCanarioV2 {
   motivo: string;
 }
 
+/** Fundação técnica anterior ao canário; nunca cobre escrita nem avaliação. */
+export interface LiberacaoFundacaoPreCanarioV2 {
+  schema: "engine-v2-liberacao-fundacao-pre-canario/v1";
+  modo: "pre_canario";
+  codigo_commit: string;
+  runtime_hash: string;
+  project_id: string;
+  skill: string;
+  autorizado_por: string;
+  motivo: string;
+}
+
 /**
  * Decide se este projeto pode executar. Função PURA: recebe a autorização já
  * lida do banco, para permanecer testável sem Supabase.
@@ -632,8 +645,9 @@ export function exigirReleaseAtual(
   skillId: string,
   projectId?: string | null,
   autorizacao?: AutorizacaoProjetoV2 | null,
-  operacao: OperacaoV2 = "escrita"
-): CertificadoReleaseV2 | LiberacaoCanarioV2 {
+  operacao: OperacaoV2 = "escrita",
+  provaPreCanario?: { codigoCommit: string; worktreeLimpa: boolean }
+): CertificadoReleaseV2 | LiberacaoCanarioV2 | LiberacaoFundacaoPreCanarioV2 {
   if (projectId) {
     if (!autorizacao) {
       throw new ErroEngine({
@@ -687,6 +701,36 @@ export function exigirReleaseAtual(
     });
   }
   if (!verificacao.ok || !verificacao.certificado) {
+    if (operacao === "fundacao" && autorizacao?.modo === "producao" && !verificacao.certificado) {
+      const repoRoot = path.resolve(workerDirPadrao(), "..");
+      const prova = provaPreCanario ?? {
+        codigoCommit: capturarHead(repoRoot),
+        worktreeLimpa: worktreeLimpa(repoRoot, [
+          "worker/src",
+          "worker/skills-v2",
+          "src",
+          "supabase",
+        ]).limpa,
+      };
+      if (!prova.worktreeLimpa) {
+        throw new ErroEngine({
+          codigo: "PRE_CANARIO_WORKTREE_SUJA",
+          classe: "configuracao",
+          mensagem: "fundação pré-canário bloqueada: o código em execução não corresponde a um commit limpo",
+          detalhe: { skill: skillId, project_id: projectId },
+        });
+      }
+      return {
+        schema: "engine-v2-liberacao-fundacao-pre-canario/v1",
+        modo: "pre_canario",
+        codigo_commit: prova.codigoCommit,
+        runtime_hash: verificacao.estado.runtimeHash,
+        project_id: projectId!,
+        skill: skillId,
+        autorizado_por: autorizacao.autorizado_por,
+        motivo: autorizacao.motivo,
+      };
+    }
     throw new ErroEngine({
       codigo: "RELEASE_V2_NAO_CERTIFICADA",
       classe: "configuracao",

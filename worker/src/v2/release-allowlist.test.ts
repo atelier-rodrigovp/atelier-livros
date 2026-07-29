@@ -25,10 +25,40 @@ describe("autorização de projeto (V2)", () => {
   });
 
   it("[DOD:M-03] autorização de PRODUÇÃO não substitui o certificado", () => {
-    // Não há certificado válido no checkout: mesmo autorizado, o projeto para.
+    // Não há certificado válido no checkout: escrita continua bloqueada.
     expect(() => exigirReleaseAtual("dan-brown", PROJETO, autorizacao("producao"))).toThrowError(
       /Engine V2 bloqueada para fundação\/escrita/
     );
+  });
+
+  it("fundação pré-canário é permitida em commit limpo sem liberar escrita", () => {
+    const release = exigirReleaseAtual(
+      "dan-brown",
+      PROJETO,
+      autorizacao("producao"),
+      "fundacao",
+      { codigoCommit: "a".repeat(40), worktreeLimpa: true }
+    );
+    expect(release).toMatchObject({
+      schema: "engine-v2-liberacao-fundacao-pre-canario/v1",
+      modo: "pre_canario",
+      codigo_commit: "a".repeat(40),
+      project_id: PROJETO,
+    });
+    expect(() => exigirReleaseAtual("dan-brown", PROJETO, autorizacao("producao"), "escrita"))
+      .toThrowError(/Engine V2 bloqueada/);
+  });
+
+  it("fundação pré-canário recusa worktree suja", () => {
+    expect(() =>
+      exigirReleaseAtual(
+        "dan-brown",
+        PROJETO,
+        autorizacao("producao"),
+        "fundacao",
+        { codigoCommit: "a".repeat(40), worktreeLimpa: false }
+      )
+    ).toThrowError(/commit limpo/);
   });
 
   it("autorização de CANÁRIO dispensa o certificado — só ela, e só na operação de canário", () => {

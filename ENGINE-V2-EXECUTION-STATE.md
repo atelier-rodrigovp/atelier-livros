@@ -670,3 +670,13 @@ antes de `PRE_CANARY_READY`.
   o timer periódico sobrescrevia `paused` e `busy` com `idle` a cada 30 segundos
   e atualizações de fase apagavam o estado. O contexto agora é preservado em
   pulsos e progresso; somente uma transição explícita de estado limpa o contexto.
+- projeto exclusivo de prova criado pela interface:
+  `8ba4cd11-7514-4f42-aeb1-c6f8544483a5`; a criação gerou somente jobs
+  `entrevistar`, sem `canario_voz`;
+- entrevista real concluída em quatro blocos, briefing aprovado por hash e
+  autorização de produção registrada com motivo auditável;
+- a tela e o worker exigiam o certificado final para criar a fundação. Isso era
+  circular: certificado exige calibração/canários, que dependem da fundação.
+  O escopo foi separado: autorização de produção + commit limpo liberam somente
+  a fundação pré-canário; escrita e avaliação continuam fail-closed sem o
+  certificado final.

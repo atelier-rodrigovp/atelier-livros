@@ -737,7 +737,8 @@ export default function Projeto() {
                     <p className="font-medium">Portões antes da fundação</p>
                     <p className="text-xs text-muted-foreground">
                       A Engine V2 só aceita a fundação quando entrevista, aprovação autoral,
-                      autorização do projeto e certificado de release correspondem ao estado atual.
+                      autorização do projeto e código pré-canário limpo correspondem ao estado atual.
+                      O certificado final continua obrigatório antes de escrever prosa.
                     </p>
                   </div>
                   <div className="grid gap-2 text-xs sm:grid-cols-2">
@@ -750,8 +751,8 @@ export default function Projeto() {
                     <p><Badge variant={autorizacaoAtiva ? "default" : "destructive"}>
                       {autorizacao?.titulo ?? "Autorização desconhecida"}
                     </Badge></p>
-                    <p><Badge variant={releaseCertificado ? "default" : "destructive"}>
-                      {releaseCertificado ? "Release certificado" : "Release não certificado"}
+                    <p><Badge variant={releaseCertificado ? "default" : "outline"}>
+                      {releaseCertificado ? "Release certificado" : "Pré-canário: somente fundação"}
                     </Badge></p>
                   </div>
                   <details className="text-xs">

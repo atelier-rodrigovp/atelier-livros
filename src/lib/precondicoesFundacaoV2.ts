@@ -9,16 +9,26 @@ export interface EntradaPrecondicoesFundacao {
 export interface PrecondicoesFundacao {
   podeGerar: boolean;
   pendencias: string[];
+  modo: "release_certificada" | "pre_canario";
 }
 
-/** Mesma decisão exibida pela tela e exigida pelo worker antes da fundação. */
+/**
+ * A fundação é uma pré-condição da prova real e da calibração; exigir o
+ * certificado final aqui criava um ciclo impossível (certificado exige canário,
+ * canário exige fundação). Escrita continua bloqueada pelo release final.
+ */
 export function avaliarPrecondicoesFundacao(entrada: EntradaPrecondicoesFundacao): PrecondicoesFundacao {
-  if (entrada.engineMode !== "v2") return { podeGerar: true, pendencias: [] };
+  if (entrada.engineMode !== "v2") {
+    return { podeGerar: true, pendencias: [], modo: "release_certificada" };
+  }
   const pendencias = [
     !entrada.entrevistaCompleta ? "concluir a entrevista" : null,
     !entrada.briefingAprovadoAtual ? "aprovar o briefing atual" : null,
     !entrada.projetoAutorizado ? "autorizar este projeto" : null,
-    !entrada.releaseCertificado ? "publicar um certificado de release válido para o código em execução" : null,
   ].filter((item): item is string => Boolean(item));
-  return { podeGerar: pendencias.length === 0, pendencias };
+  return {
+    podeGerar: pendencias.length === 0,
+    pendencias,
+    modo: entrada.releaseCertificado ? "release_certificada" : "pre_canario",
+  };
 }
