@@ -171,6 +171,9 @@ export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPa
           // vira anedota.
           { tipo: "metrica", referencia: "esforco_solicitado", detalhe: execucao.esforco },
           { tipo: "metrica", referencia: "cli_versao", detalhe: versaoCli },
+          // Duracao da CHAMADA, medida no spawn. `finished_at` mede a linha, e ja
+          // saiu 27 min depois do trabalho (run 889f9fc9) — nao serve para medir ganho.
+          { tipo: "metrica", referencia: "duracao_chamada_ms", detalhe: String(resposta.duracaoMs ?? "") },
         ],
       });
       return { valor, runId, resposta, tentativas: tentativa };

@@ -63,25 +63,41 @@ falharam por timeout. Para `arquiteto_enredo`: maior sucesso real 333 s → ~100
 → os **1200 s** da tabela se sustentam. Timeout **mantido em 1200 s**; não foi
 aumentado para cobrir os 1621 s, que não são trabalho.
 
-### Achados abertos — resolver ANTES da medição de ganho
+### Fatia 5 — A1 fechado, A2 com parecer
 
-**A1 — `finished_at` não é confiável.** Duas provas no mesmo papel:
+**A1 — medição confiável. FECHADO.**
 
-- `889f9fc9`: erro `timeout após 300000ms`, mas `finished_at` 27 min após o
-  `started_at`. A duração gravada é artefato do carimbo, não do trabalho.
-- `de568246`: preso em `running` desde 2026-07-27 15:37, `finished_at` nulo.
+- `duracao_chamada_ms` passa a ser medida no **spawn** (relógio nas duas pontas,
+  nos três caminhos de saída: fim normal, timeout e erro) e gravada em
+  `evidencias`, aditivo, sem DDL. `finished_at` continua existindo, mas deixou
+  de ser a fonte da medição.
+- `falharRun` já carimbava o fim no catch; provado por teste que timeout e erro
+  de infra carimbam na hora, sem espera pendurada.
+- **11 runs órfãos encerrados** (não 1): 6 do revisor, e um de cada em auditor,
+  contextualizador, arquiteto_cena, escritor e arquiteto_enredo. O mais antigo
+  estava preso havia 196 h. `select count(*) where status='running'` → **0**.
+- Fronteira do imutável confirmada CONTRA O BANCO antes e depois: o trigger
+  `engine_runs_congelar` recusa `update` quando o status anterior é ok/falha/
+  cancelado. O reconciliador só age sobre `running`, e um segundo update no
+  `de568246` já reconciliado foi BARRADO pelo banco na prova.
 
-Consequência: **qualquer métrica de duração — inclusive a medição do ganho desta
-fila — é suspeita enquanto isso não for corrigido.** Precede a fatia de medição.
+Comando: `npx tsx scripts/v2-reconciliar-runs.ts [--confirmar]`. Roda por
+comando, nunca em background.
 
-**A2 — o CLI executou modelo diferente do solicitado.** Run `894dba1a`,
-`arquiteto_enredo`: solicitado `claude-sonnet-5`, executados
-`claude-haiku-4-5-20251001, claude-sonnet-5` — dois modelos numa chamada que
-deveria ter um só. `exigirModeloExecutado` pegou e falhou fechado, como devia.
+**A2 — parecer em `docs/engine-v2/08-parecer-troca-de-modelo.md`.**
 
-Investigar **quando** o downgrade acontece (limite de cota? roteamento do CLI?)
-**antes de trocar os pins na fatia 6** — trocar pin sem saber disso é calibrar
-contra um modelo que pode não ser o que roda.
+Ocorrência **única** em 2.037 runs. O modelo intruso é exatamente o `haiku` que
+o comentário do provedor já atribui a tráfego interno do CLI, e a mitigação
+(`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, commit `84af5a1`) precede o run em
+3 horas. Hipótese mais consistente: o worker ainda rodava o código anterior —
+**não provada**, porque não há marca de restart datada em lugar nenhum.
+
+Recomendação: prosseguir com os pins na fatia 6, mantendo
+`exigirModeloExecutado` intocado e confirmando antes que o worker roda o código
+atual. Segunda ocorrência depois de restart confirmado derruba a hipótese.
+
+**Aberto (novo):** não existe registro de versão do código no start do worker.
+Foi exatamente o que impediu fechar o A2, e é barato de criar.
 
 **Dívida explícita:** regressão completa segue reservada para a fatia 6. Aqui
 rodou a suíte inteira do worker: 103 arquivos, 1367 testes, zero pulados.

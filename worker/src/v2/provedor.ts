@@ -24,6 +24,8 @@ export interface RespostaModelo {
   tokensIn?: number;
   tokensOut?: number;
   truncado?: boolean;
+  /** Duracao da CHAMADA, medida no spawn (nao inferida de finished_at). */
+  duracaoMs?: number;
   bruto?: unknown;                // envelope original (telemetria/depuração)
 }
 
@@ -172,7 +174,11 @@ export class ProvedorClaudeCli implements ProvedorModelo {
     return this._versao;
   }
 
-  private executar(args: string[], stdin: string, timeoutMs: number): Promise<{ code: number; out: string; err: string }> {
+  private executar(args: string[], stdin: string, timeoutMs: number): Promise<{ code: number; out: string; err: string; duracaoMs: number }> {
+    // Cronometro do SPAWN. `finished_at` e carimbo de ciclo de vida da linha e
+    // ja saiu 27 min depois do trabalho real (run 889f9fc9); a medicao precisa
+    // da duracao da CHAMADA, tomada aqui, nas duas pontas do processo.
+    const t0 = Date.now();
     return new Promise((resolve) => {
       // CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: sem ela o CLI dispara chamadas
       // internas (haiku, ex.: título de sessão) que aparecem no modelUsage e
@@ -190,15 +196,15 @@ export class ProvedorClaudeCli implements ProvedorModelo {
       p.stderr.on("data", (c: string) => (err += c));
       const timer = setTimeout(() => {
         try { p.kill(); } catch { /* já morreu */ }
-        resolve({ code: -1, out, err: `timeout após ${timeoutMs}ms` });
+        resolve({ code: -1, out, err: `timeout após ${timeoutMs}ms`, duracaoMs: Date.now() - t0 });
       }, timeoutMs);
       p.on("close", (code) => {
         clearTimeout(timer);
-        resolve({ code: code ?? -1, out, err });
+        resolve({ code: code ?? -1, out, err, duracaoMs: Date.now() - t0 });
       });
       p.on("error", (e) => {
         clearTimeout(timer);
-        resolve({ code: -1, out, err: String(e) });
+        resolve({ code: -1, out, err: String(e), duracaoMs: Date.now() - t0 });
       });
       p.stdin.write(stdin, "utf8");
       p.stdin.end();
@@ -241,6 +247,7 @@ ${r.out}`, c.esforco, this.versao());
           modeloExecutado,
           tokensIn: env.usage?.input_tokens,
           tokensOut: env.usage?.output_tokens,
+          duracaoMs: r.duracaoMs,
           bruto: env,
         };
       }
