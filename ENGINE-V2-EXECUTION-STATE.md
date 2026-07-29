@@ -645,3 +645,24 @@ Próxima ação de máquina: commitar e publicar este endurecimento, reiniciar o
 worker no mesmo SHA e materializar as evidências remotas com worktree limpa.
 Depois, executar o fluxo autenticado sem prosa. Nenhum canário está autorizado
 antes de `PRE_CANARY_READY`.
+
+### Continuação do checkpoint
+
+- endurecimento publicado em
+  `ba225cb58099a2d474b657aa00eb9dfe030bfbd1`;
+- CI completo aprovado, inclusive gate técnico `--pre-canary`, sem converter a
+  release literária bloqueada em certificada;
+- interface GitHub Pages publicada e o bundle contém somente o SHA `ba225cb`;
+- worker reiniciado no mesmo SHA completo, com `sujo=false` e estado `paused`;
+- evidências frescas no mesmo commit:
+  `.evidencias/migracoes_remotas.json` e
+  `.evidencias/provedor_real.json`;
+- redirect autenticado do GitHub Pages foi acrescentado à allowlist do Supabase
+  e a sessão do proprietário abriu o artefato correto;
+- a inspeção autenticada de “Novo projeto” encontrou uma regressão de sequência:
+  a V2 ainda gerava `canario_voz` antes da entrevista. Isso violava a regra
+  `PRE_CANARY_READY` e produzia prosa antes da fundação e dos gates;
+- correção em andamento: projeto novo vai diretamente para `entrevistar`; a
+  skill escolhida no wizard permanece autoritativa na V2 sem depender de uma
+  amostra de prosa pré-fundação. Testes direcionados: 26 aprovados; typecheck
+  do frontend e worker limpos.
