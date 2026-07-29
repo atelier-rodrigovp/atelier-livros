@@ -8,6 +8,7 @@ import { LimiteMaxError, deveRecuperar } from "./limite-max.js";
 import { escolherProximo, normalizarMaxParalelo, type ProjInfo } from "./fila.js";
 import { aguardarConexao } from "./espera-conexao.js";
 import { comRetrySb, ehErroDeRede } from "./retry.js";
+import { mesclarContextoHeartbeat } from "./heartbeat-state.js";
 import { instalarTimestampsISO } from "./log-iso.js";
 import { lerVersaoCodigo, descreverVersao } from "./versao-codigo.js";
 import { recuperarOrfaos as recuperarOrfaosCore } from "./orfaos.js";
@@ -74,7 +75,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // cada ~5min (numa outage de 83min o log tinha 166 linhas idênticas — ruído).
 let hbFalhasSeguidas = 0;
 let hbUltimoAviso = 0;
+let contextoHeartbeat: Record<string, unknown> = {};
 async function heartbeat(extra: Record<string, unknown> = {}) {
+  contextoHeartbeat = mesclarContextoHeartbeat(contextoHeartbeat, extra);
   const { error } = await comRetrySb(
     () =>
       sb.from("worker_heartbeats").upsert(
@@ -84,7 +87,7 @@ async function heartbeat(extra: Record<string, unknown> = {}) {
           last_seen: new Date().toISOString(),
           // Vai em TODO heartbeat: quem le o painel nao precisa ter visto o log
           // do arranque para saber qual codigo esta no ar.
-          status: { ...extra, codigo: VERSAO_CODIGO },
+          status: { ...contextoHeartbeat, codigo: VERSAO_CODIGO },
         },
         { onConflict: "owner,worker_id" }
       ),
@@ -368,7 +371,9 @@ async function loop() {
     );
   }
 
-  const hb = setInterval(() => heartbeat({ estado: "idle" }), 30_000);
+  // O pulso periódico renova presença sem inventar um estado novo. Antes, este
+  // timer sobrescrevia `paused` e `busy` com `idle` a cada 30 segundos.
+  const hb = setInterval(() => heartbeat(), 30_000);
   hb.unref?.();
 
   // Duas faixas concorrentes: pesados em série + interativos em paralelo.

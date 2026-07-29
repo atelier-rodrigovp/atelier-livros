@@ -666,3 +666,7 @@ antes de `PRE_CANARY_READY`.
   skill escolhida no wizard permanece autoritativa na V2 sem depender de uma
   amostra de prosa pré-fundação. Testes direcionados: 26 aprovados; typecheck
   do frontend e worker limpos.
+- durante o realinhamento, o heartbeat remoto expôs outro defeito observável:
+  o timer periódico sobrescrevia `paused` e `busy` com `idle` a cada 30 segundos
+  e atualizações de fase apagavam o estado. O contexto agora é preservado em
+  pulsos e progresso; somente uma transição explícita de estado limpa o contexto.
