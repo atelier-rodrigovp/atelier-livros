@@ -17,6 +17,74 @@ const EIXOS = [
   "hook_effectiveness",
 ] as const;
 
+/**
+ * Rótulos com que o modelo diz "este sinal está dentro da cota". O protocolo
+ * manda NÃO listar sinal dentro da cota; quando ele lista assim mesmo, a
+ * entrada é ruído — desde que o detector concorde que o sinal está na cota.
+ */
+const ROTULOS_DENTRO_DA_COTA = new Set(["dentro_da_cota", "conforme", "ok", "dentro da cota", "na_cota"]);
+
+/**
+ * NORMALIZAÇÃO DETERMINÍSTICA — roda ANTES de `validarParecer` e não decide nada.
+ *
+ * A maior classe de falha do revisor era de FORMATO, não de julgamento: o modelo
+ * escrevia `"6 (cota máx 1)"` no lugar de `6`, ou listava um sinal dentro da cota
+ * com um rótulo fora do enum. Cada uma dessas custava um retry inteiro — 22 mil
+ * tokens para reescrever um parecer cujo CONTEÚDO já estava certo.
+ *
+ * O que esta função faz é estritamente sintático:
+ *   · extrai o inteiro de um valor escrito como texto ("6 (cota máx 1)" → 6);
+ *   · aceita `ocorrencias_citadas` dada como lista de strings;
+ *   · descarta entrada rotulada "dentro da cota" QUANDO o detector também diz
+ *     que está na cota — nesse caso a entrada não devia existir.
+ *
+ * O que ela NÃO faz, de propósito: não muda medição, não converte disposição em
+ * outra disposição, e não descarta entrada de sinal FORA DA COTA. Um valor que
+ * normaliza para 7 contra medição 6 continua reprovando; um "dentro_da_cota"
+ * sobre sinal fora da cota continua inválido, porque ali o modelo está
+ * contradizendo o detector — e isso é julgamento, não formato.
+ */
+export function normalizarParecerBruto(obj: unknown, medidos: SinalMedido[]): unknown {
+  if (typeof obj !== "object" || obj === null) return obj;
+  const p = { ...(obj as Record<string, unknown>) };
+  if (!Array.isArray(p.sinais)) return p;
+
+  const foraDaCota = new Map(medidos.map((m) => [m.sinal, m.fora_da_cota]));
+  const saida: unknown[] = [];
+  for (const bruto of p.sinais as unknown[]) {
+    if (typeof bruto !== "object" || bruto === null) { saida.push(bruto); continue; }
+    const s = { ...(bruto as Record<string, unknown>) };
+
+    // "6 (cota máx 1)" → 6. Só reinterpreta a ESCRITA do número; a comparação
+    // com a medição continua acontecendo depois, intacta.
+    if (typeof s.valor === "string") {
+      const m = /^\s*(-?\d+)/.exec(s.valor);
+      if (m) s.valor = Number(m[1]);
+    }
+
+    if (typeof s.disposicao === "string") {
+      const rotulo = s.disposicao.trim().toLowerCase();
+      if (ROTULOS_DENTRO_DA_COTA.has(rotulo)) {
+        // Detector concorda que está na cota → entrada supérflua, descartada.
+        // Detector diz que está FORA → mantida como está e reprovada adiante.
+        if (foraDaCota.get(String(s.sinal)) !== true) continue;
+      } else {
+        s.disposicao = rotulo;
+      }
+    }
+
+    // Ocorrências citadas como texto puro viram o objeto que o schema espera.
+    if (Array.isArray(s.ocorrencias_citadas)) {
+      s.ocorrencias_citadas = (s.ocorrencias_citadas as unknown[]).map((o) =>
+        typeof o === "string" ? { trecho: o } : o
+      );
+    }
+    saida.push(s);
+  }
+  p.sinais = saida;
+  return p;
+}
+
 /** Validação estrutural do JSON do parecer (usada como `parse` do executor de papel). */
 export function validarParecer(obj: unknown): Parecer {
   if (typeof obj !== "object" || obj === null) throw new Error("parecer não é objeto");

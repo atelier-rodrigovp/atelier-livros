@@ -26,7 +26,7 @@ import { derivarMemoriaDaProsa, validarExtracaoProsa, type ExtracaoProsa } from 
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
-import { acharSinalMedido, conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
+import { acharSinalMedido, conferirParecer, exigirDisposicaoCompleta, normalizarParecerBruto, validarParecer } from "./revisor.js";
 import { medirSinais, resumoSinais } from "./sinais.js";
 import { validarSpec } from "./spec.js";
 import {
@@ -661,7 +661,11 @@ export async function escreverCapitulo(
       tarefa: tarefaRevisor(capitulo, resumoSinais(sinais), deps.contrato.contrato),
       // Parecer que omite disposição de sinal fora da cota = protocolo violado →
       // retry técnico do REVISOR (com o sinal nomeado), não reprova do capítulo.
-      parse: (t) => exigirDisposicaoCompleta(validarParecer(extrairJson(t)), sinais),
+      // Normaliza a ESCRITA antes de julgar: valor escrito como texto e rotulo
+      // superfluo de "dentro da cota" custavam um retry inteiro do revisor —
+      // ~22 mil tokens para reescrever um parecer cujo conteudo ja estava certo.
+      // Nenhuma regua muda aqui: a validacao recebe o mesmo julgamento.
+      parse: (t) => exigirDisposicaoCompleta(validarParecer(normalizarParecerBruto(extrairJson(t), sinais)), sinais),
     });
     runs.push(rRev.runId);
     const parecer = rRev.valor;

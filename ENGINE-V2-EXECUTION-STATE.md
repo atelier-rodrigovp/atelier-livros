@@ -7,6 +7,49 @@ SHA inicial da sessão: `34b2cea`. Branch: `master`. **Nunca fazer push sem
 autorização explícita; nunca aplicar SQL remoto; nunca gerar canário; nunca
 chamar modelo de prosa; nunca escrever capítulo.**
 
+## Fila de custo por capítulo (rodada 2026-07-29)
+
+SHA de partida: `2cc31c3`.
+
+**Ação obrigatória cumprida:** autorização `67d19ea0` revogada pelo caminho
+previsto (único UPDATE que a policy permite; o trigger carimbou `revoked_at`
+sozinho). Fail-closed confirmado: `v2-materializar-documentos` volta a recusar.
+
+| item | estado |
+|---|---|
+| 1. normalização determinística | **CONCLUÍDO** — `normalizarParecerBruto` ligada ao `parse` do revisor |
+| 2. citação por índice | não iniciado |
+| 3. timeouts por papel | não iniciado |
+| 4. esforço por papel | investigado: `--effort` EXISTE (`low, medium, high, xhigh, max`), validado no CLI real |
+| 5. cascata de julgamento | não iniciado |
+| 6. pins de modelo | não iniciado |
+
+### Linha de base relida do banco (não de memória)
+
+```sql
+select papel, count(*), round(avg(tokens_out)), round(avg(extract(epoch from (finished_at-started_at)))),
+       count(*) filter (where status='falha')
+from public.engine_runs where engine_version='2.0.0' and model_name like 'claude-%' group by papel;
+```
+
+Confere com o enunciado. Falhas medidas: revisor 26/71, arquiteto_enredo 5/10,
+escritor 21/75. Classes de falha do revisor: **36 de formato** (FORA_DO_SCHEMA)
+contra 19 de infra — confirma o fato 2.
+
+### Bloqueio a decidir (item 1, parte 2)
+
+A DoD pede canonizar `"dentro_da_cota"` para `"conforme"`. **`"conforme"` não
+existe no enum** (`Disposicao` = violacao_confirmada | excecao_valida |
+falso_positivo | necessita_decisao_humana), e `tarefas.ts:139` diz ao modelo, com
+todas as letras, que `"conforme"/"ok"/"dentro_da_cota"` invalidam o parecer.
+Criar esse valor seria afrouxar o protocolo, não normalizá-lo.
+
+Implementado no lugar, sem perder rigor: entrada rotulada "dentro da cota" é
+**descartada** quando o detector também diz que o sinal está na cota (o protocolo
+manda não listar sinal em cota — a linha não devia existir); e **continua
+inválida** quando o sinal está FORA da cota, porque aí o modelo contradiz a
+medição, e isso é julgamento, não formato.
+
 ## Ordem de trabalho
 
 ### Defeitos da revisão (antes das fatias abertas)
