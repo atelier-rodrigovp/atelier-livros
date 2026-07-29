@@ -124,6 +124,49 @@ seguindo a disciplina que já existia ali: delta VAZIO, com o veredito lido do
 parecer da triagem que o próprio prompt carrega — não é opinião do mock, e a
 fila enfileirada sempre vence.
 
+### Fatia 6b — pins de modelo e a versão do código no arranque
+
+**Pins.** `raciocinio` sobe de sonnet para **opus**: são `arquiteto_enredo`,
+`arquiteto_cena` e `editor_estrutural`, e erro de arquitetura de cena não se
+conserta com revisão de frase — reescreve o capítulo. `fatos` fica em haiku
+como PISO, para quem só seleciona contexto já escrito (`contextualizador`); os
+dois papéis de fatos que erram caro, `auditor_factual` e `extrator_memoria`,
+sobem para sonnet por `MODELO_POR_PAPEL`. `julgamento` fica em sonnet na
+triagem, com a segunda passada cara vindo pela cascata.
+
+O mecanismo de congelamento fez o que existe para fazer: o teste do pin quebrou
+sozinho quando o valor mudou, e foi atualizado **deliberadamente**, com o motivo
+escrito ao lado. O erro em `V2_MODEL_*` divergente segue intacto — ambiente não
+troca modelo sem código novo.
+
+**Consequência formal, dita por inteiro:** mudar pin invalida calibração,
+canários e certificação anteriores, conforme o comentário que já estava em
+`config.ts`. Nenhum canário existia para invalidar (`CANARIOS_NOVOS` segue
+`BLOQUEADOS_AGUARDANDO_AUTOR`), mas a régua vale e está registrada aqui.
+
+**A versão do código no arranque — o que faltava para fechar A2.**
+`worker/src/versao-codigo.ts` carimba, uma vez, no arranque: SHA do HEAD,
+`sujo` (arquivos do worker modificados por cima) e `iniciadoEm`. Vai no log e em
+todo heartbeat (`worker_heartbeats.status.codigo`). É lido UMA vez de propósito:
+interessa o código com que o processo SUBIU — editar arquivo com o worker no ar
+não troca o que está em execução.
+
+`sujo` é dado de primeira classe, não nota de rodapé: SHA com arquivo modificado
+por cima **parece** dado e não é, e foi esse buraco que deixou A2 sem causa raiz.
+
+**O worker que está no ar NÃO tem este código — e agora isso está datado.**
+
+| | |
+|---|---|
+| processo | PID 18188, `node --import tsx src\index.ts` |
+| subiu em | **28/07/2026 16:57:49** (local) |
+| último commit antes disso | `055f33b` (28/07 16:55) |
+| estado no heartbeat | `paused`, sem campo `codigo` — confirma código pré-6b |
+
+Ou seja: o processo no ar não tem NENHUMA das seis fatias, nem os quatro commits
+de 28/07 18:20 em diante. **Commit não é produção.** Religar o worker com o
+código novo é ação de produção e fica com o autor — não foi feito aqui.
+
 ### Fatia 5 — A1 fechado, A2 com parecer
 
 **A1 — medição confiável. FECHADO.**

@@ -6,9 +6,17 @@ import type { ClasseCapacidade, MapaModelos, Papel } from "./tipos.js";
 import { CLASSE_POR_PAPEL } from "./tipos.js";
 
 export const MODELOS_V2_FIXOS: Readonly<MapaModelos> = Object.freeze({
-  raciocinio: "claude-sonnet-5",
+  // Raciocinio (arquiteto_enredo, arquiteto_cena, editor_estrutural): o que se
+  // decide aqui e a arquitetura da cena, e um erro de estrutura nao se conserta
+  // com revisao de frase — reescreve o capitulo. Sobe para opus.
+  raciocinio: "claude-opus-5",
+  // Fatos: piso barato para quem so SELECIONA contexto ja escrito
+  // (contextualizador). Os dois papeis de fatos que ERRAM CARO —
+  // auditor_factual e extrator_memoria — sobem para sonnet por MODELO_POR_PAPEL.
   fatos: "claude-haiku-4-5-20251001",
   prosa: "claude-opus-5",
+  // Julgamento: triagem barata. A 2a passada cara e o `revisor_decisao`, que
+  // vem por MODELO_POR_PAPEL e so roda quando ha o que decidir.
   julgamento: "claude-sonnet-5",
 });
 
