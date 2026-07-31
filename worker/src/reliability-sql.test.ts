@@ -14,7 +14,18 @@ describe("contrato da migração de confiabilidade", () => {
     expect(sql).toContain("where id = p_job_id and owner = p_owner and status = 'queued'");
     expect(sql).toContain("pg_advisory_xact_lock");
     expect(sql).toContain("owner = p_owner and project_id = v_project and status = 'running'");
-    expect(sql).toContain("set status = 'running', locked_by = p_worker, locked_at = now()");
+    expect(sql).toContain("status = 'running'");
+    expect(sql).toContain("locked_by = p_worker");
+    expect(sql).toContain("locked_at = now()");
+  });
+
+  it("ao retomar, remove marcadores vencidos e preserva a tentativa de infraestrutura no histórico", () => {
+    expect(sql).toContain("- 'retry_at'");
+    expect(sql).toContain("- 'aguardando_reset'");
+    expect(sql).toContain("- 'engine_erro_detalhe'");
+    expect(sql).toContain("- 'infrastructure_retry'");
+    expect(sql).toContain("'infrastructure_retry_history'");
+    expect(sql).toContain("jsonb_build_object('resolvido_em', now())");
   });
 
   it("fecha a corrida de enqueue duplicado no banco (índice parcial)", () => {

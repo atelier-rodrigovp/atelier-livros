@@ -133,6 +133,46 @@ export function promessasForaDoDesfecho(arco: ArcoFundacao, total: number): stri
 export function motivoDocInsubstancial(conteudo: string): string | null {
   const t = (conteudo ?? "").trim();
   if (!t) return "vazio";
+  const linhas = t.split(/\r?\n/);
+  const trecho = (linha: string) => {
+    const limpo = linha.replace(/\s+/g, " ").trim();
+    return limpo.length > 120 ? `${limpo.slice(0, 117)}…` : limpo;
+  };
+
+  // Marcadores inequívocos podem aparecer no meio de uma frase/linha. A
+  // evidência cita o marcador e o trecho exatos para que o retry saiba o que
+  // corrigir — e para que o diagnóstico não dependa de adivinhação.
+  const fortes = [
+    // Case-sensitive de propósito: "todo" é palavra corrente em português.
+    { regex: /\bTODO\b/, rotulo: "TODO" },
+    { regex: /\bTBD\b/i, rotulo: "TBD" },
+    { regex: /\bLOREM IPSUM\b/i, rotulo: "LOREM IPSUM" },
+    { regex: /\bPLACEHOLDER\b/i, rotulo: "PLACEHOLDER" },
+  ];
+  for (const linha of linhas) {
+    for (const forte of fortes) {
+      const achado = forte.regex.exec(linha);
+      if (achado) {
+        return `contém marcador forte "${forte.rotulo}" no trecho "${trecho(linha)}"`;
+      }
+    }
+  }
+
+  // Reticências fazem parte da prosa normal; só são placeholder quando ocupam
+  // sozinhas uma linha (eventualmente como item de lista). "A definir" também
+  // só bloqueia como valor isolado/campo, não em frases como
+  // "não há nada a definir".
+  for (const linha of linhas) {
+    if (/^\s*(?:[-*+]\s*)?(?:\.{3}|…)\s*$/.test(linha)) {
+      return `contém marcador isolado "${trecho(linha)}"`;
+    }
+    if (
+      /^\s*(?:[-*+]\s*)?(?:(?:[^:\n]{1,60}):\s*)?(?:a definir|preencher|em branco)[.!]?\s*$/i.test(linha)
+    ) {
+      return `contém campo sem valor no trecho "${trecho(linha)}"`;
+    }
+  }
+
   const semTitulos = t
     .split("\n")
     .filter((l) => !/^\s*#{1,6}\s/.test(l))
@@ -140,9 +180,6 @@ export function motivoDocInsubstancial(conteudo: string): string | null {
     .trim();
   const palavras = semTitulos.split(/\s+/).filter(Boolean).length;
   if (palavras < 40) return `${palavras} palavra(s) de conteúdo fora dos títulos (mínimo 40)`;
-  if (/\b(TODO|TBD|A DEFINIR|PREENCHER|LOREM IPSUM|PLACEHOLDER|EM BRANCO|\.\.\.)\b/i.test(semTitulos)) {
-    return "contém marcador de placeholder (TODO/TBD/a definir/…)";
-  }
   return null;
 }
 

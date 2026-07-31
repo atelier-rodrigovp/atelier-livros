@@ -6,6 +6,7 @@ import {
   correcaoParaRetry,
   gateFundacao,
   gateMacroMicroCoerentes,
+  motivoDocInsubstancial,
 } from "./portao-fundacao.js";
 import type { ArcoFundacao, SkillContract } from "./tipos.js";
 
@@ -371,6 +372,8 @@ describe("o que virou bloqueante (antes: aviso)", () => {
     const b = av.bloqueios.find((x) => x.codigo === "DOC_PLACEHOLDER");
     expect(b).toBeDefined();
     expect(b!.mensagem).toContain("dossie-factual.md");
+    expect(b!.mensagem).toContain('marcador forte "TODO"');
+    expect(b!.mensagem).toContain("TODO: preencher");
   });
 
   it("documento exigido substantivo passa", () => {
@@ -389,6 +392,54 @@ describe("o que virou bloqueante (antes: aviso)", () => {
       contrato, 12, ["dossie-factual.md"]
     );
     expect(av.bloqueios.some((x) => x.codigo === "DOC_PLACEHOLDER")).toBe(false);
+  });
+
+  it("reticências em prosa normal não são placeholder", () => {
+    const doc =
+      "# Dossiê factual\n\n" +
+      "A investigação começa no farol e continua pelo arquivo municipal... A pausa marca hesitação, não ausência de conteúdo. " +
+      "Os registros de 1987 possuem duas vias autenticadas, confrontadas com o livro de bordo e com fotografias da reforma. " +
+      "A maré de sizígia expõe o túnel em março e setembro, conforme as tabelas náuticas anexadas ao processo histórico.";
+    expect(motivoDocInsubstancial(doc)).toBeNull();
+  });
+
+  it("frase substantiva com 'não há nada a definir' não é placeholder", () => {
+    const doc =
+      "# Dossiê factual\n\n" +
+      "O protocolo histórico fixa data, local, responsáveis e cadeia de custódia; não há nada a definir sobre esses campos. " +
+      "A primeira via está no arquivo municipal, a segunda permanece no consulado e ambas registram a automatização em 1987. " +
+      "As coordenadas do túnel foram verificadas contra as cartas náuticas e contra o diário técnico do faroleiro.";
+    expect(motivoDocInsubstancial(doc)).toBeNull();
+  });
+
+  it("palavras portuguesas 'todo' e 'preencher' em prosa normal não são TODO técnico", () => {
+    const doc =
+      "# Dossiê factual\n\n" +
+      "Todo o arquivo municipal foi inventariado antes da reforma e cada caixa recebeu uma referência de proveniência. " +
+      "Marina precisou preencher o formulário de consulta para confrontar as duas vias autenticadas do registro de 1987. " +
+      "O campo estava em branco no fac-símile histórico, fato descrito pelo perito e não uma lacuna deste dossiê. " +
+      "As cartas náuticas confirmam as coordenadas e a periodicidade da maré de sizígia.";
+    expect(motivoDocInsubstancial(doc)).toBeNull();
+  });
+
+  it("reticências isoladas continuam sendo placeholder e citam a ocorrência", () => {
+    const doc =
+      "# Dossiê factual\n\n" +
+      "O protocolo registra a cadeia de custódia, as coordenadas e todos os responsáveis pela inspeção histórica do farol. " +
+      "A documentação foi confrontada com o diário técnico, as cartas náuticas e o inventário municipal de 1987.\n\n" +
+      "- ...\n\n" +
+      "As duas vias autenticadas permanecem preservadas e têm proveniência conhecida.";
+    expect(motivoDocInsubstancial(doc)).toBe('contém marcador isolado "- ..."');
+  });
+
+  it("campo 'a definir' isolado continua sendo placeholder e cita a linha", () => {
+    const doc =
+      "# Dossiê factual\n\n" +
+      "O protocolo registra a cadeia de custódia, as coordenadas e todos os responsáveis pela inspeção histórica do farol. " +
+      "A documentação foi confrontada com o diário técnico, as cartas náuticas e o inventário municipal de 1987.\n\n" +
+      "Responsável: a definir\n\n" +
+      "As duas vias autenticadas permanecem preservadas e têm proveniência conhecida.";
+    expect(motivoDocInsubstancial(doc)).toBe('contém campo sem valor no trecho "Responsável: a definir"');
   });
 });
 

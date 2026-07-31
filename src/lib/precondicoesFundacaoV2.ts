@@ -61,3 +61,8 @@ export function avaliarPrecondicoesEscrita(entrada: EntradaPrecondicoesEscrita):
   ].filter((item): item is string => Boolean(item));
   return { podeEscrever: pendencias.length === 0, pendencias };
 }
+
+/** Texto coerente com o primeiro portão que o autor realmente precisa resolver. */
+export function proximaAcaoAntesDaEscrita(pendencias: string[]): string | null {
+  return pendencias.length ? `Resolver antes da escrita: ${pendencias[0]}` : null;
+}

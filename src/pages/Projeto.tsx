@@ -40,7 +40,11 @@ import { EngineV2Panel } from "@/components/EngineV2Panel";
 import { chaveStorageDocumento, documentosParaExibir } from "@/lib/documentosFundacao";
 import { aprovarBriefingWeb, aprovacaoAindaCorresponde } from "@/lib/briefingAprovacao";
 import { useSession } from "@/hooks/useSession";
-import { avaliarPrecondicoesEscrita, avaliarPrecondicoesFundacao } from "@/lib/precondicoesFundacaoV2";
+import {
+  avaliarPrecondicoesEscrita,
+  avaliarPrecondicoesFundacao,
+  proximaAcaoAntesDaEscrita,
+} from "@/lib/precondicoesFundacaoV2";
 
 interface Edition { id: string; idioma: string; status: string; is_origem: boolean; nota_review: number | null; }
 interface Artifact { id: string; edition_id: string | null; tipo: string; storage_path: string; url_publica: string | null; created_at?: string; meta?: any; }
@@ -1017,6 +1021,7 @@ export default function Projeto() {
                 const stInterface = motivoBloqueioEscritaV2
                   ? {
                       ...st,
+                      proxima_acao: proximaAcaoAntesDaEscrita(pendenciasEscritaV2),
                       botoes: st.botoes.map((botao) =>
                         idsEscrita.has(botao.id)
                           ? { ...botao, habilitado: false, motivo_indisponivel: motivoBloqueioEscritaV2 }

@@ -572,6 +572,7 @@ async function processarJob(job: Job) {
             quality_status: classe === "qualidade" ? "blocked_quality" : "aguardando_decisao",
             engine_erro_codigo: e.codigo,
             engine_erro_classe: classe,
+            engine_erro_detalhe: e.detalhe ?? null,
             resumo:
               classe === "qualidade"
                 ? "Bloqueado por qualidade (escada de correção esgotada)"

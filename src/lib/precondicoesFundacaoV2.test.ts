@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { avaliarPrecondicoesEscrita, avaliarPrecondicoesFundacao } from "./precondicoesFundacaoV2";
+import {
+  avaliarPrecondicoesEscrita,
+  avaliarPrecondicoesFundacao,
+  proximaAcaoAntesDaEscrita,
+} from "./precondicoesFundacaoV2";
 
 describe("portões da fundação na interface", () => {
   it("[DOD:O-03] V2 exige entrevista, aprovação e autorização", () => {
@@ -92,5 +96,13 @@ describe("portões da escrita na interface", () => {
       projetoAutorizado: false,
       releaseCertificado: false,
     })).toEqual({ podeEscrever: true, pendencias: [] });
+  });
+
+  it("a próxima ação não contradiz um botão de escrita bloqueado", () => {
+    expect(proximaAcaoAntesDaEscrita([
+      "concluir a fundação",
+      "obter o certificado final de release",
+    ])).toBe("Resolver antes da escrita: concluir a fundação");
+    expect(proximaAcaoAntesDaEscrita([])).toBeNull();
   });
 });
