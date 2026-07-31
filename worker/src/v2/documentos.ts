@@ -131,6 +131,77 @@ export function indiceDeDocumentos(docs: DocumentoFundacao[], geradoEm: string):
 }
 
 /**
+ * Reconstrói os documentos contratuais a partir do índice canônico persistido.
+ *
+ * O materializador de evidência precisa fazer o caminho inverso de
+ * `documentosDaFundacao`. Antes ele reconstruía apenas os quatro documentos de
+ * núcleo e, por isso, conseguia declarar round-trip aprovado omitindo justamente
+ * os documentos variáveis exigidos por cada contrato.
+ */
+export function docsExigidosDoIndice(
+  indice: IndiceDocumentos | null | undefined,
+  lerDocumento: (caminho: string) => string
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const doc of indice?.documentos ?? []) {
+    if (doc.origem !== "contrato") continue;
+    const nome = nomeSeguroDeDoc(path.basename(doc.caminho));
+    if (!nome || doc.caminho !== `fundacao/${nome}`) {
+      throw new Error(`caminho contratual inválido no índice: ${doc.caminho}`);
+    }
+    if (Object.prototype.hasOwnProperty.call(out, nome)) {
+      throw new Error(`documento contratual duplicado no índice: ${nome}`);
+    }
+    out[nome] = lerDocumento(doc.caminho);
+  }
+  return out;
+}
+
+/**
+ * Confere que lista, hashes e índice representam o mesmo conjunto completo.
+ *
+ * Para JSON, `hashesDosDocumentos` usa JSON canônico (ordem/indentação não
+ * alteram identidade semântica). A prova de Storage confere separadamente o
+ * SHA-256 dos bytes enviados e baixados.
+ */
+export function divergenciasManifestoDocumentos(
+  docs: DocumentoFundacao[],
+  hashesEstado: Record<string, string> | null | undefined,
+  indice: IndiceDocumentos | null | undefined
+): string[] {
+  const divergencias: string[] = [];
+  const hashes = hashesDosDocumentos(docs);
+  const caminhos = docs.map((d) => d.caminho);
+  const unicos = new Set(caminhos);
+  if (unicos.size !== caminhos.length) divergencias.push("lista canônica contém caminhos duplicados");
+
+  const esperados = [...unicos].sort();
+  const noEstado = Object.keys(hashesEstado ?? {}).sort();
+  const noIndice = (indice?.documentos ?? []).map((d) => d.caminho).sort();
+  if (JSON.stringify(noEstado) !== JSON.stringify(esperados)) {
+    divergencias.push(`estado diverge da lista canônica: esperado [${esperados.join(", ")}], recebido [${noEstado.join(", ")}]`);
+  }
+  if (JSON.stringify(noIndice) !== JSON.stringify(esperados)) {
+    divergencias.push(`índice diverge da lista canônica: esperado [${esperados.join(", ")}], recebido [${noIndice.join(", ")}]`);
+  }
+
+  const indicePorCaminho = new Map((indice?.documentos ?? []).map((d) => [d.caminho, d]));
+  for (const doc of docs) {
+    if (hashesEstado?.[doc.caminho] !== hashes[doc.caminho]) {
+      divergencias.push(`hash do estado diverge: ${doc.caminho}`);
+    }
+    const item = indicePorCaminho.get(doc.caminho);
+    if (item?.hash !== hashes[doc.caminho]) {
+      divergencias.push(`hash do índice diverge: ${doc.caminho}`);
+    }
+    if (item && item.origem !== doc.origem) {
+      divergencias.push(`origem do índice diverge: ${doc.caminho}`);
+    }
+  }
+  return divergencias;
+}
+
+/**
  * Documentos que o contrato exige e a fundação NÃO produziu. A ausência não pode
  * ser engolida: vira bloqueio no portão (DOC_EXIGIDO_AUSENTE) e some da lista da
  * interface só quando de fato existir.
