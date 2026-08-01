@@ -138,14 +138,21 @@ export function validarDelta(obj: unknown, medidos: SinalMedido[]): DeltaDecisao
       if (typeof x?.motivo !== "string" || x.motivo.trim().length < 10) {
         throw new Error(`delta.${nome}[${i}].motivo obrigatório — derrubar ou acrescentar sem justificar não é julgamento`);
       }
-      const medido = medidos.find((m) => m.sinal === x.sinal);
+      const alvo = normalizarNomeSinal(x.sinal);
+      const candidatos = medidos.filter((m) => {
+        const atual = normalizarNomeSinal(m.sinal);
+        return atual === alvo || (atual.length > 2 && alvo.length > 2 && (atual.includes(alvo) || alvo.includes(atual)));
+      });
+      const medido = candidatos.length === 1 ? candidatos[0] : undefined;
       if (!medido) throw new Error(`delta.${nome}[${i}]: sinal "${String(x.sinal)}" não foi medido pelo detector`);
       if ((x.indice as number) > medido.exemplos.length) {
         throw new Error(
           `delta.${nome}[${i}]: índice ${String(x.indice)} fora do medido para "${String(x.sinal)}" (há ${medido.exemplos.length})`
         );
       }
-      return { sinal: x.sinal, indice: x.indice as number, motivo: x.motivo };
+      // O restante do pipeline trabalha com o nome canônico do detector. O
+      // modelo pode omitir a glosa entre parênteses, mas nunca criar/ambiguidade.
+      return { sinal: medido.sinal, indice: x.indice as number, motivo: x.motivo };
     });
   };
 

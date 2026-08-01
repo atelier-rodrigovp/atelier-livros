@@ -818,3 +818,33 @@ lint com 0 erros e os mesmos 3 avisos de react-refresh. O canário real ainda
 precisa ser reexecutado sobre o commit publicado desta correção antes de afirmar
 que o capítulo foi aprovado. Ausência dessa reexecução é **NÃO COMPROVADO**, não
 sucesso.
+
+### Continuação do canário real — canonicalização da cascata
+
+- correções do loop autônomo publicadas em
+  `4d0673302a08450d4995e9e6db0d4c1cc9892076`; CI, deploy e worker foram
+  alinhados nesse SHA antes da nova execução;
+- o diretório de uma tentativa concorrente anterior foi preservado apenas para
+  diagnóstico e não conta como prova;
+- canário limpo e isolado: projeto
+  `7b8a4d88-d9d5-4ddb-8797-0011909de046`, diretório
+  `C:\Users\Rodrigo Paiva\atelier-work\canario-v2-dan-brown-7b8a4d88`;
+- o canário atravessou fundação, ficha, contexto, escrita, triagem, segunda
+  passada, auditor factual e conformidade sem decisão manual;
+- defeito novo observado: o Opus abreviou o sinal medido
+  `cadencia.fragmentos colados (≤4 palavras)` para
+  `cadencia.fragmentos colados`. A triagem já resolvia nomes inequívocos, mas o
+  validador do delta exigia igualdade literal e consumiu uma tentativa técnica;
+- correção: o delta agora usa o mesmo casamento tolerante e fail-closed do
+  revisor, aceita somente um candidato inequívoco e devolve o nome canônico ao
+  restante do pipeline. Nome inventado ou ambíguo continua recusado;
+- prova de consumo: teste de integração usa o detector real, atravessa
+  `escreverCapitulo` e só aprova quando o delta abreviado é canonicalizado e
+  efetivamente altera o parecer final. Remover a chamada ou o consumidor faz o
+  teste falhar;
+- regressão após a correção: 133 arquivos e 1698 testes aprovados; build e
+  typecheck aprovados; lint com 0 erros e os 3 avisos preexistentes.
+
+O canário que revelou o defeito continua útil como diagnóstico, mas não pode
+certificar a correção porque o processo carregou o SHA anterior. A comprovação
+exige publicação e retomada única no novo SHA.

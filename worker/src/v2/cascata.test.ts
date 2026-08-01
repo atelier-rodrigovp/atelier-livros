@@ -186,6 +186,18 @@ describe("o que a decisão NÃO pode fazer", () => {
     ).toThrow(/fora do medido/);
   });
 
+  it("nome abreviado inequívoco é canonicalizado para o sinal medido", () => {
+    const completo = medido({
+      sinal: "cadencia.fragmentos colados (≤4 palavras)",
+      valor: 4,
+      exemplos: EXEMPLOS.slice(0, 4),
+    });
+    const d = validarDelta(delta({
+      derrubar: [{ sinal: "cadencia.fragmentos colados", indice: 1, motivo: "é enumeração legítima, não fragmentação" }],
+    }), [completo]);
+    expect(d.derrubar[0].sinal).toBe(completo.sinal);
+  });
+
   it("sinal que o detector não mediu é rejeitado", () => {
     expect(() =>
       validarDelta(delta({ derrubar: [{ sinal: "inventado", indice: 1, motivo: "motivo suficientemente longo" }] }), [medido()])

@@ -14,6 +14,7 @@ import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
 import { ProvedorMock } from "./provedor.js";
 import { MODELO_POR_PAPEL, resolverModelo } from "./config.js";
 import { conformidadeOk } from "./fixtures-teste.js";
+import { medirSinais } from "./sinais.js";
 import type { SceneSpec, SkillContract } from "./tipos.js";
 
 const contrato: SkillContract = {
@@ -180,6 +181,58 @@ describe("escalada só quando há o que decidir", () => {
     expect(r.problemas.join(" ")).not.toMatch(/decisão humana|anotação \(sem pausa\)/i);
     expect(chamadasDe("revisor_decisao")).toBe(1);
     expect(chamadasDe("auditor_factual")).toBe(1);
+  });
+
+  it("nome abreviado do delta é canonicalizado e realmente altera o veredito no pipeline", async () => {
+    const texto = `${prosa}\nImpossível. Não pode ser. Sem saída. Fim.`;
+    const contratoComCota: SkillContract = {
+      ...contrato,
+      ritmo: { ...contrato.ritmo, cadencia: { colados: 0 } },
+    };
+    deps.contrato = { contrato: contratoComCota, hash: "h-cadencia", origem: "teste" };
+
+    const medido = medirSinais(texto, contratoComCota).find(
+      (s) => s.sinal.startsWith("cadencia.fragmentos colados") && s.fora_da_cota
+    );
+    expect(medido, "a fixture precisa acionar o detector real de fragmentos colados").toBeDefined();
+    expect(medido!.exemplos).toHaveLength(Number(medido!.valor));
+
+    provedor.enfileirar("arquiteto_cena", JSON.stringify(ficha()));
+    provedor.enfileirar("contextualizador", CTX);
+    provedor.enfileirar("escritor", texto);
+    provedor.enfileirar("revisor_literario", parecerBase({
+      verdict: "reprovado",
+      sinais: [{
+        sinal: medido!.sinal,
+        valor: medido!.valor,
+        disposicao: "violacao_confirmada",
+        evidencia: "os fragmentos medidos foram confirmados na triagem",
+        ocorrencias_citadas: medido!.exemplos.map((_, i) => ({ indice: i + 1 })),
+        falsos_positivos: 0,
+      }],
+      correcoes: [{ local: "fim do capítulo", problema: "fragmentos colados", instrucao: "fundir as frases" }],
+    }));
+    provedor.enfileirar("revisor_decisao", JSON.stringify({
+      schema: "delta-decisao/v1",
+      // Reproduz literalmente a abreviação emitida pelo Opus no canário real.
+      derrubar: medido!.exemplos.map((_, i) => ({
+        sinal: "cadencia.fragmentos colados",
+        indice: i + 1,
+        motivo: "sequência deliberada de choque, não fragmentação involuntária",
+      })),
+      acrescentar: [],
+      veredito_sugerido: "aprovado",
+      observacao: "a sequência curta é uma escolha local e controlada",
+    }));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+    provedor.enfileirar("conformidade_ficha", conformidadeOk(ficha(), texto));
+    provedor.enfileirar("extrator_memoria", JSON.stringify({ entradas: [], divergencias: [] }));
+
+    const r = await escreverCapitulo(deps, 1);
+
+    expect(r.status).toBe("aprovado");
+    expect(chamadasDe("revisor_decisao")).toBe(1);
+    expect(chamadasDe("escritor")).toBe(1);
   });
 });
 
