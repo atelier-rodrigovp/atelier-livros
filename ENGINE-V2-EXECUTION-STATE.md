@@ -848,3 +848,32 @@ sucesso.
 O canário que revelou o defeito continua útil como diagnóstico, mas não pode
 certificar a correção porque o processo carregou o SHA anterior. A comprovação
 exige publicação e retomada única no novo SHA.
+
+### Pausa externa observada no canário
+
+O processo diagnóstico sob o SHA anterior avançou por uma reescrita autônoma,
+segunda triagem e segunda decisão. Em seguida o provedor recusou o auditor
+factual com a mensagem real `You've hit your weekly limit · resets 1pm
+(America/Sao_Paulo)`.
+
+A assinatura `weekly limit` não existia no classificador, embora `session
+limit` e `usage limit` já existissem. Consequência observada: a quota foi
+gravada incorretamente como falha de infraestrutura e o executor fez uma
+segunda chamada imediata inútil.
+
+Correção local:
+
+- `weekly limit` agora produz `LimiteMaxError` com `retry_at` futuro;
+- `executarPapel` não faz retry técnico nem incrementa o teto de falhas;
+- o run passa a registrar `PROVEDOR_LIMITE`, classe `quota`, com
+  `retry_at/aguardando_reset`, em vez de `PROVEDOR_FALHOU`/`infra`;
+- a mensagem literal do canário está coberta nos testes do parser e do
+  provedor; teste do executor comprova uma única chamada e a classificação do
+  ledger;
+- regressão: 133 arquivos e 1700 testes aprovados; build e typecheck
+  aprovados; lint com 0 erros e os 3 avisos preexistentes.
+
+O checkpoint de fundação e o capítulo reescrito foram preservados. Nenhum
+canário está ativo enquanto a quota permanece fechada. A correção só pode ser
+certificada retomando o mesmo diretório no SHA publicado quando o provedor
+voltar; até lá, canário final continua **NÃO COMPROVADO POR QUOTA EXTERNA**.

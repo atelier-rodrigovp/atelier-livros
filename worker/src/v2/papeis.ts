@@ -4,6 +4,7 @@
 // Papéis nunca tocam disco: quem persiste é o gravador (worker).
 
 import { hashJsonCanonico } from "./hash.js";
+import { LimiteMaxError } from "../limite-max.js";
 import type { Gravador } from "./gravador.js";
 import { renderizarPacote, type PacoteCompilado } from "./compilador.js";
 import { resolverModelo } from "./config.js";
@@ -108,10 +109,19 @@ export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPa
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await e.gravador.falharRun(runId, { codigo: "PROVEDOR_FALHOU", classe: "infra", mensagem: msg });
       // Limite do plano Max: NÃO é falha do papel — atravessa sem retry técnico
       // (retry local não ajuda; o loop do worker pausa com retry_at sem contar tentativa).
-      if ((err as Error)?.name === "LimiteMaxError") throw err;
+      if (err instanceof LimiteMaxError || (err as Error)?.name === "LimiteMaxError") {
+        const limite = err as LimiteMaxError;
+        await e.gravador.falharRun(runId, {
+          codigo: "PROVEDOR_LIMITE",
+          classe: "quota",
+          mensagem: msg,
+          detalhe: { retry_at: limite.retryAt, aguardando_reset: limite.aguardandoReset },
+        });
+        throw err;
+      }
+      await e.gravador.falharRun(runId, { codigo: "PROVEDOR_FALHOU", classe: "infra", mensagem: msg });
       // Fallback/deriva de modelo é configuração inválida, não instabilidade:
       // repetir a mesma chamada apenas consumiria cota no modelo errado.
       if (err instanceof ErroProvedor && err.codigo === "PROVEDOR_MODELO_DIVERGENTE") {

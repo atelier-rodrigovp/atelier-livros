@@ -35,6 +35,13 @@ describe("limiteMaxRetryAt", () => {
     expect(new Date(iso).getHours()).toBe(1);
   });
 
+  it("detecta a assinatura weekly real do canário e agenda sem retry imediato", () => {
+    const agora = new Date("2026-08-01T17:03:00");
+    const iso = limiteMaxRetryAt("You've hit your weekly limit · resets 1pm (America/Sao_Paulo)", agora)!;
+    expect(iso).not.toBeNull();
+    expect(Date.parse(iso)).toBeGreaterThan(agora.getTime());
+  });
+
   it("limite sem horário parseável → backoff padrão (~35min)", () => {
     const iso = limiteMaxRetryAt("usage limit reached", AGORA, 35 * 60_000)!;
     expect(new Date(iso).getTime()).toBeCloseTo(AGORA.getTime() + 35 * 60_000, -3);
@@ -101,6 +108,7 @@ describe("pareceLimiteMax — recuperação de jobs mortos", () => {
   it("casa a assinatura antiga do worker e a do CLI", () => {
     expect(pareceLimiteMax("Limite de uso do plano Max atingido (reseta 7:20pm). A escrita parou em 6/32.")).toBe(true);
     expect(pareceLimiteMax("You've hit your usage limit. Resets at 1:40am.")).toBe(true);
+    expect(pareceLimiteMax("You've hit your weekly limit · resets 1pm (America/Sao_Paulo)")).toBe(true);
   });
   it("NÃO casa erros reais (não recupera)", () => {
     expect(pareceLimiteMax("fundação ausente — rode criar_fundacao antes de escrever_livro")).toBe(false);

@@ -40,6 +40,12 @@ describe("classificarErroCli", () => {
     );
   });
 
+  it("weekly limit real do canário também vira pausa de quota", () => {
+    expect(classificarErroCli("claude CLI rc=1: You've hit your weekly limit · resets 1pm (America/Sao_Paulo)")).toBeInstanceOf(
+      LimiteMaxError
+    );
+  });
+
   it("erro comum do CLI segue como ErroProvedor", () => {
     const e = classificarErroCli("claude CLI rc=3221225794: ");
     expect(e).toBeInstanceOf(ErroProvedor);
@@ -101,9 +107,10 @@ describe("executarPapel — LimiteMaxError atravessa sem retry técnico", () => 
         throw new LimiteMaxError("claude CLI: session limit", new Date(Date.now() + 60_000).toISOString());
       },
     };
+    let erroPersistido: unknown;
     const gravador = {
       iniciarRun: async () => "run-1",
-      falharRun: async () => undefined,
+      falharRun: async (_id: string, erro: unknown) => { erroPersistido = erro; },
       concluirRun: async () => undefined,
     };
     await expect(
@@ -127,6 +134,7 @@ describe("executarPapel — LimiteMaxError atravessa sem retry técnico", () => 
       })
     ).rejects.toMatchObject({ name: "LimiteMaxError" });
     expect(chamadas).toBe(1); // sem 2ª tentativa
+    expect(erroPersistido).toMatchObject({ codigo: "PROVEDOR_LIMITE", classe: "quota" });
   });
 
   it("rejeita fallback do escritor sem tentar consumir uma segunda chamada", async () => {
