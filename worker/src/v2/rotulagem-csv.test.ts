@@ -39,7 +39,7 @@ function preencherHumanamente(csv: string): ReturnType<typeof parsearCsv> {
   return linhas;
 }
 
-describe("fluxo CSV de rotulagem humana", () => {
+describe("fluxo legado CSV (fora dos portões de release)", () => {
   it("preserva ponto e vírgula, aspas e quebras de linha em campos", () => {
     const dir = copiarCorpus();
     const exportado = exportarRotulosCsv(dir, { amostra: "dan-brown-aprovado-01" });

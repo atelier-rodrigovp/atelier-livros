@@ -1,5 +1,23 @@
 # Estado de execução — correção e certificação da Engine V2
 
+## CHECKPOINT ATUAL — 2026-08-01 — AUTOMAÇÃO SEM ROTULAGEM MANUAL
+
+Decisão autoritativa do autor: nenhuma planilha ou avaliação manual de detectores
+é requisito. O julgamento humano será o livro e, opcionalmente, a leitura dos
+canários. O CSV de 778 linhas é histórico e não deve ser preenchido.
+
+Base desta alteração: `1dc5171cbf39624a9b0c89fb4dc51cfc2e61332d`, branch
+`codex/pre-canary-ready`, estado anterior `PRE_CANARY_READY`. A implementação em
+curso remove `CALIBRACAO_HUMANA` e a avaliação cega humana dos portões, mantém as
+cotas congeladas e exige corpus automático íntegro, laboratório cego automático,
+canários e certificado vinculados por hash. A interface deixa de pedir palpites
+ou aprovação manual de release.
+
+Não gerar canário até esta alteração estar commitada, publicada, implantada e a
+prontidão integral voltar a provar o mesmo SHA em UI, worker e evidências.
+
+---
+
 **Objetivo ativo até a Definition of Done do prompt mestre.** Se a execução for
 interrompida, retomar daqui SEM perguntar nada.
 

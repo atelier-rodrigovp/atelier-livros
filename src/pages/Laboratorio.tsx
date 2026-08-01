@@ -1,15 +1,13 @@
-// Laboratório de skills (Engine V2, F7): roda os canários (laboratorio_v2),
-// mostra o relatório (métricas × skill, regressões, matriz de confusão) e a
-// avaliação cega HUMANA — o gabarito só é consultado depois do palpite.
+// Laboratório de skills (Engine V2, F7): roda os canários (laboratorio_v2) e
+// mostra o relatório automático (métricas × skill, regressões e confusão).
 import { useCallback, useEffect, useState } from "react";
-import { Download, FlaskConical, Loader2, Play, RotateCw } from "lucide-react";
+import { FlaskConical, Loader2, Play, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
 import type { Job } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { montarEvidenciaHumanaRelease, podeAprovarReleaseLab } from "@/lib/laboratorioV2";
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning";
 
@@ -53,21 +51,6 @@ interface LabSkillVersao {
   hash: string;
 }
 
-interface LabRelease {
-  decisao: "aprovada" | "rejeitada";
-  por: string;
-  em: string;
-}
-
-interface LabAvaliacaoHumana {
-  palpites: Record<string, string>;
-  acertos: number;
-  total: number;
-  distinguibilidade: number;
-  por: "autor";
-  em: string;
-}
-
 interface ProgressoLab {
   fase?: string;
   etapa?: string;
@@ -77,9 +60,6 @@ interface ProgressoLab {
   lab_gabarito?: Record<string, string>;
   // Versões dos contratos da execução — só aparece se o worker publicar (ver rodar.ts/job.ts).
   lab_skills?: LabSkillVersao[];
-  // Decisão do autor sobre o release, registrada manualmente pela UI.
-  lab_release?: LabRelease;
-  lab_avaliacao_humana?: LabAvaliacaoHumana;
 }
 
 const DECISAO: Record<string, { label: string; variant: BadgeVariant }> = {
@@ -222,7 +202,7 @@ function Relatorio({ rel, skillsVersoes }: { rel: LabRelatorio; skillsVersoes?: 
 
       <div className={`rounded-md border px-3 py-2 ${rel.calibracao?.pronta ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/5"}`}>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium">Calibração humana:</span>
+          <span className="text-xs font-medium">Corpus automático:</span>
           <Badge variant={rel.calibracao?.pronta ? "success" : "warning"}>
             {rel.calibracao?.pronta ? "pronta" : "pendente"}
           </Badge>
@@ -272,113 +252,11 @@ function Relatorio({ rel, skillsVersoes }: { rel: LabRelatorio; skillsVersoes?: 
   );
 }
 
-function AvaliacaoCega({
-  jobId,
-  cegas,
-  gabarito,
-  skills,
-  distinguibilidade,
-  resultadoPersistido,
-  registrando,
-  onRegistrar,
-}: {
-  jobId: string;
-  cegas: LabCega[];
-  gabarito: Record<string, string>;
-  skills: string[];
-  distinguibilidade?: number;
-  resultadoPersistido?: LabAvaliacaoHumana;
-  registrando: boolean;
-  onRegistrar: (resultado: Omit<LabAvaliacaoHumana, "por" | "em">) => Promise<void>;
-}) {
-  const chave = `lab-cego-${jobId}`;
-  const [palpites, setPalpites] = useState<Record<string, string>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(chave) ?? "{}") as Record<string, string>;
-    } catch {
-      return {};
-    }
-  });
-
-  const pendentes = cegas.filter((c) => !palpites[c.amostraId]);
-  const atual = pendentes[0];
-  const respondidas = cegas.length - pendentes.length;
-
-  function registrar(skillId: string) {
-    if (!atual) return;
-    const novo = { ...palpites, [atual.amostraId]: skillId };
-    setPalpites(novo);
-    localStorage.setItem(chave, JSON.stringify(novo));
-  }
-
-  if (!atual) {
-    const acertos = cegas.filter((c) => palpites[c.amostraId] === gabarito[c.hash]).length;
-    const humano = cegas.length ? acertos / cegas.length : 0;
-    return (
-      <div className="space-y-2 text-sm">
-        <p>
-          Você acertou <span className="font-semibold tabular-nums">{acertos}</span> de{" "}
-          <span className="tabular-nums">{cegas.length}</span> amostras —{" "}
-          <span className="font-semibold tabular-nums">{pct(humano)}</span> de acerto humano.
-        </p>
-        <p className="text-muted-foreground">
-          Distinguibilidade da máquina: <span className="tabular-nums">{pct(distinguibilidade)}</span>.
-          {distinguibilidade != null &&
-            (humano >= distinguibilidade
-              ? " Você distinguiu as vozes tão bem ou melhor que o avaliador cego automático."
-              : " O avaliador cego automático distinguiu as vozes melhor que você nesta rodada.")}
-        </p>
-        {resultadoPersistido ? (
-          <p className="text-xs text-muted-foreground">
-            Resultado registrado por {resultadoPersistido.por} em {fmtData(resultadoPersistido.em)}.
-          </p>
-        ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={registrando}
-            onClick={() => onRegistrar({ palpites, acertos, total: cegas.length, distinguibilidade: humano })}
-          >
-            {registrando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            Registrar avaliação humana
-          </Button>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span>
-          Amostra <span className="tabular-nums">{respondidas + 1}</span> de{" "}
-          <span className="tabular-nums">{cegas.length}</span>
-        </span>
-        <Badge variant="outline">{atual.categoria}</Badge>
-      </div>
-      <div className="max-h-80 overflow-y-auto rounded-md border bg-muted/20 p-4">
-        <p className="whitespace-pre-wrap font-serif text-sm leading-relaxed">{atual.texto}</p>
-      </div>
-      <div>
-        <p className="mb-2 text-xs text-muted-foreground">Qual skill escreveu este trecho?</p>
-        <div className="flex flex-wrap gap-2">
-          {skills.map((s) => (
-            <Button key={s} size="sm" variant="outline" onClick={() => registrar(s)}>
-              {s}
-            </Button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function Laboratorio() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [executando, setExecutando] = useState(false);
-  const [registrando, setRegistrando] = useState(false);
 
   const carregar = useCallback(async () => {
     const { data, error } = await supabase
@@ -421,120 +299,11 @@ export default function Laboratorio() {
     }
   }
 
-  // Registra a decisão do autor (independente da decisão automática do relatório):
-  // lê o progresso atual do job, faz merge de lab_release e grava de volta.
-  async function registrarDecisao(jobId: string, decisao: LabRelease["decisao"]) {
-    setRegistrando(true);
-    try {
-      const { data, error: errLeitura } = await supabase
-        .from("jobs")
-        .select("progresso")
-        .eq("id", jobId)
-        .single();
-      if (errLeitura) throw errLeitura;
-      const atualProg = (data?.progresso ?? {}) as ProgressoLab;
-      if (
-        decisao === "aprovada" &&
-        !podeAprovarReleaseLab({
-          decisaoAutomatica: atualProg.lab_relatorio?.decisao,
-          calibracaoPronta: atualProg.lab_relatorio?.calibracao?.pronta,
-          resultadoHumano: atualProg.lab_avaliacao_humana,
-        })
-      ) {
-        throw new Error("A aprovação exige calibração humana pronta, decisão automática aprovada e leitura humana registrada com ao menos 80% de acerto.");
-      }
-      const merged: ProgressoLab = {
-        ...atualProg,
-        lab_release: { decisao, por: "autor", em: new Date().toISOString() },
-      };
-      const { error } = await supabase.from("jobs").update({ progresso: merged }).eq("id", jobId);
-      if (error) throw error;
-      toast.success(decisao === "aprovada" ? "Aprovação registrada." : "Rejeição registrada.");
-      await carregar();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setRegistrando(false);
-    }
-  }
-
-  async function registrarAvaliacaoHumana(
-    jobId: string,
-    resultado: Omit<LabAvaliacaoHumana, "por" | "em">
-  ) {
-    setRegistrando(true);
-    try {
-      const { data, error: errLeitura } = await supabase
-        .from("jobs")
-        .select("progresso")
-        .eq("id", jobId)
-        .single();
-      if (errLeitura) throw errLeitura;
-      const atualProg = (data?.progresso ?? {}) as ProgressoLab;
-      const { error } = await supabase
-        .from("jobs")
-        .update({
-          progresso: {
-            ...atualProg,
-            lab_avaliacao_humana: {
-              ...resultado,
-              por: "autor",
-              em: new Date().toISOString(),
-            },
-          },
-        })
-        .eq("id", jobId);
-      if (error) throw error;
-      toast.success("Avaliação humana registrada.");
-      await carregar();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setRegistrando(false);
-    }
-  }
-
-  function baixarEvidenciaHumana(jobId: string, progresso: ProgressoLab) {
-    const humana = progresso.lab_avaliacao_humana;
-    const cegas = progresso.lab_cegas;
-    const gabaritoPorHash = progresso.lab_gabarito;
-    const execucaoId = progresso.lab_execucao_id ?? progresso.lab_relatorio?.execucaoId;
-    if (!humana || !cegas?.length || !gabaritoPorHash || !execucaoId) {
-      toast.error("A execução não contém avaliação humana e gabarito completos.");
-      return;
-    }
-    try {
-      const evidencia = montarEvidenciaHumanaRelease({
-        jobId,
-        execucaoId,
-        humana,
-        amostras: cegas,
-        gabaritoPorHash,
-      });
-      const blob = new Blob([JSON.stringify(evidencia, null, 2) + "\n"], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `avaliacao-humana-${execucaoId}.json`;
-      link.click();
-      URL.revokeObjectURL(url);
-    } catch (erro) {
-      toast.error((erro as Error).message);
-    }
-  }
-
   const atual = jobs[0];
   const pgAtual = atual ? progressoDe(atual) : undefined;
   const jobRelatorio = jobs.find((j) => j.status === "done" && progressoDe(j).lab_relatorio);
   const pgRelatorio = jobRelatorio ? progressoDe(jobRelatorio) : undefined;
   const emAndamento = atual?.status === "queued" || atual?.status === "running";
-  const podeAprovarRelease = podeAprovarReleaseLab({
-    decisaoAutomatica: pgRelatorio?.lab_relatorio?.decisao,
-    calibracaoPronta: pgRelatorio?.lab_relatorio?.calibracao?.pronta,
-    resultadoHumano: pgRelatorio?.lab_avaliacao_humana,
-  });
-  const releaseRegistradaValida =
-    pgRelatorio?.lab_release?.decisao !== "aprovada" || podeAprovarRelease;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -542,7 +311,7 @@ export default function Laboratorio() {
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Laboratório</h1>
           <p className="mt-1 text-muted-foreground">
-            Canários das skills V2: métricas por voz, regressões e avaliação cega.
+            Canários das skills V2: métricas por voz, regressões e julgamento cego automático.
           </p>
         </div>
         <Button onClick={executar} disabled={executando || emAndamento}>
@@ -609,117 +378,6 @@ export default function Laboratorio() {
               </CardHeader>
               <CardContent>
                 <Relatorio rel={pgRelatorio.lab_relatorio} skillsVersoes={pgRelatorio.lab_skills} />
-              </CardContent>
-            </Card>
-          )}
-
-          {jobRelatorio && pgRelatorio?.lab_relatorio && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-xl">Decisão de release</CardTitle>
-                <CardDescription>
-                  A versão ativa dos contratos é a publicada com o worker (repo); este registro
-                  documenta a decisão de release.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="text-xs text-muted-foreground">Decisão automática:</span>
-                  <Badge
-                    variant={
-                      (DECISAO[pgRelatorio.lab_relatorio.decisao] ?? { variant: "outline" as BadgeVariant })
-                        .variant
-                    }
-                  >
-                    {(DECISAO[pgRelatorio.lab_relatorio.decisao] ?? { label: pgRelatorio.lab_relatorio.decisao })
-                      .label}
-                  </Badge>
-                </div>
-                {pgRelatorio.lab_release ? (
-                  <>
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
-                      <span className="text-xs text-muted-foreground">Decisão do autor:</span>
-                      <Badge
-                        variant={
-                          pgRelatorio.lab_release.decisao === "aprovada"
-                            ? releaseRegistradaValida ? "success" : "warning"
-                            : "destructive"
-                        }
-                      >
-                        {pgRelatorio.lab_release.decisao}
-                        {!releaseRegistradaValida ? " · sem prova vigente" : ""}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">
-                        · {pgRelatorio.lab_release.por} · {fmtData(pgRelatorio.lab_release.em)}
-                      </span>
-                    </div>
-                    {!releaseRegistradaValida && (
-                      <p className="text-xs text-amber-700 dark:text-amber-400">
-                        Este registro é legado e não satisfaz o protocolo atual; execute e registre a leitura humana v2.
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      disabled={registrando || !podeAprovarRelease}
-                      title={
-                        podeAprovarRelease
-                          ? undefined
-                          : "Exige calibração humana pronta, decisão automática aprovada e leitura humana registrada com ao menos 80%."
-                      }
-                      onClick={() => registrarDecisao(jobRelatorio.id, "aprovada")}
-                    >
-                      {registrando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                      Registrar aprovação do autor
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={registrando}
-                      onClick={() => registrarDecisao(jobRelatorio.id, "rejeitada")}
-                    >
-                      {registrando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                      Registrar rejeição
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {jobRelatorio && !!pgRelatorio?.lab_cegas?.length && pgRelatorio.lab_gabarito && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-xl">Avaliação cega humana</CardTitle>
-                <CardDescription>
-                  Leia cada trecho e diga qual skill o escreveu — o gabarito só é revelado no fim.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <AvaliacaoCega
-                  key={jobRelatorio.id}
-                  jobId={jobRelatorio.id}
-                  cegas={pgRelatorio.lab_cegas}
-                  gabarito={pgRelatorio.lab_gabarito}
-                  skills={skillsDoRelatorio(pgRelatorio.lab_relatorio, pgRelatorio.lab_gabarito)}
-                  distinguibilidade={pgRelatorio.lab_relatorio?.distinguibilidade}
-                  resultadoPersistido={pgRelatorio.lab_avaliacao_humana}
-                  registrando={registrando}
-                  onRegistrar={(resultado) => registrarAvaliacaoHumana(jobRelatorio.id, resultado)}
-                />
-                {pgRelatorio.lab_avaliacao_humana && (
-                  <Button
-                    className="mt-3"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => baixarEvidenciaHumana(jobRelatorio.id, pgRelatorio)}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    Baixar evidência para certificação
-                  </Button>
-                )}
               </CardContent>
             </Card>
           )}

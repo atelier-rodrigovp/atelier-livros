@@ -9,7 +9,7 @@ const rel = (over: Record<string, unknown> = {}) => ({
     pre_canary: "PRE_CANARY_BLOQUEADO: PAPEIS_REAIS",
     release_producao: "RELEASE_PRODUCAO_BLOQUEADO",
   },
-  bloqueios_producao: ["CALIBRACAO_HUMANA"],
+  bloqueios_producao: ["CERTIFICADO_RELEASE"],
   bloqueios: [],
   ...over,
 });
@@ -19,7 +19,7 @@ describe("payload publicado", () => {
     const p = payloadDaProntidao(rel());
     expect(p.schema).toBe(SCHEMA_PRONTIDAO_PUBLICADA);
     expect(p.head).toHaveLength(40);
-    expect(p.bloqueios_producao).toEqual(["CALIBRACAO_HUMANA"]);
+    expect(p.bloqueios_producao).toEqual(["CERTIFICADO_RELEASE"]);
   });
 
   it("NÃO leva log, caminho de arquivo nem nada além do necessário", () => {

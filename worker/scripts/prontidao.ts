@@ -5,7 +5,7 @@
 // e nenhum deles é inferido do outro.
 //
 // Nível 1 — fiação e mutação: cada gate/campo decisório muda uma decisão?
-// Nível 2 — acurácia: fixtures HUMANAS rotuladas confirmam a classificação?
+// Nível 2 — corpus automático: integridade, cobertura e cotas congeladas.
 // Nível 3 — ciclo real: ponta a ponta, com provedor determinístico.
 //
 // Uso: npm run prontidao            (níveis 1 e 2)
@@ -22,7 +22,7 @@ import { interpretarRelatorioVitest, type ExecucaoVitest, type RelatorioBruto } 
 import { conferirDod, resumoConferencia, type ConferenciaDod } from "../src/v2/dod-conferencia.js";
 import { capturarHead, rodarComando } from "../src/v2/execucao.js";
 import { DIR_EVIDENCIAS, validarEvidencia, type FingerprintsCodigo, type TipoEvidencia } from "../src/v2/evidencia-externa.js";
-import { LIMITACOES_RECALL, resumoLimitacoes } from "../src/limitacoes-conhecidas.js";
+import { resumoLimitacoes } from "../src/limitacoes-conhecidas.js";
 import { fatiasDoInventario, INVENTARIO_DOD } from "../src/v2/inventario-dod.js";
 import { compararVersaoWorker } from "../../src/lib/versaoWorker.js";
 import { workerOnline } from "../../src/lib/status.js";
@@ -44,7 +44,7 @@ type Estado =
   | "IMPLEMENTACAO_LOCAL_APROVADA" | "IMPLEMENTACAO_LOCAL_REPROVADA"
   | "REGRESSAO_LOCAL_APROVADA" | "REGRESSAO_LOCAL_REPROVADA"
   | "INTEGRACAO_MOCK_APROVADA" | "INTEGRACAO_MOCK_REPROVADA" | "INTEGRACAO_MOCK_NAO_EXECUTADA"
-  | "ACURACIA_CALIBRADA" | "ACURACIA_AGUARDANDO_ROTULAGEM"
+  | "CORPUS_AUTOMATICO_PRONTO_PARA_LAB" | "CORPUS_AUTOMATICO_REPROVADO"
   | "MIGRACOES_REMOTAS_COMPROVADAS" | "MIGRACOES_REMOTAS_NAO_COMPROVADAS"
   | "INTEGRACAO_REAL_APROVADA" | "INTEGRACAO_REAL_NAO_COMPROVADA"
   | "UI_AUTENTICADA_APROVADA" | "UI_AUTENTICADA_NAO_COMPROVADA"
@@ -288,16 +288,14 @@ function nivel2(): { itens: Item[]; calibrada: boolean } {
       ok: true,
       evidencia: `versão ${r.corpus_versao}, hash ${r.corpus_hash.slice(0, 12)}, ${r.skills.length} skill(s)`,
     });
-    const semRotulo = r.pendencias.filter((p) => /rotul|humano|valida/i.test(p));
     itens.push({
-      item: "rótulos humanos suficientes",
-      ok: semRotulo.length === 0 ? true : null,
-      evidencia:
-        semRotulo.length === 0
-          ? "todas as amostras com status validado_humano"
-          : `${semRotulo.length} pendência(s) de rotulagem: ${semRotulo.slice(0, 3).join(" · ")}`,
+      item: "corpus automático pronto para laboratório",
+      ok: r.pendencias.length === 0,
+      evidencia: r.pendencias.length === 0
+        ? "hashes, contratos, splits e classes aprovadas/contraste conferem; cotas permanecem congeladas"
+        : r.pendencias.slice(0, 3).join(" · "),
     });
-    for (const p of r.pendencias.filter((x) => !/rotul|humano|valida/i.test(x)).slice(0, 10)) {
+    for (const p of r.pendencias.slice(0, 10)) {
       itens.push({ item: "pendência de calibração", ok: null, evidencia: p });
     }
     // Limitação de recall conhecida é dívida de ACURÁCIA, não de implementação:
@@ -306,7 +304,7 @@ function nivel2(): { itens: Item[]; calibrada: boolean } {
     for (const l of resumoLimitacoes()) {
       itens.push({ item: "limitação de recall conhecida", ok: null, evidencia: l });
     }
-    return { itens, calibrada: r.pendencias.length === 0 && LIMITACOES_RECALL.length === 0 };
+    return { itens, calibrada: r.pendencias.length === 0 };
   } catch (e) {
     itens.push({
       item: "corpus de calibração",
@@ -702,7 +700,7 @@ const dodOk = n1.dod.ok;
 // com prova que nunca saiu desta máquina.
 const implementacao: Estado = n1.ok && dodOk ? "IMPLEMENTACAO_LOCAL_APROVADA" : "IMPLEMENTACAO_LOCAL_REPROVADA";
 const regressaoEstado: Estado = reg.ok ? "REGRESSAO_LOCAL_APROVADA" : "REGRESSAO_LOCAL_REPROVADA";
-const acuracia: Estado = n2.calibrada ? "ACURACIA_CALIBRADA" : "ACURACIA_AGUARDANDO_ROTULAGEM";
+const acuracia: Estado = n2.calibrada ? "CORPUS_AUTOMATICO_PRONTO_PARA_LAB" : "CORPUS_AUTOMATICO_REPROVADO";
 const integracaoMock: Estado = n3.mockOk ? "INTEGRACAO_MOCK_APROVADA" : "INTEGRACAO_MOCK_REPROVADA";
 
 const migracoes: Estado = ext.aprovadas.migracoes_remotas ? "MIGRACOES_REMOTAS_COMPROVADAS" : "MIGRACOES_REMOTAS_NAO_COMPROVADAS";
@@ -730,7 +728,7 @@ if (versaoWorker.ok !== true) bloqueiosPreCanary.push("WORKER_ATIVO_SHA_ATUAL");
 
 const preCanaryReady = bloqueiosPreCanary.length === 0;
 const bloqueiosProducao = [...bloqueiosPreCanary];
-if (!n2.calibrada) bloqueiosProducao.push("CALIBRACAO_HUMANA");
+if (!n2.calibrada) bloqueiosProducao.push("CORPUS_AUTOMATICO");
 if (!releaseAtual.ok) bloqueiosProducao.push("CERTIFICADO_RELEASE");
 
 const releaseProducao = bloqueiosProducao.length === 0 && releaseAtual.ok
@@ -762,9 +760,7 @@ const relatorio: Relatorio = {
       : releaseProducao,
     canarios_novos: !preCanaryReady
       ? `BLOQUEADOS: ${bloqueiosPreCanary.join(", ")}`
-      : !n2.calibrada
-        ? "BLOQUEADOS: CALIBRACAO_HUMANA"
-        : "CANARIO_AUTORIZADO_PELO_GATE",
+      : "CANARIO_AUTORIZADO_PELO_GATE",
     // Autorização é por projeto e vive no banco: este comando não a infere.
     projeto: "PROJETO_NAO_AUTORIZADO (por projeto; consulte engine_autorizacoes_v2)",
     prova_literaria: "PROVA_LITERARIA_NAO_EXECUTADA",

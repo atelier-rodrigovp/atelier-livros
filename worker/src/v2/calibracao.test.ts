@@ -112,7 +112,7 @@ describe("calibração reproduzível", () => {
     expect(() => carregarCorpusCalibracao(dir)).toThrow(/não cobrem exatamente/);
   });
 
-  it("não deriva candidata enquanto houver revisão humana pendente", () => {
+  it("não depende de revisão humana e nunca promove cota automaticamente", () => {
     const dir = montarCorpus([
       { id: "cal-pos", split: "calibracao", texto: POSITIVA, positiva: true, status: "pendente_humano" },
       { id: "cal-neg", split: "calibracao", texto: NEGATIVA, positiva: false },
@@ -120,8 +120,8 @@ describe("calibração reproduzível", () => {
       { id: "hold-neg", split: "holdout", texto: NEGATIVA, positiva: false },
     ]);
     const r = analisarCalibracao(dir);
-    expect(r.pendencias).toContain("dan-brown: 1 amostra(s) aguardam validação humana");
-    expect(r.skills[0].sinais.every((s) => s.decisao === "rotulacao_pendente")).toBe(true);
+    expect(r.pendencias.join(" ")).not.toMatch(/humana|rotulagem/i);
+    expect(r.skills[0].sinais.every((s) => s.decisao !== "promover_para_lab")).toBe(true);
   });
 
   it("deriva só no split de calibração e mede a candidata no holdout", () => {

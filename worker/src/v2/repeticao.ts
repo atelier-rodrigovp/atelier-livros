@@ -319,7 +319,7 @@ export function medirManeirismosDoLivro(
 export const CAPITULOS_PARA_SINAL = 5;
 
 export interface PoliticaManeirismo {
-  /** Padrões cujo limiar foi CALIBRADO por rotulagem humana. */
+  /** Padrões com limiar congelado no contrato versionado e auditado pelo laboratório. */
   calibrados: Record<string, { limiarCapitulos: number; corpus_hash: string }>;
   /** Exceções de voz autoral: o autor aceitou este padrão nesta obra. */
   excecoesDoAutor: { padrao: string; justificativa: string; em: string }[];

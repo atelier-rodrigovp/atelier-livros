@@ -13,23 +13,12 @@ import { MODELOS_V2_FIXOS } from "./config.js";
 import { carregarContrato } from "./contrato.js";
 import { hashJsonCanonico } from "./hash.js";
 import { falhasAvaliacaoCega, type RelatorioLab } from "./lab/relatorio.js";
-import { ordenarAmostrasCegas, type AvaliacaoCega } from "./lab/avaliar.js";
+import type { AvaliacaoCega } from "./lab/avaliar.js";
 import type { ExecucaoLab } from "./lab/rodar.js";
 import { ENGINE_V2_VERSION, ErroEngine, type MapaModelos } from "./tipos.js";
 import { capturarHead, worktreeLimpa } from "./execucao.js";
 
-export const SCHEMA_CERTIFICADO_RELEASE_V2 = "engine-v2-release/v2" as const;
-export const SCHEMA_AVALIACAO_HUMANA_RELEASE = "human-blind-evaluation/v1" as const;
-
-export interface AvaliacaoHumanaRelease {
-  schema: typeof SCHEMA_AVALIACAO_HUMANA_RELEASE;
-  lab_execucao_id: string;
-  job_id?: string;
-  por: string;
-  em: string;
-  palpites: Record<string, string>;
-  gabarito: Record<string, string>;
-}
+export const SCHEMA_CERTIFICADO_RELEASE_V2 = "engine-v2-release/v3" as const;
 
 export interface CertificadoReleaseV2 {
   schema: typeof SCHEMA_CERTIFICADO_RELEASE_V2;
@@ -54,14 +43,6 @@ export interface CertificadoReleaseV2 {
     execucao_hash: string;
     avaliacao_automatica_hash: string;
     relatorio_hash: string;
-  };
-  avaliacao_humana: {
-    evidencia_hash: string;
-    por: string;
-    em: string;
-    acertos: number;
-    total: number;
-    distinguibilidade: number;
   };
 }
 
@@ -88,7 +69,6 @@ export interface EvidenciasParaCertificar {
   execucaoLab: ExecucaoLab;
   avaliacaoAutomatica: AvaliacaoCega;
   relatorioLab: RelatorioLab;
-  avaliacaoHumana: AvaliacaoHumanaRelease;
   calibracao: ResultadoCalibracao;
   emitidoPor: string;
   emitidoEm: string;
@@ -98,7 +78,6 @@ export interface EvidenciasParaCertificar {
     execucaoLab: string;
     avaliacaoAutomatica: string;
     relatorioLab: string;
-    avaliacaoHumana: string;
   };
 }
 
@@ -291,48 +270,6 @@ function validarLaboratorio(
   return erros;
 }
 
-function validarHumana(
-  evidencia: AvaliacaoHumanaRelease,
-  execucao: ExecucaoLab,
-  skills: string[]
-): { erros: string[]; acertos: number; total: number; distinguibilidade: number } {
-  const erros: string[] = [];
-  if (evidencia.schema !== SCHEMA_AVALIACAO_HUMANA_RELEASE) erros.push("avaliação humana: schema inválido");
-  if (evidencia.lab_execucao_id !== execucao.id) erros.push("avaliação humana: lab_execucao_id divergente");
-  if (evidencia.por.trim().length < 3) erros.push("avaliação humana: revisor ausente");
-  if (!Number.isFinite(Date.parse(evidencia.em))) erros.push("avaliação humana: data inválida");
-
-  const esperadas = ordenarAmostrasCegas(execucao).amostras.map((amostra, indice) => ({
-    id: `A-${String(indice + 1).padStart(2, "0")}-${amostra.textoHash.slice(0, 12)}`,
-    skill: amostra.skillId,
-  }));
-  const idsEsperados = new Set(esperadas.map((item) => item.id));
-  const idsPalpites = Object.keys(evidencia.palpites ?? {});
-  const idsGabarito = Object.keys(evidencia.gabarito ?? {});
-  if (
-    idsPalpites.length !== esperadas.length ||
-    idsGabarito.length !== esperadas.length ||
-    idsPalpites.some((id) => !idsEsperados.has(id)) ||
-    idsGabarito.some((id) => !idsEsperados.has(id))
-  ) {
-    erros.push("avaliação humana: amostras ausentes, extras ou duplicadas");
-  }
-  let acertos = 0;
-  for (const esperada of esperadas) {
-    const gabarito = evidencia.gabarito?.[esperada.id];
-    const palpite = evidencia.palpites?.[esperada.id];
-    if (gabarito !== esperada.skill) erros.push(`avaliação humana/${esperada.id}: gabarito adulterado`);
-    if (!skills.includes(palpite)) erros.push(`avaliação humana/${esperada.id}: palpite inválido`);
-    if (palpite === esperada.skill) acertos++;
-  }
-  const total = esperadas.length;
-  const distinguibilidade = total ? acertos / total : 0;
-  if (distinguibilidade < 0.8) {
-    erros.push(`avaliação humana: distinguibilidade ${(distinguibilidade * 100).toFixed(1)}% abaixo de 80%`);
-  }
-  return { erros, acertos, total, distinguibilidade };
-}
-
 export function estadoAtualRelease(
   skillsIds: string[],
   calibracao: ResultadoCalibracao,
@@ -393,12 +330,6 @@ export function criarCertificadoRelease(
     estado.calibracao.corpusHash,
     estado.modelos
   ));
-  const humana = validarHumana(
-    evidencias.avaliacaoHumana,
-    evidencias.execucaoLab,
-    estado.skills.map((skill) => skill.id)
-  );
-  erros.push(...humana.erros);
   for (const [nome, hash] of Object.entries(evidencias.hashes)) {
     if (!/^[0-9a-f]{64}$/.test(hash)) erros.push(`hash de evidência inválido: ${nome}`);
   }
@@ -429,14 +360,6 @@ export function criarCertificadoRelease(
       execucao_hash: evidencias.hashes.execucaoLab,
       avaliacao_automatica_hash: evidencias.hashes.avaliacaoAutomatica,
       relatorio_hash: evidencias.hashes.relatorioLab,
-    },
-    avaliacao_humana: {
-      evidencia_hash: evidencias.hashes.avaliacaoHumana,
-      por: evidencias.avaliacaoHumana.por,
-      em: evidencias.avaliacaoHumana.em,
-      acertos: humana.acertos,
-      total: humana.total,
-      distinguibilidade: humana.distinguibilidade,
     },
   };
 }
@@ -482,18 +405,11 @@ export function validarCertificadoContraEstado(
   if (skillId && !certificado.skills.some((skill) => skill.id === skillId)) {
     erros.push(`skill ${skillId} não consta no certificado`);
   }
-  if (
-    certificado.avaliacao_humana.total <= 0 ||
-    certificado.avaliacao_humana.acertos / certificado.avaliacao_humana.total < 0.8
-  ) {
-    erros.push("avaliação humana certificada abaixo de 80%");
-  }
   const hashes = [
     certificado.canarios?.evidencia_hash,
     certificado.laboratorio?.execucao_hash,
     certificado.laboratorio?.avaliacao_automatica_hash,
     certificado.laboratorio?.relatorio_hash,
-    certificado.avaliacao_humana?.evidencia_hash,
   ];
   if (hashes.some((hash) => !/^[0-9a-f]{64}$/.test(hash ?? ""))) {
     erros.push("hashes das evidências certificadas são inválidos");

@@ -41,7 +41,7 @@ function tela(jobs: Job[], chapters: { numero: number; quality_status?: string |
           local: "IMPLEMENTACAO_LOCAL_APROVADA",
           preCanary: "PRE_CANARY_BLOQUEADO: PAPEIS_REAIS",
           producao: "RELEASE_PRODUCAO_BLOQUEADO",
-          bloqueios: ["CALIBRACAO_HUMANA"],
+          bloqueios: ["CERTIFICADO_RELEASE"],
           indisponivel: null,
         }}
       />
@@ -116,6 +116,6 @@ describe("estados operacionais da página do projeto", () => {
     const { html } = tela([job({ status: "running", progresso: { fase: "ESCRITA", cap_atual: 1 } })], []);
     expect(html).toContain("IMPLEMENTACAO_LOCAL_APROVADA");
     expect(html).toContain("RELEASE_PRODUCAO_BLOQUEADO");
-    expect(html).toContain("CALIBRACAO_HUMANA");
+    expect(html).toContain("CERTIFICADO_RELEASE");
   });
 });

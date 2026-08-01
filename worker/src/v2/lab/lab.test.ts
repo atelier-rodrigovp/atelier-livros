@@ -241,7 +241,7 @@ describe("lab — avaliação cega e relatório", () => {
     expect(r.vazamentos.length).toBe(1);
   });
 
-  it("não aprova release sem evidência de calibração humana pronta", async () => {
+  it("não aprova release sem evidência de corpus automático pronto", async () => {
     const { exec } = await execComMock();
     const itens = exec.amostras.map((a, i) => ({
       amostraAnonima: `A-${i}`,

@@ -89,8 +89,7 @@ cd worker
 npx tsx scripts/v2-certificar-release.ts `
   --canarios "<WORK_DIR>\canario-v2-resumo.json" `
   --lab-dir "<WORK_DIR>\lab-v2\<execucao-id>" `
-  --humano "<downloads>\avaliacao-humana-<execucao-id>.json" `
-  --por "Nome do autor/revisor" `
+  --por "operacao-automatica" `
   --commit "<SHA Git completo>"
 
 npx tsx scripts/v2-verificar-release.ts
@@ -98,8 +97,9 @@ npx tsx scripts/v2-verificar-release.ts
 
 O primeiro comando rejeita exceções, hashes divergentes, menos de dois
 capítulos plenos por skill, menos de três amostras de laboratório por skill,
-regressão, vazamento, avaliação automática abaixo dos pisos ou avaliação humana
-abaixo de 80%, além de evidência produzida por modelos diferentes dos pins. O
+regressão, vazamento ou avaliação automática abaixo dos pisos, além de evidência
+produzida por modelos diferentes dos pins. Nenhuma rotulagem ou avaliação humana
+é exigida; a leitura dos canários é editorial e opcional. O
 segundo é o mesmo gate executado pelo CI.
 
 ## Recuperação de falhas

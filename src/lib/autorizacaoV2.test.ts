@@ -83,7 +83,7 @@ describe("prontidão publicada", () => {
       pre_canary: "PRE_CANARY_BLOQUEADO: PAPEIS_REAIS",
       release_producao: "RELEASE_PRODUCAO_BLOQUEADO",
     },
-    bloqueios_producao: ["CALIBRACAO_HUMANA", "MIGRACOES_REMOTAS"],
+    bloqueios_producao: ["CERTIFICADO_RELEASE", "MIGRACOES_REMOTAS"],
   };
 
   it("lê local, produção e bloqueios", () => {
@@ -91,7 +91,7 @@ describe("prontidão publicada", () => {
     expect(p.local).toBe("IMPLEMENTACAO_LOCAL_APROVADA");
     expect(p.preCanary).toBe("PRE_CANARY_BLOQUEADO: PAPEIS_REAIS");
     expect(p.producao).toBe("RELEASE_PRODUCAO_BLOQUEADO");
-    expect(p.bloqueios).toEqual(["CALIBRACAO_HUMANA", "MIGRACOES_REMOTAS"]);
+    expect(p.bloqueios).toEqual(["CERTIFICADO_RELEASE", "MIGRACOES_REMOTAS"]);
     expect(p.indisponivel).toBeNull();
   });
 

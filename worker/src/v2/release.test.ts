@@ -12,9 +12,7 @@ import type { AmostraLab, ExecucaoLab } from "./lab/rodar.js";
 import {
   criarCertificadoRelease,
   calcularHashRuntimeV2,
-  SCHEMA_AVALIACAO_HUMANA_RELEASE,
   validarCertificadoContraEstado,
-  type AvaliacaoHumanaRelease,
   type EstadoAtualRelease,
   type EvidenciasParaCertificar,
 } from "./release.js";
@@ -126,18 +124,6 @@ function fixture(): { evidencias: EvidenciasParaCertificar; estado: EstadoAtualR
     vazamentos: [],
     decisao: "aprovar",
   };
-  const paresHumanos = ordenadas.map((amostra, indice) => [
-    `A-${String(indice + 1).padStart(2, "0")}-${amostra.textoHash.slice(0, 12)}`,
-    amostra.skillId,
-  ] as const);
-  const avaliacaoHumana: AvaliacaoHumanaRelease = {
-    schema: SCHEMA_AVALIACAO_HUMANA_RELEASE,
-    lab_execucao_id: execucaoLab.id,
-    por: "Autor Humano",
-    em: "2026-07-25T14:00:00.000Z",
-    palpites: Object.fromEntries(paresHumanos),
-    gabarito: Object.fromEntries(paresHumanos),
-  };
   const calibracao: ResultadoCalibracao = {
     schema: "calibration-result/v1",
     corpus_versao: "1.0.0",
@@ -181,7 +167,6 @@ function fixture(): { evidencias: EvidenciasParaCertificar; estado: EstadoAtualR
       execucaoLab,
       avaliacaoAutomatica,
       relatorioLab,
-      avaliacaoHumana,
       calibracao,
       emitidoPor: "Autor Humano",
       emitidoEm: "2026-07-25T15:00:00.000Z",
@@ -191,7 +176,6 @@ function fixture(): { evidencias: EvidenciasParaCertificar; estado: EstadoAtualR
         execucaoLab: "2".repeat(64),
         avaliacaoAutomatica: "3".repeat(64),
         relatorioLab: "4".repeat(64),
-        avaliacaoHumana: "5".repeat(64),
       },
     },
   };
@@ -231,7 +215,6 @@ describe("certificação de release V2", () => {
       "hoover-mcfadden": 2,
       romantasy: 2,
     });
-    expect(certificado.avaliacao_humana).toMatchObject({ acertos: 9, total: 9, distinguibilidade: 1 });
     expect(validarCertificadoContraEstado(certificado, estado, "dan-brown")).toEqual([]);
   });
 
@@ -243,13 +226,15 @@ describe("certificação de release V2", () => {
       .toThrow(/capítulos não estão 100% aprovados plenos/);
   });
 
-  it("rejeita avaliação humana abaixo de 80% e gabarito adulterado", () => {
+  it("rejeita avaliação cega automática abaixo do piso sem pedir avaliação humana", () => {
     const { evidencias, estado } = fixture();
-    const ids = Object.keys(evidencias.avaliacaoHumana.palpites);
-    for (const id of ids.slice(0, 3)) evidencias.avaliacaoHumana.palpites[id] = "dan-brown";
-    evidencias.avaliacaoHumana.gabarito[ids[0]] = "romantasy";
+    for (const item of evidencias.avaliacaoAutomatica.porAmostra.slice(0, 3)) {
+      item.skillAdivinhada = item.skillReal === "dan-brown" ? "romantasy" : "dan-brown";
+      item.acertou = false;
+    }
+    evidencias.avaliacaoAutomatica.distinguibilidade = 2 / 3;
     expect(() => criarCertificadoRelease(evidencias, estado))
-      .toThrow(/gabarito adulterado|distinguibilidade/);
+      .toThrow(/distinguibilidade|acerto/);
   });
 
   it("recalcula prosa, saída cega e gates em vez de confiar no JSON", () => {

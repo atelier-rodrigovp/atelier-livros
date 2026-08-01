@@ -1,7 +1,7 @@
 // Engine V2 — handler do job "laboratorio_v2" (F7).
 // Roda o laboratório com o provedor real, faz a avaliação cega e publica o
 // relatório em jobs.progresso (a UI lê de lá; amostras cegas SEM a skill para
-// a avaliação humana às cegas).
+// o julgamento automático às cegas).
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";

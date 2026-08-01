@@ -4,7 +4,6 @@
 // npx tsx scripts/v2-certificar-release.ts `
 //   --canarios <canario-v2-resumo.json> `
 //   --lab-dir <diretorio-da-execucao-do-lab> `
-//   --humano <avaliacao-humana.json> `
 //   --por "Nome do autor/revisor" `
 //   --commit <sha-git-completo>
 
@@ -16,7 +15,6 @@ import { analisarCalibracao } from "../src/v2/calibracao.js";
 import {
   criarCertificadoRelease,
   estadoAtualRelease,
-  type AvaliacaoHumanaRelease,
 } from "../src/v2/release.js";
 import type { AvaliacaoCega } from "../src/v2/lab/avaliar.js";
 import type { RelatorioLab } from "../src/v2/lab/relatorio.js";
@@ -40,16 +38,14 @@ function lerJson<T>(arquivo: string): { valor: T; hash: string } {
 
 const canariosArg = arg("--canarios");
 const labDirArg = arg("--lab-dir");
-const humanoArg = arg("--humano");
 const emitidoPor = arg("--por") ?? "";
 const codigoCommit = arg("--commit") ?? "";
-if (!canariosArg || !labDirArg || !humanoArg || !emitidoPor || !codigoCommit) {
-  throw new Error("uso: --canarios <json> --lab-dir <dir> --humano <json> --por <nome> --commit <sha-completo>");
+if (!canariosArg || !labDirArg || !emitidoPor || !codigoCommit) {
+  throw new Error("uso: --canarios <json> --lab-dir <dir> --por <nome> --commit <sha-completo>");
 }
 
 const canariosPath = path.resolve(canariosArg);
 const labDir = path.resolve(labDirArg);
-const humanoPath = path.resolve(humanoArg);
 const saida = path.resolve(arg("--output") ?? path.join(workerDir, "release", "engine-v2.json"));
 if (existsSync(saida)) {
   throw new Error(`certificado já existe em ${saida}; preserve-o no Git e remova/substitua somente por decisão explícita`);
@@ -59,7 +55,6 @@ const canarios = lerJson<unknown>(canariosPath);
 const execucao = lerJson<ExecucaoLab>(path.join(labDir, "execucao.json"));
 const automatica = lerJson<AvaliacaoCega>(path.join(labDir, "avaliacao-cega.json"));
 const relatorio = lerJson<RelatorioLab>(path.join(labDir, "relatorio.json"));
-const humana = lerJson<AvaliacaoHumanaRelease>(humanoPath);
 const calibracao = analisarCalibracao(path.join(workerDir, "calibration", "v1"));
 const skills = ["dan-brown", "hoover-mcfadden", "romantasy"];
 const estado = estadoAtualRelease(skills, calibracao);
@@ -68,7 +63,6 @@ const certificado = criarCertificadoRelease({
   execucaoLab: execucao.valor,
   avaliacaoAutomatica: automatica.valor,
   relatorioLab: relatorio.valor,
-  avaliacaoHumana: humana.valor,
   calibracao,
   emitidoPor,
   emitidoEm: new Date().toISOString(),
@@ -78,7 +72,6 @@ const certificado = criarCertificadoRelease({
     execucaoLab: execucao.hash,
     avaliacaoAutomatica: automatica.hash,
     relatorioLab: relatorio.hash,
-    avaliacaoHumana: humana.hash,
   },
 }, estado);
 

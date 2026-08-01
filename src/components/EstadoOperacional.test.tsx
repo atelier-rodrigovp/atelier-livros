@@ -293,14 +293,14 @@ describe("local não é produção, e mock não é integração real", () => {
           local: "IMPLEMENTACAO_LOCAL_APROVADA",
           preCanary: "PRE_CANARY_BLOQUEADO: PAPEIS_REAIS",
           producao: "RELEASE_PRODUCAO_BLOQUEADO",
-          bloqueios: ["CALIBRACAO_HUMANA", "MIGRACOES_REMOTAS"],
+          bloqueios: ["CERTIFICADO_RELEASE", "MIGRACOES_REMOTAS"],
           indisponivel: null,
         }}
       />
     );
     expect(html).toContain("IMPLEMENTACAO_LOCAL_APROVADA");
     expect(html).toContain("RELEASE_PRODUCAO_BLOQUEADO");
-    expect(html).toContain("CALIBRACAO_HUMANA");
+    expect(html).toContain("CERTIFICADO_RELEASE");
     expect(html).toContain("MIGRACOES_REMOTAS");
   });
 
@@ -407,7 +407,7 @@ describe("produção bloqueada lista os motivos", () => {
             pre_canary: "PRE_CANARY_BLOQUEADO: PAPEIS_REAIS",
             release_producao: "RELEASE_PRODUCAO_BLOQUEADO",
           },
-          bloqueios_producao: ["CALIBRACAO_HUMANA", "MIGRACOES_REMOTAS", "INTEGRACAO_REAL"],
+          bloqueios_producao: ["CORPUS_AUTOMATICO", "MIGRACOES_REMOTAS", "INTEGRACAO_REAL"],
         })}
       />
     );

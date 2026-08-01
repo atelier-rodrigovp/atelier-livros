@@ -1,7 +1,7 @@
 {
   "schema": "calibration-corpus/v1",
   "versao": "1.0.0",
-  "descricao": "Corpus inicial autocontido da calibração Engine V2; splits congelados antes da rotulagem humana.",
+  "descricao": "Corpus automático autocontido da Engine V2; splits e classes contrastivas congelados para auditoria reprodutível.",
   "amostras": [
     {
       "id": "dan-brown-aprovado-01",
