@@ -480,6 +480,7 @@ export default function Projeto() {
     const resultado = await abrirUrlAssinada(async () => a.url_publica || signedUrl(bucket, a.storage_path));
     if (resultado === "ausente") toast.error("Não consegui gerar o link.");
     if (resultado === "bloqueado") toast.error("O navegador bloqueou a nova aba. Libere popups e tente novamente.");
+    if (resultado === "aberto" || resultado === "mesma_aba") toast.success("Download iniciado.");
   }
 
   if (!proj) return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
@@ -947,6 +948,7 @@ export default function Projeto() {
                             );
                             if (resultado === "ausente") toast.error(`Documento não encontrado no Storage: ${d.caminho}`);
                             if (resultado === "bloqueado") toast.error("O navegador bloqueou a nova aba. Libere popups e tente novamente.");
+                            if (resultado === "aberto" || resultado === "mesma_aba") toast.success("Download iniciado.");
                           }}>
                             <FileText className="h-4 w-4" /> {d.titulo}
                             {d.origem === "contrato" && (
