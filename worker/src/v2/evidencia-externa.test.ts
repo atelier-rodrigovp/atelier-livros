@@ -328,6 +328,16 @@ describe("11 papéis reais e cascata não viram um checkbox vazio", () => {
     expect(validarEvidencia(ev, esperadoPapeis).motivos.join(" ")).toContain("provedor não comprova modelo real");
   });
 
+  it("aceita somente os aliases legados fechados quando o provedor é Claude real", () => {
+    const legado = base();
+    legado.execucoes_reais!.papeis.find((r) => r.papel === "editor_estrutural")!.model_name = "sonnet";
+    expect(validarEvidencia(legado, esperadoPapeis)).toEqual({ valida: true, motivos: [] });
+
+    const hibrido = base();
+    hibrido.execucoes_reais!.papeis.find((r) => r.papel === "editor_estrutural")!.model_name = "gpt-sonnet";
+    expect(validarEvidencia(hibrido, esperadoPapeis).motivos.join(" ")).toContain("modelo não comprova Claude real");
+  });
+
   it("decisão em outro alvo não comprova cascata", () => {
     const ev = base();
     ev.execucoes_reais!.papeis.find((r) => r.papel === "revisor_decisao")!.alvo = "outro-alvo";

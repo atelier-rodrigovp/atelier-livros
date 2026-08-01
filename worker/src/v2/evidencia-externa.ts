@@ -307,7 +307,12 @@ export function validarEvidencia(ev: unknown, esperado: EsperadoEvidencia): Vali
         if (!provedor.includes("claude") || provedor.includes("mock") || provedor.includes("fixture")) {
           motivos.push(`${run.papel}: provedor não comprova modelo real (${run.model_provider || "ausente"})`);
         }
-        if (!/^claude-/i.test(run.model_name ?? "") || /mock|fixture/i.test(run.model_name ?? "")) {
+        // O ledger legado gravava os aliases fechados aceitos pelo próprio worker
+        // (`opus`, `sonnet`, `haiku`). Eles continuam sendo Claude real quando o
+        // provedor também é Claude; qualquer outro apelido ou híbrido é recusado.
+        const modelo = run.model_name?.trim() ?? "";
+        const modeloClaudeReal = /^claude-/i.test(modelo) || /^(?:opus|sonnet|haiku)$/i.test(modelo);
+        if (!modeloClaudeReal || /mock|fixture/i.test(modelo)) {
           motivos.push(`${run.papel}: modelo não comprova Claude real (${run.model_name || "ausente"})`);
         }
         if (!/^[0-9a-f]{64}$/i.test(run.output_hash ?? "")) motivos.push(`${run.papel}: output_hash inválido`);
