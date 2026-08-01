@@ -135,6 +135,18 @@ describe("execução que não aprova NÃO produz arquivo", () => {
     await expect(gerarEvidencia(opcoesBase({ introspectar: undefined }))).rejects.toThrow(/introspecção/);
   });
 
+  it("papeis_reais sem consulta do ledger aborta", async () => {
+    await expect(
+      gerarEvidencia(
+        opcoesBase({
+          tipo: "papeis_reais",
+          introspectar: undefined,
+          baixarArtefatos: undefined,
+        })
+      )
+    ).rejects.toThrow(/ledger engine_runs/);
+  });
+
   it("não existe parâmetro que declare aprovação", async () => {
     // Passar `resultado: "aprovado"` não tem efeito: o campo é derivado.
     const passos = [{ nome: "x", executar: () => ({ exit_code: 3, saida: "falhou" }) }];

@@ -7,18 +7,22 @@ export const ENGINE_V2_VERSION = "2.0.0";
 // Papéis e classes de capacidade (F3)
 // ---------------------------------------------------------------------------
 
-export type Papel =
-  | "arquiteto_enredo"      // fundação, estrutura, revelações, promessa editorial
-  | "arquiteto_cena"        // objetivo, obstáculo, evento, mudança, gancho (ficha)
-  | "contextualizador"      // fatos, continuidade, seleção de contexto — proibido prosa
-  | "escritor"              // ÚNICO autor de prosa
-  | "revisor_literario"     // voz, transparência, emoção, propulsão, aderência
-  | "auditor_factual"       // nomes, datas, geografia, continuidade, conhecimento
-  | "editor_estrutural"     // cortes, fusões, ordem, macro-ritmo (propõe; worker aplica)
-  | "conformidade_ficha"     // a prosa cumpriu a ficha? (fatia G) — evidência localizada
-  | "extrator_memoria"       // o que a PROSA APROVADA estabeleceu (fatia H)
-  | "julgamento_idioma"     // variante-alvo × narração e diálogo (fatia J)
-  | "revisor_decisao";       // 2a passada da cascata: julga o delta, nao reescreve o parecer
+/** Lista canônica: o gate pré-canário compara execução real papel a papel. */
+export const PAPEIS_ENGINE_V2 = [
+  "arquiteto_enredo",      // fundação, estrutura, revelações, promessa editorial
+  "arquiteto_cena",        // objetivo, obstáculo, evento, mudança, gancho (ficha)
+  "contextualizador",      // fatos, continuidade, seleção de contexto — proibido prosa
+  "escritor",              // ÚNICO autor de prosa
+  "revisor_literario",     // voz, transparência, emoção, propulsão, aderência
+  "auditor_factual",       // nomes, datas, geografia, continuidade, conhecimento
+  "editor_estrutural",     // cortes, fusões, ordem, macro-ritmo (propõe; worker aplica)
+  "conformidade_ficha",    // a prosa cumpriu a ficha? (fatia G) — evidência localizada
+  "extrator_memoria",      // o que a PROSA APROVADA estabeleceu (fatia H)
+  "julgamento_idioma",     // variante-alvo × narração e diálogo (fatia J)
+  "revisor_decisao",       // 2a passada da cascata: julga o delta, não reescreve o parecer
+] as const;
+
+export type Papel = (typeof PAPEIS_ENGINE_V2)[number];
 // O "gravador de estado" NÃO é um papel: é código determinístico (gravador.ts).
 
 export type ClasseCapacidade = "raciocinio" | "fatos" | "prosa" | "julgamento";

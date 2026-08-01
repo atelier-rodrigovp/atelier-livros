@@ -78,13 +78,18 @@ describe("prontidão publicada", () => {
     schema: SCHEMA_PRONTIDAO_PUBLICADA,
     head: "190868d0000000000000000000000000000000aa",
     gerado_em: "2026-07-28T16:00:00Z",
-    estados: { implementacao_local: "IMPLEMENTACAO_LOCAL_APROVADA", release_producao: "RELEASE_PRODUCAO_BLOQUEADO" },
+    estados: {
+      implementacao_local: "IMPLEMENTACAO_LOCAL_APROVADA",
+      pre_canary: "PRE_CANARY_BLOQUEADO: PAPEIS_REAIS",
+      release_producao: "RELEASE_PRODUCAO_BLOQUEADO",
+    },
     bloqueios_producao: ["CALIBRACAO_HUMANA", "MIGRACOES_REMOTAS"],
   };
 
   it("lê local, produção e bloqueios", () => {
     const p = lerProntidaoPublicada(payload);
     expect(p.local).toBe("IMPLEMENTACAO_LOCAL_APROVADA");
+    expect(p.preCanary).toBe("PRE_CANARY_BLOQUEADO: PAPEIS_REAIS");
     expect(p.producao).toBe("RELEASE_PRODUCAO_BLOQUEADO");
     expect(p.bloqueios).toEqual(["CALIBRACAO_HUMANA", "MIGRACOES_REMOTAS"]);
     expect(p.indisponivel).toBeNull();

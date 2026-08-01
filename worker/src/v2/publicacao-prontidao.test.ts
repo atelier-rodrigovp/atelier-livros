@@ -4,7 +4,11 @@ import { ErroPublicacao, payloadDaProntidao, SCHEMA_PRONTIDAO_PUBLICADA } from "
 const rel = (over: Record<string, unknown> = {}) => ({
   head: "190868d0000000000000000000000000000000aa",
   gerado_em: "2026-07-28T16:00:00Z",
-  estados: { implementacao_local: "IMPLEMENTACAO_LOCAL_APROVADA", release_producao: "RELEASE_PRODUCAO_BLOQUEADO" },
+  estados: {
+    implementacao_local: "IMPLEMENTACAO_LOCAL_APROVADA",
+    pre_canary: "PRE_CANARY_BLOQUEADO: PAPEIS_REAIS",
+    release_producao: "RELEASE_PRODUCAO_BLOQUEADO",
+  },
   bloqueios_producao: ["CALIBRACAO_HUMANA"],
   bloqueios: [],
   ...over,
@@ -48,7 +52,11 @@ describe("o que NÃO pode ser publicado", () => {
   });
 
   it("relatório sem release_producao", () => {
-    expect(() => payloadDaProntidao(rel({ estados: { implementacao_local: "X" } }))).toThrow(/release_producao/);
+    expect(() => payloadDaProntidao(rel({ estados: { implementacao_local: "X", pre_canary: "Y" } }))).toThrow(/release_producao/);
+  });
+
+  it("relatório sem pre_canary", () => {
+    expect(() => payloadDaProntidao(rel({ estados: { implementacao_local: "X", release_producao: "Z" } }))).toThrow(/pre_canary/);
   });
 
   it("entrada ausente", () => {

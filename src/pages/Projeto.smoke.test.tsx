@@ -39,8 +39,10 @@ function tela(jobs: Job[], chapters: { numero: number; quality_status?: string |
         acoes={todasAcoes()}
         prontidao={{
           local: "IMPLEMENTACAO_LOCAL_APROVADA",
+          preCanary: "PRE_CANARY_BLOQUEADO: PAPEIS_REAIS",
           producao: "RELEASE_PRODUCAO_BLOQUEADO",
           bloqueios: ["CALIBRACAO_HUMANA"],
+          indisponivel: null,
         }}
       />
     ),

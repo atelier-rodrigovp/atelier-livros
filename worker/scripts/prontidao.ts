@@ -26,6 +26,7 @@ import { LIMITACOES_RECALL, resumoLimitacoes } from "../src/limitacoes-conhecida
 import { fatiasDoInventario, INVENTARIO_DOD } from "../src/v2/inventario-dod.js";
 import { compararVersaoWorker } from "../../src/lib/versaoWorker.js";
 import { workerOnline } from "../../src/lib/status.js";
+import { verificarReleaseAtual } from "../src/v2/release.js";
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(AQUI, "..", "..");
@@ -48,6 +49,8 @@ type Estado =
   | "INTEGRACAO_REAL_APROVADA" | "INTEGRACAO_REAL_NAO_COMPROVADA"
   | "UI_AUTENTICADA_APROVADA" | "UI_AUTENTICADA_NAO_COMPROVADA"
   | "PROVEDOR_REAL_APROVADO" | "PROVEDOR_REAL_NAO_COMPROVADO"
+  | "PAPEIS_REAIS_APROVADOS" | "PAPEIS_REAIS_NAO_COMPROVADOS"
+  | "PRE_CANARY_READY" | "PRE_CANARY_BLOQUEADO"
   | "RELEASE_PRODUCAO_CERTIFICADO" | "RELEASE_PRODUCAO_BLOQUEADO"
   | "PROJETO_AUTORIZADO" | "PROJETO_NAO_AUTORIZADO"
   | "PROVA_LITERARIA_APROVADA" | "PROVA_LITERARIA_REPROVADA" | "PROVA_LITERARIA_NAO_EXECUTADA"
@@ -602,6 +605,7 @@ const TIPOS_EXTERNOS: { tipo: TipoEvidencia; rotulo: string }[] = [
   { tipo: "integracao_real", rotulo: "fluxo real interface → worker → Storage com download conferido" },
   { tipo: "ui_autenticada", rotulo: "interface autenticada: abertura e download dos documentos V2" },
   { tipo: "provedor_real", rotulo: "smoke do provedor real (sem escrita literária)" },
+  { tipo: "papeis_reais", rotulo: "11 papéis com modelo real e cascata em duas passadas" },
 ];
 
 /**
@@ -669,10 +673,21 @@ const reg = regressao(suiteRaiz);
 console.log("Evidências externas…\n");
 const ext = externas();
 const versaoWorker = await versaoDoWorkerNoAr();
+const releaseAtual = verificarReleaseAtual();
+const certificadoExiste = existsSync(path.join(DIR_WORKER, "release", "engine-v2.json"));
+const certificadoRelease: Item = {
+  item: "certificado final de release contra o checkout atual",
+  // Ausente antes do canário é NÃO COMPROVADO, não falha local. Presente e
+  // inválido é falha: alguém publicou uma alegação que não se sustenta.
+  ok: releaseAtual.ok ? true : certificadoExiste ? false : null,
+  evidencia: releaseAtual.ok
+    ? `certificado válido para ${releaseAtual.certificado!.codigo_commit.slice(0, 7)}`
+    : releaseAtual.erros.join(" · "),
+};
 
 const bloqueios: string[] = [];
 const naoComprovados: string[] = [];
-for (const i of [...n1.itens, ...n2.itens, ...n3.itens, ...reg.itens, versaoWorker, ...ext.itens]) {
+for (const i of [...n1.itens, ...n2.itens, ...n3.itens, ...reg.itens, versaoWorker, ...ext.itens, certificadoRelease]) {
   if (i.ok === false) bloqueios.push(`${i.item}: ${i.evidencia}`);
   if (i.ok === null) naoComprovados.push(`${i.item}: ${i.evidencia}`);
 }
@@ -694,24 +709,33 @@ const migracoes: Estado = ext.aprovadas.migracoes_remotas ? "MIGRACOES_REMOTAS_C
 const integracaoReal: Estado = ext.aprovadas.integracao_real ? "INTEGRACAO_REAL_APROVADA" : "INTEGRACAO_REAL_NAO_COMPROVADA";
 const uiAutenticada: Estado = ext.aprovadas.ui_autenticada ? "UI_AUTENTICADA_APROVADA" : "UI_AUTENTICADA_NAO_COMPROVADA";
 const provedorReal: Estado = ext.aprovadas.provedor_real ? "PROVEDOR_REAL_APROVADO" : "PROVEDOR_REAL_NAO_COMPROVADO";
+const papeisReais: Estado = ext.aprovadas.papeis_reais ? "PAPEIS_REAIS_APROVADOS" : "PAPEIS_REAIS_NAO_COMPROVADOS";
 
-// TODOS os bloqueios de produção de uma vez. Reportar só o primeiro fazia o
-// autor consertar um item e descobrir o seguinte na rodada seguinte.
-const bloqueiosProducao: string[] = [];
-if (!(n1.ok && dodOk)) bloqueiosProducao.push("IMPLEMENTACAO_LOCAL");
-if (!reg.ok) bloqueiosProducao.push("REGRESSAO_LOCAL");
-if (!n3.mockOk) bloqueiosProducao.push("INTEGRACAO_MOCK");
-if (!n2.calibrada) bloqueiosProducao.push("CALIBRACAO_HUMANA");
-if (!ext.aprovadas.migracoes_remotas) bloqueiosProducao.push("MIGRACOES_REMOTAS");
-if (!ext.aprovadas.integracao_real) bloqueiosProducao.push("INTEGRACAO_REAL");
-if (!ext.aprovadas.ui_autenticada) bloqueiosProducao.push("DOWNLOAD_AUTENTICADO");
-if (!ext.aprovadas.provedor_real) bloqueiosProducao.push("PROVEDOR_REAL");
+// PRE_CANARY é um gate próprio. Calibração e certificado final vêm depois;
+// misturá-los permitia chamar "release certificada" a saúde local sem sequer
+// existir `worker/release/engine-v2.json`.
+const bloqueiosPreCanary: string[] = [];
+if (!(n1.ok && dodOk)) bloqueiosPreCanary.push("IMPLEMENTACAO_LOCAL");
+if (!reg.ok) bloqueiosPreCanary.push("REGRESSAO_LOCAL");
+if (!n3.mockOk) bloqueiosPreCanary.push("INTEGRACAO_MOCK");
+if (!ext.aprovadas.migracoes_remotas) bloqueiosPreCanary.push("MIGRACOES_REMOTAS");
+if (!ext.aprovadas.integracao_real) bloqueiosPreCanary.push("INTEGRACAO_REAL");
+if (!ext.aprovadas.ui_autenticada) bloqueiosPreCanary.push("DOWNLOAD_AUTENTICADO");
+if (!ext.aprovadas.provedor_real) bloqueiosPreCanary.push("PROVEDOR_REAL");
+if (!ext.aprovadas.papeis_reais) bloqueiosPreCanary.push("ONZE_PAPEIS_E_CASCATA_REAL");
 // Worker rodando codigo que nao e o do repositorio bloqueia producao: a regua
-// em execucao nao e a regua auditada. Offline (ok === null) nao bloqueia — se
-// nada esta no ar, nada produz com codigo velho.
-if (versaoWorker.ok === false) bloqueiosProducao.push("CODIGO_DO_WORKER");
+// em execucao nao e a regua auditada. Para PRE_CANARY, offline também bloqueia:
+// a definição exige worker ATIVO no SHA atual.
+if (versaoWorker.ok !== true) bloqueiosPreCanary.push("WORKER_ATIVO_SHA_ATUAL");
 
-const releaseProducao = bloqueiosProducao.length === 0 ? "RELEASE_PRODUCAO_CERTIFICADO" : "RELEASE_PRODUCAO_BLOQUEADO";
+const preCanaryReady = bloqueiosPreCanary.length === 0;
+const bloqueiosProducao = [...bloqueiosPreCanary];
+if (!n2.calibrada) bloqueiosProducao.push("CALIBRACAO_HUMANA");
+if (!releaseAtual.ok) bloqueiosProducao.push("CERTIFICADO_RELEASE");
+
+const releaseProducao = bloqueiosProducao.length === 0 && releaseAtual.ok
+  ? "RELEASE_PRODUCAO_CERTIFICADO"
+  : "RELEASE_PRODUCAO_BLOQUEADO";
 
 const relatorio: Relatorio = {
   gerado_em: new Date().toISOString(),
@@ -729,12 +753,18 @@ const relatorio: Relatorio = {
     integracao_real: integracaoReal,
     ui_autenticada: uiAutenticada,
     provedor_real: provedorReal,
+    papeis_reais: papeisReais,
+    pre_canary: preCanaryReady
+      ? "PRE_CANARY_READY"
+      : `PRE_CANARY_BLOQUEADO: ${bloqueiosPreCanary.join(", ")}`,
     release_producao: bloqueiosProducao.length
       ? `${releaseProducao}: ${bloqueiosProducao.join(", ")}`
       : releaseProducao,
-    // Canário NOVO exige decisão do autor: a engine não gera canário sozinha, e
-    // sem canário novo não há evidência nova para certificar.
-    canarios_novos: "BLOQUEADOS_AGUARDANDO_AUTOR",
+    canarios_novos: !preCanaryReady
+      ? `BLOQUEADOS: ${bloqueiosPreCanary.join(", ")}`
+      : !n2.calibrada
+        ? "BLOQUEADOS: CALIBRACAO_HUMANA"
+        : "CANARIO_AUTORIZADO_PELO_GATE",
     // Autorização é por projeto e vive no banco: este comando não a infere.
     projeto: "PROJETO_NAO_AUTORIZADO (por projeto; consulte engine_autorizacoes_v2)",
     prova_literaria: "PROVA_LITERARIA_NAO_EXECUTADA",
@@ -763,6 +793,7 @@ secao("NÍVEL 3 — ciclo real", n3.itens);
 secao("REGRESSÃO LOCAL (DoD completa)", reg.itens);
 secao("CÓDIGO EM EXECUÇÃO", [versaoWorker]);
 secao("VERIFICAÇÃO EXTERNA (fora do alcance desta máquina)", ext.itens);
+secao("CERTIFICADO FINAL", [certificadoRelease]);
 
 if (reg.avisos.length) {
   console.log("\n--- AVISOS (não bloqueiam, não somem) ---");

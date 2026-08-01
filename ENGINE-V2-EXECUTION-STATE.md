@@ -3,6 +3,49 @@
 **Objetivo ativo até a Definition of Done do prompt mestre.** Se a execução for
 interrompida, retomar daqui SEM perguntar nada.
 
+## CHECKPOINT ATUAL — 2026-08-01 — PRÉ-CANÁRIO (prevalece sobre o histórico abaixo)
+
+Branch: `codex/pre-canary-ready`. Base desta fatia: `0f6a5c1`. O prompt
+persistente agora autoriza commits pequenos, push/deploy, reinício controlado do
+worker, verificação autenticada e chamadas reais limitadas de papéis. Continua
+**PROIBIDO gerar canário ou prosa nova antes de `PRE_CANARY_READY`**, alterar
+outro projeto de livro, afrouxar gates ou inventar rótulos humanos.
+
+Estado antes do commit desta fatia:
+
+- Banco real, fundação, cinco documentos no Storage, download autenticado e
+  interface do projeto exclusivo `8ba4cd11-7514-4f42-aeb1-c6f8544483a5` já
+  haviam sido comprovados no SHA `0f6a5c1`; zero capítulos e escrita bloqueada.
+- Auditoria do ledger confirmou 7/11 papéis reais. Nunca haviam rodado:
+  `conformidade_ficha`, `extrator_memoria`, `julgamento_idioma` e
+  `revisor_decisao`; portanto a cascata real também nunca havia rodado.
+- A prontidão podia declarar release certificado sem validar a existência e a
+  validade de `worker/release/engine-v2.json`. Esta fatia corrige a afirmação,
+  não cria certificado.
+- Implementado um gate formal separado `PRE_CANARY`: exige regressão, banco,
+  integração/download autenticado, provedor real, worker ativo no SHA atual e
+  evidência dos 11 papéis + cascata. Calibração humana e certificado final
+  permanecem posteriores ao pré-canário.
+- A evidência dos papéis agora exige 11 papéis únicos, UUIDs reais, provedor e
+  modelo Claude, `output_hash`, timestamps e, na cascata, mesmo projeto/alvo e
+  `revisor_decisao.parent_run_id = revisor_literario.run_id`. Os testes de
+  mutação derrubam cada elo removido.
+- `scripts/v2-provar-papeis-reais.ts` foi criado para usar como entrada um
+  capítulo preexistente do projeto `5ac9d614-...` em modo somente leitura e
+  persistir **somente** runs no projeto exclusivo de prova. Não escreve prosa,
+  capítulo, review, spec, memória ou estado.
+- Testes direcionados: 137/137 e depois 71/71; typecheck do worker limpo.
+  Prontidão integral executou 1.687 testes na raiz e 1.462 no worker, todos
+  verdes. Ela encontrou uma lacuna de tipo na prop da interface para
+  `preCanary`; corrigida em seguida. Typecheck raiz e build foram repetidos e
+  passaram.
+
+Próxima ação sem pedir decisão: revisar/stagear somente os arquivos da meta,
+commitar e publicar o mesmo SHA; reiniciar o worker; executar a prova limitada
+dos papéis; gerar as cinco evidências atuais; rodar e publicar a prontidão;
+confirmar `PRE_CANARY_READY` na interface autenticada. Só então parar na
+rotulagem humana, sem fabricar resposta.
+
 SHA inicial da sessão: `34b2cea`. Branch: `master`. **Nunca fazer push sem
 autorização explícita; nunca aplicar SQL remoto; nunca gerar canário; nunca
 chamar modelo de prosa; nunca escrever capítulo.**

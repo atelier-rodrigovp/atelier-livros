@@ -15,7 +15,13 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { gerarEvidencia } from "../src/v2/gerador-evidencia.js";
-import type { ArtefatoEvidencia, EstadoRemoto, FingerprintsCodigo, TipoEvidencia } from "../src/v2/evidencia-externa.js";
+import type {
+  ArtefatoEvidencia,
+  EstadoRemoto,
+  ExecucoesReaisEvidencia,
+  FingerprintsCodigo,
+  TipoEvidencia,
+} from "../src/v2/evidencia-externa.js";
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(AQUI, "..", "..");
@@ -70,6 +76,7 @@ interface Entrada {
   passos: { nome: string; comando?: string; exit_code: number | null; saida: string }[];
   remoto?: Omit<EstadoRemoto, "remote_schema_hash">;
   artefatos?: ArtefatoEvidencia[];
+  execucoes_reais?: ExecucoesReaisEvidencia;
 }
 
 const caminho = arg("--entrada");
@@ -98,6 +105,7 @@ const r = await gerarEvidencia({
   })),
   introspectar: e.remoto ? async () => e.remoto! : undefined,
   baixarArtefatos: e.artefatos ? async () => e.artefatos! : undefined,
+  execucoesReais: e.execucoes_reais ? async () => e.execucoes_reais! : undefined,
 });
 
 console.log(`evidência gravada: ${path.relative(RAIZ, r.caminho)}`);
