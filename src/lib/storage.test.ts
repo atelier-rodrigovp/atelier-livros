@@ -69,7 +69,21 @@ describe("download assinado preserva o gesto do clique", () => {
     expect(aba.close).toHaveBeenCalledOnce();
   });
 
-  it("retorna bloqueado quando o navegador recusa a abertura", async () => {
-    await expect(abrirUrlAssinada(async () => "https://storage.exemplo/doc", () => null)).resolves.toBe("bloqueado");
+  it("usa a aba atual quando o navegador não oferece popups", async () => {
+    const navegar = vi.fn();
+    await expect(abrirUrlAssinada(
+      async () => "https://storage.exemplo/doc",
+      () => null,
+      navegar
+    )).resolves.toBe("mesma_aba");
+    expect(navegar).toHaveBeenCalledWith("https://storage.exemplo/doc");
+  });
+
+  it("retorna bloqueado somente quando popup e navegação falham", async () => {
+    await expect(abrirUrlAssinada(
+      async () => "https://storage.exemplo/doc",
+      () => null,
+      () => { throw new Error("navegação indisponível"); }
+    )).resolves.toBe("bloqueado");
   });
 });

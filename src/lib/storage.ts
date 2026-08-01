@@ -12,7 +12,7 @@ export async function signedUrl(
   return data?.signedUrl ?? null;
 }
 
-export type ResultadoAberturaUrl = "aberto" | "ausente" | "bloqueado";
+export type ResultadoAberturaUrl = "aberto" | "mesma_aba" | "ausente" | "bloqueado";
 
 type AbaDownload = {
   location: { href: string };
@@ -20,6 +20,14 @@ type AbaDownload = {
 };
 
 type AbrirJanela = (url: string, alvo: string) => AbaDownload | null;
+type NavegarJanelaAtual = (url: string) => void;
+
+const abrirJanelaPadrao: AbrirJanela = (url, alvo) => {
+  if (typeof window === "undefined" || typeof window.open !== "function") return null;
+  return window.open(url, alvo) as AbaDownload | null;
+};
+
+const navegarJanelaAtualPadrao: NavegarJanelaAtual = (url) => window.location.assign(url);
 
 /**
  * Reserva a aba DURANTE o gesto do clique e só depois espera a URL assinada.
@@ -28,7 +36,8 @@ type AbrirJanela = (url: string, alvo: string) => AbaDownload | null;
  */
 export async function abrirUrlAssinada(
   obterUrl: () => Promise<string | null>,
-  abrir: AbrirJanela = (url, alvo) => window.open(url, alvo) as AbaDownload | null
+  abrir: AbrirJanela = abrirJanelaPadrao,
+  navegarJanelaAtual: NavegarJanelaAtual = navegarJanelaAtualPadrao
 ): Promise<ResultadoAberturaUrl> {
   const aba = abrir("", "_blank");
   let url: string | null;
@@ -42,7 +51,14 @@ export async function abrirUrlAssinada(
     aba?.close();
     return "ausente";
   }
-  if (!aba) return "bloqueado";
+  if (!aba) {
+    try {
+      navegarJanelaAtual(url);
+      return "mesma_aba";
+    } catch {
+      return "bloqueado";
+    }
+  }
   aba.location.href = url;
   return "aberto";
 }
