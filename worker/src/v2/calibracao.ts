@@ -251,7 +251,7 @@ export function carregarCorpusCalibracao(dirCorpus: string): {
     const hash = sha256(texto);
     if (hash !== meta.sha256) throw new Error(`${meta.id}: hash divergente (manifesto ${meta.sha256}; arquivo ${hash})`);
     const contrato = carregarContrato(meta.skill);
-    const sinais = medirSinais(texto, contrato.contrato);
+    const sinais = medirSinais(texto, contrato.contrato, { compatibilidadeCorpusV1: true });
     const rotulos = JSON.parse(readFileSync(rotulosPath, "utf8")) as RotulosAmostra;
     validarRotulos(meta, texto, sinais, rotulos);
     amostras.push({ meta, texto, sinais, rotulos });

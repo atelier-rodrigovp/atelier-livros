@@ -102,6 +102,27 @@ describe("citar índice válido funciona", () => {
     const hid = hidratarOcorrenciasCitadas(conferir(comIndices([3])) as Parecer, [medido()]);
     expect(hid.sinais[0].ocorrencias_citadas?.[0]).toEqual({ indice: 3, trecho: EXEMPLOS[2] });
   });
+
+  it("fragColados real publica o par, aceita #1 e hidrata antes de gravar (canário 2026-08-01)", () => {
+    const texto =
+      "Ele entrou na sala devagar, medindo cada passo até a mesa. " +
+      "Impossível. Não pode ser. Depois sentou e respirou fundo antes de abrir o envelope lacrado.";
+    const sinal = medirSinais(texto, CONTRATO).find((s) => /ênfase COLADOS/.test(s.sinal))!;
+    expect(sinal.valor).toBe(1);
+    expect(sinal.exemplos).toEqual(["Impossível. / Não pode ser."]);
+    const bruto = parecer([{
+      sinal: sinal.sinal,
+      valor: 1,
+      disposicao: "violacao_confirmada",
+      evidencia: "dois fragmentos consecutivos",
+      ocorrencias_citadas: [{ indice: 1 }],
+      falsos_positivos: 0,
+    }]);
+    const validado = conferir(bruto, [sinal]) as Parecer;
+    expect(hidratarOcorrenciasCitadas(validado, [sinal]).sinais[0].ocorrencias_citadas).toEqual([
+      { indice: 1, trecho: "Impossível. / Não pode ser." },
+    ]);
+  });
 });
 
 describe("índice inválido REPROVA", () => {

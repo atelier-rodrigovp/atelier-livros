@@ -262,10 +262,17 @@ function problemasDeCitacao(parecer: Parecer, sinaisMedidos: SinalMedido[]): str
     }
     if (ehSinalEscalar(medido.sinal) || typeof medido.valor !== "number") continue;
 
-    // Sinal medido SEM exemplos (ex.: fragColados — o detector conta pares mas não
-    // os lista, para não invalidar os rótulos do corpus de calibração): não há como
-    // vincular; as citações do revisor são aceitas sem cross-check.
-    if (medido.exemplos.length === 0) continue;
+    // Sinal de ocorrência sem exemplos não pode aceitar um índice órfão: depois
+    // da gravação não existiria array capaz de resolvê-lo. Escalares já saíram
+    // acima. Este ramo é só uma defesa para detectores legados/incompletos.
+    if (medido.exemplos.length === 0) {
+      if ((disposto.ocorrencias_citadas ?? []).some((o) => typeof o.indice === "number" && !o.trecho?.trim())) {
+        problemas.push(
+          `sinal "${disposto.sinal}": detector não publicou ocorrências numeradas; cite o trecho literal em vez de índice`
+        );
+      }
+      continue;
+    }
     // MULTISET com prefixo: o mesmo trecho pode ocorrer N vezes ("Raspagem." ×3)
     // e o revisor cita cada uma; o exemplo do detector é truncado (110 chars),
     // então citação e exemplo casam também por prefixo longo (≥60 chars) — ainda

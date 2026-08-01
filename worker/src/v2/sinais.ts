@@ -119,7 +119,11 @@ function isencaoDePiso(contrato: SkillContract, texto: string): string | undefin
 }
 
 /** Mede todos os sinais editoriais do texto, com cotas vindas SÓ do contrato. */
-export function medirSinais(texto: string, contrato: SkillContract): SinalMedido[] {
+export function medirSinais(
+  texto: string,
+  contrato: SkillContract,
+  opts?: { compatibilidadeCorpusV1?: boolean }
+): SinalMedido[] {
   const out: SinalMedido[] = [];
 
   const gn = contarGnomico(texto);
@@ -154,7 +158,14 @@ export function medirSinais(texto: string, contrato: SkillContract): SinalMedido
     // (t.nome) nunca casava — cadência declarada jamais saía da cota (defeito da
     // auditoria de fechamento).
     const declarou = t.chave != null && contrato.ritmo.cadencia != null && t.chave in (contrato.ritmo.cadencia ?? {});
-    out.push({ sinal: `cadencia.${t.nome}`, valor: t.n, cota: declarou ? { max: t.alvo } : undefined, fora_da_cota: declarou && t.acima, exemplos: t.todosExemplos ?? t.exemplos });
+    // O corpus histórico v1 foi congelado antes de fragColados publicar os pares.
+    // A compatibilidade afeta SOMENTE a lista explicativa desse loader legado;
+    // contagem, cota e produção usam o detector atual. No pipeline real todo
+    // sinal de ocorrência precisa ser numerável para o parecer ser auditável.
+    const exemplos = opts?.compatibilidadeCorpusV1 && t.chave === "fragColados"
+      ? []
+      : t.todosExemplos ?? t.exemplos;
+    out.push({ sinal: `cadencia.${t.nome}`, valor: t.n, cota: declarou ? { max: t.alvo } : undefined, fora_da_cota: declarou && t.acima, exemplos });
   }
 
   // Muleta genérica: a regra `muleta-coisa` do romantasy declarava cota e NÃO

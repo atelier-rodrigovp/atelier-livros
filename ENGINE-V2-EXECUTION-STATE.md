@@ -16,6 +16,16 @@ ou aprovação manual de release.
 Não gerar canário até esta alteração estar commitada, publicada, implantada e a
 prontidão integral voltar a provar o mesmo SHA em UI, worker e evidências.
 
+Continuação: `aa74ce2` foi publicado/deployado, worker e UI foram alinhados, e a
+prontidão integral aprovou 1.690 testes na raiz, 1.464 no worker, 435 mutações e
+as cinco evidências externas. Estado publicado: `PRE_CANARY_READY`, produção
+bloqueada somente por `CERTIFICADO_RELEASE`. O canário mínimo Dan Brown isolado
+chegou ao capítulo 1 e expôs uma quebra real: `fragColados` tinha contagem, mas
+não publicava os pares numerados; o revisor citou `#1` e a hidratação recusou o
+ponteiro órfão. Correção em curso: o detector publica cada par, o protocolo
+rejeita índice de detector legado sem exemplo, e um teste reproduz exatamente a
+saída real. Retomar o mesmo diretório somente depois de novo alinhamento de SHA.
+
 ---
 
 **Objetivo ativo até a Definition of Done do prompt mestre.** Se a execução for
