@@ -57,6 +57,22 @@ revisor e reconstruir a conta exclusivamente pela medição determinística.
 Teste com a forma real adicionada; 26 testes de cascata/pipeline e typecheck do
 worker passaram. Publicar este segundo commit, reiniciar e repetir a prova.
 
+Continuação: `91215ad` foi publicado/deployado e o worker reiniciou no mesmo
+SHA. A repetição real passou: 11/11 papéis no ledger; triagem
+`5a098ec1-...` → decisão `8a358962-...`, mesmo alvo e `parent_run_id`; a
+triagem efetiva aprovou e a segunda passada consolidou reprovação, provando
+que a cascata muda a decisão. Conformidade trouxe 7 afirmações localizadas.
+Nenhuma prosa, capítulo, review, spec, memória ou estado foi persistido.
+Evidências de papéis, provedor, integração e migrations foram renovadas.
+
+Na prova autenticada da interface, o clique em documento não abriu aba: a URL
+assinada era aguardada antes de `window.open`, permitindo bloqueio de popup sem
+mensagem. Correção em andamento: reservar a aba sincronamente no gesto do
+clique, navegar após a assinatura e distinguir `ausente` de `bloqueado`. Teste
+fixa a ordem e os dois erros; 16 testes direcionados, typecheck raiz e build
+passaram. Commitar/deployar, repetir o clique real e renovar as evidências pelo
+novo fingerprint antes da prontidão final.
+
 SHA inicial da sessão: `34b2cea`. Branch: `master`. **Nunca fazer push sem
 autorização explícita; nunca aplicar SQL remoto; nunca gerar canário; nunca
 chamar modelo de prosa; nunca escrever capítulo.**

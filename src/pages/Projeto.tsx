@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, ArrowUp, BookOpen, Check, ClipboardCheck, Copy, Download, FileText, Gauge, Image, Languages, Loader2, Maximize2, Pencil, PenLine, Play, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
-import { signedUrl, downloadText, deleteProject } from "@/lib/storage";
+import { abrirUrlAssinada, signedUrl, downloadText, deleteProject } from "@/lib/storage";
 import {
   Dialog,
   DialogContent,
@@ -477,9 +477,9 @@ export default function Projeto() {
   }
 
   async function baixar(a: Artifact, bucket: string) {
-    const url = a.url_publica || (await signedUrl(bucket, a.storage_path));
-    if (url) window.open(url, "_blank");
-    else toast.error("Não consegui gerar o link.");
+    const resultado = await abrirUrlAssinada(async () => a.url_publica || signedUrl(bucket, a.storage_path));
+    if (resultado === "ausente") toast.error("Não consegui gerar o link.");
+    if (resultado === "bloqueado") toast.error("O navegador bloqueou a nova aba. Libere popups e tente novamente.");
   }
 
   if (!proj) return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
@@ -942,8 +942,11 @@ export default function Projeto() {
                       <div className="flex flex-wrap gap-2">
                         {documentosParaExibir(pg).map((d) => (
                           <Button key={d.caminho} variant="outline" size="sm" onClick={async () => {
-                            const url = await signedUrl("manuscritos", chaveStorageDocumento(proj.owner, proj.id, d.caminho));
-                            if (url) window.open(url, "_blank"); else toast.error(`Documento não encontrado no Storage: ${d.caminho}`);
+                            const resultado = await abrirUrlAssinada(() =>
+                              signedUrl("manuscritos", chaveStorageDocumento(proj.owner, proj.id, d.caminho))
+                            );
+                            if (resultado === "ausente") toast.error(`Documento não encontrado no Storage: ${d.caminho}`);
+                            if (resultado === "bloqueado") toast.error("O navegador bloqueou a nova aba. Libere popups e tente novamente.");
                           }}>
                             <FileText className="h-4 w-4" /> {d.titulo}
                             {d.origem === "contrato" && (

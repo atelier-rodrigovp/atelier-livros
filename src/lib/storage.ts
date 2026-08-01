@@ -12,6 +12,41 @@ export async function signedUrl(
   return data?.signedUrl ?? null;
 }
 
+export type ResultadoAberturaUrl = "aberto" | "ausente" | "bloqueado";
+
+type AbaDownload = {
+  location: { href: string };
+  close(): void;
+};
+
+type AbrirJanela = (url: string, alvo: string) => AbaDownload | null;
+
+/**
+ * Reserva a aba DURANTE o gesto do clique e só depois espera a URL assinada.
+ * `window.open` chamado depois de um `await` é bloqueado por alguns navegadores;
+ * o defeito anterior parecia um botão morto porque nem erro era mostrado.
+ */
+export async function abrirUrlAssinada(
+  obterUrl: () => Promise<string | null>,
+  abrir: AbrirJanela = (url, alvo) => window.open(url, alvo) as AbaDownload | null
+): Promise<ResultadoAberturaUrl> {
+  const aba = abrir("", "_blank");
+  let url: string | null;
+  try {
+    url = await obterUrl();
+  } catch (erro) {
+    aba?.close();
+    throw erro;
+  }
+  if (!url) {
+    aba?.close();
+    return "ausente";
+  }
+  if (!aba) return "bloqueado";
+  aba.location.href = url;
+  return "aberto";
+}
+
 // Baixa um objeto de texto (ex.: markdown da fundação) como string.
 export interface TextoBaixado {
   texto: string;
