@@ -104,7 +104,7 @@ const DISPOSICAO: Record<string, { label: string; variant: BadgeVariant }> = {
   violacao_confirmada: { label: "violação confirmada", variant: "destructive" },
   excecao_valida: { label: "exceção válida", variant: "success" },
   falso_positivo: { label: "falso positivo", variant: "secondary" },
-  necessita_decisao_humana: { label: "decisão humana", variant: "warning" },
+  necessita_decisao_humana: { label: "legado — reprocessar automaticamente", variant: "warning" },
 };
 
 function verdictVariant(v: string): BadgeVariant {

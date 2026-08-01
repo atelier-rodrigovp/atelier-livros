@@ -155,10 +155,12 @@ describe("conferência do parecer", () => {
     expect(r.problemas.find((x) => x.item === "marco_arco")?.motivo).toBe("item_nao_avaliado");
   });
 
-  it("item fora do vocabulário é reportado", () => {
+  it("item extra fora do vocabulário é ignorado sem esconder item obrigatório", () => {
     const p = parecerCompleto();
     p.afirmacoes.push(afirmacao("ritmo_da_prosa"));
-    expect(conferirConformidade(p, ficha(), TEXTO).problemas.some((x) => x.motivo === "item_desconhecido")).toBe(true);
+    expect(conferirConformidade(p, ficha(), TEXTO).conforme).toBe(true);
+    p.afirmacoes = p.afirmacoes.filter((a) => a.item !== "virada");
+    expect(conferirConformidade(p, ficha(), TEXTO).problemas.some((x) => x.item === "virada")).toBe(true);
   });
 });
 
@@ -190,6 +192,10 @@ describe("validação do JSON do papel", () => {
   it("aceita parecer bem formado", () => {
     const p = validarParecerConformidade({ afirmacoes: [afirmacao("virada")] });
     expect(p.schema).toBe("conformidade-ficha-prosa/v1");
+  });
+  it("normaliza ruído extra do modelo antes de conferir", () => {
+    const p = validarParecerConformidade({ afirmacoes: [afirmacao("virada"), afirmacao("fato_obrigatorio_anselmo")] });
+    expect(p.afirmacoes.map((a) => a.item)).toEqual(["virada"]);
   });
   it("rejeita afirmação sem campo obrigatório", () => {
     expect(() => validarParecerConformidade({ afirmacoes: [{ item: "virada", cumprido: true }] })).toThrow(/trecho/);

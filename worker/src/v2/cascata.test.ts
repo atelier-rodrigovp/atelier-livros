@@ -91,6 +91,16 @@ describe("gatilho: escala só quando há o que decidir", () => {
 });
 
 describe("a decisão julga nos DOIS sentidos", () => {
+  it("encerra pedido humano legado sem devolver trabalho ao autor", () => {
+    const p = parecer([
+      { sinal: "fato_extra_nao_verificado", valor: "n/a", disposicao: "necessita_decisao_humana", evidencia: "dúvida factual" },
+    ], "necessita_decisao_humana");
+    const d = validarDelta(delta({ veredito_sugerido: "aprovado" }), []);
+    const consolidado = aplicarDelta(p, d, []);
+    expect(consolidado.verdict).toBe("aprovado");
+    expect(consolidado.sinais).toEqual([]);
+  });
+
   it("DERRUBA confirmação que é falso positivo", () => {
     const p = parecer([
       {
@@ -184,6 +194,12 @@ describe("o que a decisão NÃO pode fazer", () => {
 
   it("veredito fora do vocabulário é rejeitado", () => {
     expect(() => validarDelta(delta({ veredito_sugerido: "quase" }), [medido()])).toThrow(/veredito_sugerido inválido/);
+  });
+
+  it("a decisão final não aceita devolver decisão humana", () => {
+    expect(() => validarDelta(delta({ veredito_sugerido: "necessita_decisao_humana" }), [medido()])).toThrow(
+      /veredito_sugerido inválido/
+    );
   });
 
   it("observação vazia é rejeitada — a decisão tem de dizer o que viu nos eixos", () => {

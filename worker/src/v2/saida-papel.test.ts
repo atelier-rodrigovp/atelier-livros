@@ -66,6 +66,16 @@ describe("auditor factual", () => {
   it("saída completa passa", () => {
     expect(validarSaidaAuditor(ok)).toBeTruthy();
   });
+
+  it("ha=true com detalhe que nega a própria violação aciona retry técnico", () => {
+    expect(() => validarSaidaAuditor({
+      ...ok,
+      pov_violado: {
+        ha: true,
+        detalhe: "O corte ao antagonista é consistente com a ficha. Não é uma violação indevida.",
+      },
+    })).toThrow(/contraditório/);
+  });
 });
 
 describe("revisor literário", () => {

@@ -136,11 +136,14 @@ describe("estados da correção automática (SG6 / cenário 18)", () => {
     expect(st.mensagem_humana).toContain("Correção automática em andamento");
   });
 
-  it("circuit_breaker: paused + categoria circuit_breaker → decisão humana com diagnóstico", () => {
+  it("circuit_breaker: reprova a engine sem pedir decisão editorial ao autor", () => {
     const st = resolveOperationalState(mk("paused", { quality_status: "blocked_quality", quality_categoria: "circuit_breaker", quality_cap: 38, quality_motivo: "Circuit breaker: 5 tentativas", correcao: { ...correcao, ativa: false } }));
     expect(st.situacao).toBe("circuit_breaker");
-    expect(st.badge).toBe("Bloqueado após circuit breaker");
+    expect(st.badge).toBe("Engine não convergiu");
     expect(st.diagnostico_tecnico).toContain("Circuit breaker");
+    expect(st.classe_bloqueio).toBe("falha_sistema");
+    expect(st.mensagem_humana).toContain("você não precisa decidir nem editar");
+    expect(st.botoes.map((b) => b.id)).toEqual(["ver_diagnostico"]);
   });
 
   it("circuit breaker de spec aponta o próximo capítulo e preserva os aprovados", () => {
@@ -152,7 +155,7 @@ describe("estados da correção automática (SG6 / cenário 18)", () => {
     expect(st.capitulo_bloqueado).toBe(49);
     expect(st.mensagem_humana).toContain("planejamento do capítulo 49");
     expect(st.mensagem_humana).toContain("permanecem intactos");
-    expect(st.botoes.find((b) => b.id === "corrigir")?.label).toBe("Revalidar spec do capítulo 49");
+    expect(st.botoes.find((b) => b.id === "corrigir")).toBeUndefined();
   });
 
   it("aguardando_decisao: decisão autoral e fundação pendente são distintos do editorial", () => {
@@ -223,7 +226,7 @@ describe("classe de bloqueio", () => {
     expect(classeDeBloqueio("producao_desativada")).toBe("tecnico");
     expect(classeDeBloqueio("bloqueado_qualidade")).toBe("editorial");
     expect(classeDeBloqueio("correcao_automatica")).toBe("editorial");
-    expect(classeDeBloqueio("circuit_breaker")).toBe("decisao_humana");
+    expect(classeDeBloqueio("circuit_breaker")).toBe("falha_sistema");
     expect(classeDeBloqueio("aguardando_decisao")).toBe("decisao_humana");
   });
 
@@ -234,7 +237,7 @@ describe("classe de bloqueio", () => {
   });
 
   it("toda classe tem rótulo legível para o autor", () => {
-    for (const c of ["tecnico", "editorial", "decisao_humana", "ausencia_de_prova"] as const) {
+    for (const c of ["tecnico", "editorial", "falha_sistema", "decisao_humana", "ausencia_de_prova"] as const) {
       expect(ROTULO_CLASSE_BLOQUEIO[c].length).toBeGreaterThan(20);
     }
   });

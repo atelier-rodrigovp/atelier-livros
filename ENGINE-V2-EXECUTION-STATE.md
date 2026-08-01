@@ -778,3 +778,43 @@ antes de `PRE_CANARY_READY`.
   O escopo foi separado: autorização de produção + commit limpo liberam somente
   a fundação pré-canário; escrita e avaliação continuam fail-closed sem o
   certificado final.
+
+## Checkpoint de autonomia — 2026-08-01
+
+Regra vinculante do produto: o autor não revisa corpus, CSV, sinais, pareceres
+nem capítulos intermediários. Seu julgamento é o livro terminado; no máximo,
+a leitura dos canários. Rotulagem humana e aprovação manual deixaram de ser
+portões de release no commit `aa74ce2`. O estado formal passou a
+`CORPUS_AUTOMATICO_PRONTO_PARA_LAB`.
+
+O primeiro canário real isolado Dan Brown, executado depois de
+`PRE_CANARY_READY`, encontrou quatro defeitos de fiação no capítulo 1:
+
+1. a triagem podia devolver `necessita_decisao_humana` e a engine empurrava a
+   decisão ao autor;
+2. o auditor produziu `pov_violado.ha=true` junto de detalhe que dizia
+   explicitamente que não havia violação;
+3. uma afirmação extra inventada pelo papel de conformidade reprovava a prosa,
+   embora todos os itens obrigatórios tivessem sido avaliados;
+4. depois da cascata, persistência, saldo e correções ainda consumiam o parecer
+   antigo da triagem, e `problemas` acumulava defeitos de hashes já reescritos.
+
+Correção local concluída e coberta por comportamento:
+
+- pedido humano é apenas entrada legada da triagem; sobe obrigatoriamente à
+  decisão cara, cujo schema aceita somente aprovar/aprovar com exceção/reprovar;
+- dúvida factual não medida sai do revisor literário e continua para o auditor;
+- `ha=true` com detalhe que nega o próprio POV é falha de protocolo e aciona
+  retry técnico;
+- conformidade ignora somente itens extras; item obrigatório omitido continua
+  fail-closed;
+- o pipeline usa e persiste `parecerFinal` para veredito, saldo e correção;
+- cada rodada zera problemas vencidos; o ledger de runs preserva o histórico;
+- circuit breaker agora é apresentado como falha da engine/execução reprovada,
+  nunca como tarefa editorial para o autor.
+
+Prova local desta mudança: 133 arquivos, 1696 testes aprovados; build aprovado;
+lint com 0 erros e os mesmos 3 avisos de react-refresh. O canário real ainda
+precisa ser reexecutado sobre o commit publicado desta correção antes de afirmar
+que o capítulo foi aprovado. Ausência dessa reexecução é **NÃO COMPROVADO**, não
+sucesso.

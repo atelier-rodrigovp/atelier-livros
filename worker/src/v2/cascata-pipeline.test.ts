@@ -155,6 +155,32 @@ describe("escalada só quando há o que decidir", () => {
     expect(chamadasDe("revisor_decisao")).toBe(1);
     expect(r.status).toBe("aprovado");
   });
+
+  it("pedido humano da triagem é adjudicado pela decisão e nunca pausa o autor", async () => {
+    enfileirarCiclo(parecerBase({
+      verdict: "necessita_decisao_humana",
+      sinais: [{
+        sinal: "fato_extra_nao_verificado_no_dossie",
+        valor: "n/a",
+        disposicao: "necessita_decisao_humana",
+        evidencia: "o revisor literário levantou uma dúvida factual",
+      }],
+      correcoes: [],
+    }));
+    provedor.enfileirar("revisor_decisao", JSON.stringify({
+      schema: "delta-decisao/v1", derrubar: [], acrescentar: [],
+      veredito_sugerido: "aprovado", observacao: "a dúvida pertence ao auditor factual, não ao autor",
+    }));
+    provedor.enfileirar("extrator_memoria", JSON.stringify({ entradas: [], divergencias: [] }));
+
+    const r = await escreverCapitulo(deps, 1);
+
+    expect(r.status).toBe("aprovado");
+    expect(r.status).not.toBe("necessita_decisao_humana");
+    expect(r.problemas.join(" ")).not.toMatch(/decisão humana|anotação \(sem pausa\)/i);
+    expect(chamadasDe("revisor_decisao")).toBe(1);
+    expect(chamadasDe("auditor_factual")).toBe(1);
+  });
 });
 
 describe("veredito_sugerido é SUGESTÃO — gate universal reprova por cima", () => {

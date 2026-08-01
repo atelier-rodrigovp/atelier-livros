@@ -103,7 +103,11 @@ export interface DeltaDecisao {
   observacao: string;
 }
 
-const VERDICTS: Verdict[] = ["aprovado", "aprovado_com_excecao", "reprovado", "necessita_decisao_humana"];
+// A segunda passada é a instância decisória final. Ela não pode devolver o
+// trabalho ao autor: ou aprova, aprova com exceção auditável, ou reprova para a
+// correção automática. O tipo legado ainda aceita `necessita_decisao_humana`
+// ao ler pareceres antigos da triagem, mas a decisão nova nunca o produz.
+const VERDICTS_DECISAO: Verdict[] = ["aprovado", "aprovado_com_excecao", "reprovado"];
 
 /**
  * A decisão emite um DELTA, não um parecer novo: é daí que vem a economia — ela
@@ -116,7 +120,7 @@ export function validarDelta(obj: unknown, medidos: SinalMedido[]): DeltaDecisao
   if (typeof obj !== "object" || obj === null) throw new Error("delta não é objeto");
   const d = obj as Record<string, unknown>;
   if (d.schema !== "delta-decisao/v1") throw new Error(`delta.schema inválido: ${String(d.schema)}`);
-  if (!VERDICTS.includes(d.veredito_sugerido as Verdict)) {
+  if (!VERDICTS_DECISAO.includes(d.veredito_sugerido as Verdict)) {
     throw new Error(`delta.veredito_sugerido inválido: ${String(d.veredito_sugerido)}`);
   }
   if (typeof d.observacao !== "string") throw new Error("delta.observacao obrigatória (por que a decisão diverge)");
@@ -220,6 +224,24 @@ export function aplicarDelta(triagem: Parecer, delta: DeltaDecisao, medidos: Sin
     const oc: OcorrenciaCitada = { indice: d.indice };
     s.ocorrencias_citadas = [...(s.ocorrencias_citadas ?? []), oc];
     fecharConta(s, medido);
+  }
+
+  // Pedido de decisão humana é uma ENTRADA para esta passada, nunca uma saída.
+  // Para sinal medido, a decisão precisa usar `acrescentar` para confirmar as
+  // ocorrências que são defeito; o restante fecha como falso positivo. Para
+  // observação inventada fora dos detectores (ex.: dúvida factual), removemos o
+  // sinal: o auditor factual é o dono desse julgamento logo depois no pipeline.
+  for (const [nome, s] of [...porSinal.entries()]) {
+    if (s.disposicao !== "necessita_decisao_humana") continue;
+    const medido = medidos.find((m) => normalizarNomeSinal(m.sinal) === normalizarNomeSinal(s.sinal));
+    if (!medido) {
+      porSinal.delete(nome);
+      continue;
+    }
+    s.disposicao = "falso_positivo";
+    s.ocorrencias_citadas = [];
+    if (typeof medido.valor === "number") s.falsos_positivos = medido.valor;
+    s.evidencia = `${s.evidencia} · adjudicação automática: nenhuma ocorrência confirmada pela decisão`;
   }
 
   return {

@@ -190,6 +190,22 @@ export function validarSaidaAuditor(obj: unknown): SaidaAuditor {
   if (pov.ha === true && pov.detalhe.trim().length === 0) {
     throw new Error("pov_violado.ha=true exige `detalhe` não vazio citando o trecho que viola o POV");
   }
+  if (pov.ha === true) {
+    const detalheNormalizado = pov.detalhe
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    const negaAPropriaAcusacao = [
+      /nao (?:e|constitui|configura) (?:uma )?violacao/,
+      /consistente com (?:a )?ficha/,
+      /previst[oa] pel[ao] ficha/,
+    ].some((padrao) => padrao.test(detalheNormalizado));
+    if (negaAPropriaAcusacao) {
+      throw new Error(
+        "pov_violado contraditório: ha=true, mas o detalhe afirma que o trecho não viola o POV ou está previsto pela ficha"
+      );
+    }
+  }
   return { contradicoes, conhecimento_indevido: conhecimento, pov_violado: { ha: pov.ha, detalhe: pov.detalhe } };
 }
 
@@ -699,6 +715,9 @@ export async function escreverCapitulo(
   const docsFactuais = deps.docsFactuais ?? [];
 
   for (;;) {
+    // O relatório e a decisão refletem apenas ESTE hash. Problemas de uma
+    // versão já reescrita ficam no ledger de runs, não contaminam a rodada nova.
+    problemas.length = 0;
     // 5. Sinais medidos + parecer do revisor literário
     const sinais = medirSinais(texto, deps.contrato.contrato);
     const sinaisManeirismoAtuais = medirManeirismosDoLivro([
@@ -756,9 +775,9 @@ export async function escreverCapitulo(
     });
     runs.push(rRev.runId);
     const parecer = rRev.valor;
-    const conferencia = conferirParecer(parecer, sinais);
-    problemas.push(...conferencia.problemas);
-    let verdictEfetivo = conferencia.verdictEfetivo;
+    const conferenciaTriagem = conferirParecer(parecer, sinais);
+    let conferenciaFinal = conferenciaTriagem;
+    let verdictEfetivo = conferenciaTriagem.verdictEfetivo;
 
     // 5b. CASCATA DE JULGAMENTO. A triagem (modelo barato) ja opinou; a decisao
     // (modelo caro) e chamada so quando ha o que decidir, e julga nos DOIS
@@ -793,8 +812,17 @@ export async function escreverCapitulo(
         sinais
       );
       const conf2 = conferirParecer(parecerFinal, sinais);
-      problemas.push(...conf2.problemas);
+      conferenciaFinal = conf2;
       verdictEfetivo = conf2.verdictEfetivo;
+    }
+    problemas.push(...conferenciaFinal.problemas);
+
+    // Defesa final: o caminho de produção nunca devolve uma decisão editorial
+    // ao usuário. A cascata deveria ter adjudicado acima; se um parecer legado
+    // ainda escapar, ele reprova automaticamente e segue para correção.
+    if (verdictEfetivo === "necessita_decisao_humana") {
+      verdictEfetivo = "reprovado";
+      problemas.push("pedido de decisão humana convertido em reprovação automática para correção");
     }
 
 
@@ -883,11 +911,11 @@ export async function escreverCapitulo(
         text_hash: textHash,
         verdict: verdictEfetivo,
         run_id: rRev.runId,
-        parecer,
+        parecer: parecerFinal,
       });
       await deps.gravador.aprovarCapitulo(
         capitulo,
-        { id: reviewId, text_hash: textHash, verdict: verdictEfetivo, parecer },
+        { id: reviewId, text_hash: textHash, verdict: verdictEfetivo, parecer: parecerFinal },
         caminho,
         entradasDaFicha(capitulo, ficha)
       );
@@ -931,29 +959,11 @@ export async function escreverCapitulo(
       return { capitulo, status: verdictEfetivo, textHash, reviewId, gatesFalhos: [], problemas, runs };
     }
 
-    if (verdictEfetivo === "necessita_decisao_humana") {
-      const reviewId = await deps.persistencia.inserirReview({
-        project_id: deps.projectId,
-        edition_id: deps.editionId ?? null,
-        capitulo,
-        text_hash: textHash,
-        verdict: verdictEfetivo,
-        run_id: rRev.runId,
-        parecer,
-      });
-      await deps.gravador.registrarBloqueio(
-        "DECISAO_HUMANA",
-        alvoCap,
-        problemas.length ? problemas.join(" · ") : "revisor solicitou decisão humana"
-      );
-      return { capitulo, status: "necessita_decisao_humana", textHash, reviewId, gatesFalhos: [], problemas, runs };
-    }
-
     // Reprovado: correção dirigida se há instruções, orçamento e convergência.
     // O saldo pondera TODAS as fontes de reprovação (violações do revisor +
     // contradições bloqueantes e conhecimento indevido do auditor).
-    const violacoes = parecer.sinais.filter(
-      (s) => s.disposicao === "violacao_confirmada" || conferencia.rebaixados.includes(s.sinal)
+    const violacoes = parecerFinal.sinais.filter(
+      (s) => s.disposicao === "violacao_confirmada" || conferenciaFinal.rebaixados.includes(s.sinal)
     ).length;
     const saldo =
       violacoes + 2 * contradicoesBloqueantes.length + auditoria.conhecimento_indevido.length + (povViolado ? 2 : 0) + 2 * conformidade.problemas.length;
@@ -991,8 +1001,8 @@ export async function escreverCapitulo(
     // instrução global com a cota-alvo do contrato E os trechos que o detector
     // flagrou — o escritor precisa saber QUAIS frases contam (achados do canário
     // hoover).
-    const globais = parecer.sinais
-      .filter((s) => s.disposicao === "violacao_confirmada" || conferencia.rebaixados.includes(s.sinal))
+    const globais = parecerFinal.sinais
+      .filter((s) => s.disposicao === "violacao_confirmada" || conferenciaFinal.rebaixados.includes(s.sinal))
       .map((s) => {
         const medido = acharSinalMedido(s.sinal, sinais);
         const cota = medido?.cota;
@@ -1012,7 +1022,11 @@ export async function escreverCapitulo(
         };
       });
 
-    const todasCorrecoes = [...parecer.correcoes, ...correcoesAuditor, ...globais];
+    const correcoesDoParecer = parecerFinal.correcoes;
+    // Sem instrução específica, a reprovação sobe intacta para a escada externa
+    // de cinco estratégias. Inventar aqui uma "reescrita genérica" consumiria o
+    // micro-orçamento e esconderia o diagnóstico do controlador/ledger.
+    const todasCorrecoes = [...correcoesDoParecer, ...correcoesAuditor, ...globais];
     if (todasCorrecoes.length > 0 && correcoesFeitas < maxCorrecoes && !semConvergencia) {
       saldoAnterior = saldo;
       correcoesFeitas++;
@@ -1025,6 +1039,7 @@ export async function escreverCapitulo(
           ? "reescrita"
           : "cirurgico";
       await corrigirComEscritor(todasCorrecoes, modo);
+      problemas.length = 0;
       gatesFalhos = await garantirGates();
       if (gatesFalhos.length) return bloquearPorGates(gatesFalhos);
       continue; // re-roda sinais + revisor + auditor no texto corrigido
@@ -1037,7 +1052,7 @@ export async function escreverCapitulo(
       text_hash: textHash,
       verdict: "reprovado",
       run_id: rRev.runId,
-      parecer,
+      parecer: parecerFinal,
     });
     await deps.gravador.registrarBloqueio(
       "QUALIDADE_REPROVADA",

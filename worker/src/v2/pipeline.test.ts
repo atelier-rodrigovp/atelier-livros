@@ -288,7 +288,8 @@ describe("escreverCapitulo — correção de gate", () => {
 });
 
 describe("escreverCapitulo — aprovação sem evidência rebaixa", () => {
-  it("conferirParecer rebaixa; correção roda; parecer seguinte reprova e bloqueia", async () => {
+  it("conferirParecer rebaixa; correção roda; parecer seguinte reprova sem carregar problema vencido", async () => {
+    deps.maxCorrecoes = 1;
     // fichaExistente: pula o arquiteto e NÃO insere spec
     provedor.enfileirar("contextualizador", CTX_OK);
     provedor.enfileirar("escritor", PROSA_OK);
@@ -311,7 +312,7 @@ describe("escreverCapitulo — aprovação sem evidência rebaixa", () => {
     const r = await escreverCapitulo(deps, 3, { fichaExistente: ficha() });
 
     expect(r.status).toBe("reprovado");
-    expect(r.problemas).toContain("aprovação sem evidência positiva");
+    expect(r.problemas).not.toContain("aprovação sem evidência positiva");
     expect(r.textHash).toBe(hashText(PROSA_CORRIGIDA));
     expect(r.runs).toHaveLength(9); // ctx + escritor + (rev+aud+conf) + escritor + (rev+aud+conf)
 
@@ -343,7 +344,7 @@ describe("escreverCapitulo — auditoria factual alimenta correção (caso do ca
     const r = await escreverCapitulo(deps, 3);
 
     expect(r.status).toBe("aprovado");
-    expect(r.problemas.some((p) => p.startsWith("contradição factual comprovada"))).toBe(true);
+    expect(r.problemas.some((p) => p.startsWith("contradição factual comprovada"))).toBe(false);
     expect(r.textHash).toBe(hashText(PROSA_CORRIGIDA));
 
     // O prompt da correção carrega a contradição do auditor (local + fato + instrução)
