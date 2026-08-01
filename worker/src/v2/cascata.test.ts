@@ -125,6 +125,23 @@ describe("a decisão julga nos DOIS sentidos", () => {
     expect(() => exigirDisposicaoCompleta(validarParecer(consolidado), [medido()])).not.toThrow();
   });
 
+  it("fecha a conta ao acrescentar sobre falso_positivo sem contagem declarada", () => {
+    // Forma observada na prova real: ao descartar tudo, a triagem podia omitir
+    // falsos_positivos; confirmar uma ocorrência torna a conta obrigatória.
+    const p = parecer([{ sinal: "sanfona (negação reformuladora)", valor: 4, disposicao: "falso_positivo", evidencia: "supercontou" }]);
+    const medicao = medido({ sinal: "sanfona", valor: 4, exemplos: EXEMPLOS.slice(0, 4) });
+    const d = validarDelta(
+      delta({ acrescentar: [{ sinal: "sanfona", indice: 2, motivo: "a reformulação repete o tique do narrador" }] }),
+      [medicao]
+    );
+    const consolidado = aplicarDelta(p, d, [medicao]);
+    const s = consolidado.sinais[0];
+    expect(s.ocorrencias_citadas?.map((o) => o.indice)).toEqual([2]);
+    expect(s.falsos_positivos).toBe(3);
+    expect(s.valor).toBe(4);
+    expect(() => exigirDisposicaoCompleta(validarParecer(consolidado), [medicao])).not.toThrow();
+  });
+
   it("derrubar a última ocorrência converte o sinal em falso positivo", () => {
     const p = parecer([
       { sinal: "gnomico", valor: 6, disposicao: "violacao_confirmada", evidencia: "x", ocorrencias_citadas: [{ indice: 1 }], falsos_positivos: 5 },

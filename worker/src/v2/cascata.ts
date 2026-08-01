@@ -13,6 +13,7 @@
 
 import type { SinalMedido } from "./sinais.js";
 import type { OcorrenciaCitada, Parecer, SinalDisposto, Verdict } from "./tipos.js";
+import { normalizarNomeSinal } from "./revisor.js";
 
 /**
  * Descarte a partir do qual a triagem está fazendo uma afirmação grande.
@@ -165,18 +166,43 @@ export function aplicarDelta(triagem: Parecer, delta: DeltaDecisao, medidos: Sin
   const indicesDe = (s: SinalDisposto) =>
     new Set((s.ocorrencias_citadas ?? []).map((o) => o.indice).filter((i): i is number => typeof i === "number"));
 
+  const acharDisposto = (nome: string): SinalDisposto | undefined => {
+    const exato = porSinal.get(nome);
+    if (exato) return exato;
+    const alvo = normalizarNomeSinal(nome);
+    const candidatos = [...porSinal.values()].filter((s) => {
+      const atual = normalizarNomeSinal(s.sinal);
+      return atual === alvo || (atual.length > 2 && (atual.includes(alvo) || alvo.includes(atual)));
+    });
+    return candidatos.length === 1 ? candidatos[0] : undefined;
+  };
+
+  const fecharConta = (s: SinalDisposto, medido: SinalMedido | undefined): void => {
+    // Se a triagem descartou tudo, `falsos_positivos` podia ser omitido. Ao
+    // acrescentar uma ocorrência, a cascata reconstrói a conta pela medição
+    // real; partir de zero gerava um consolidado que a própria régua recusava.
+    if (!medido || typeof medido.valor !== "number" || medido.exemplos.length === 0) return;
+    const unicos = new Map<number, OcorrenciaCitada>();
+    for (const o of s.ocorrencias_citadas ?? []) {
+      if (typeof o.indice === "number" && o.indice >= 1 && o.indice <= medido.exemplos.length) unicos.set(o.indice, o);
+    }
+    s.valor = medido.valor;
+    s.ocorrencias_citadas = [...unicos.values()];
+    s.falsos_positivos = Math.max(0, medido.valor - unicos.size);
+    if (unicos.size === 0 && s.disposicao === "violacao_confirmada") s.disposicao = "falso_positivo";
+  };
+
   for (const d of delta.derrubar) {
-    const s = porSinal.get(d.sinal);
+    const s = acharDisposto(d.sinal);
     if (!s) continue;
     s.ocorrencias_citadas = (s.ocorrencias_citadas ?? []).filter((o) => o.indice !== d.indice);
     // Conta fechada: a ocorrência sai de "confirmada" e entra em falso positivo.
-    s.falsos_positivos = (s.falsos_positivos ?? 0) + 1;
-    if (s.ocorrencias_citadas.length === 0) s.disposicao = "falso_positivo";
+    fecharConta(s, medidos.find((m) => m.sinal === d.sinal));
   }
 
   for (const d of delta.acrescentar) {
     const medido = medidos.find((m) => m.sinal === d.sinal);
-    let s = porSinal.get(d.sinal);
+    let s = acharDisposto(d.sinal);
     if (!s) {
       s = {
         sinal: d.sinal,
@@ -193,7 +219,7 @@ export function aplicarDelta(triagem: Parecer, delta: DeltaDecisao, medidos: Sin
     s.evidencia = s.evidencia ? `${s.evidencia} · decisão: ${d.motivo}` : d.motivo;
     const oc: OcorrenciaCitada = { indice: d.indice };
     s.ocorrencias_citadas = [...(s.ocorrencias_citadas ?? []), oc];
-    s.falsos_positivos = Math.max(0, (s.falsos_positivos ?? 0) - 1);
+    fecharConta(s, medido);
   }
 
   return {

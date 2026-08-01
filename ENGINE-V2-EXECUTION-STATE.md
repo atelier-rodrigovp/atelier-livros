@@ -46,6 +46,17 @@ dos papéis; gerar as cinco evidências atuais; rodar e publicar a prontidão;
 confirmar `PRE_CANARY_READY` na interface autenticada. Só então parar na
 rotulagem humana, sem fabricar resposta.
 
+Continuação da prova: o commit `2006633` foi publicado, a interface foi
+implantada e o worker reiniciou nele com worktree limpa. A primeira execução
+real chegou à segunda passada e encontrou um defeito de produção: quando a
+triagem marcava um sinal inteiro como `falso_positivo` sem informar a contagem e
+a decisão acrescentava uma ocorrência, `aplicarDelta` partia de zero e produzia
+conta aberta (`1/4` em vez de `1 citada + 3 falsos`). A evidência foi recusada,
+como deveria. Correção: reconciliar nomes de sinal com a mesma tolerância do
+revisor e reconstruir a conta exclusivamente pela medição determinística.
+Teste com a forma real adicionada; 26 testes de cascata/pipeline e typecheck do
+worker passaram. Publicar este segundo commit, reiniciar e repetir a prova.
+
 SHA inicial da sessão: `34b2cea`. Branch: `master`. **Nunca fazer push sem
 autorização explícita; nunca aplicar SQL remoto; nunca gerar canário; nunca
 chamar modelo de prosa; nunca escrever capítulo.**
