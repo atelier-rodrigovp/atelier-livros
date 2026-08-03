@@ -211,6 +211,12 @@ export function aplicarDelta(triagem: Parecer, delta: DeltaDecisao, medidos: Sin
     fecharConta(s, medidos.find((m) => m.sinal === d.sinal));
   }
 
+  // Toda ocorrência que o delta eleva a violação SAI daqui com a correção
+  // correspondente. A regra do parecer ("violacao_confirmada exige entrada em
+  // correcoes") vale para o consolidado tanto quanto para a triagem; compor a
+  // elevação sem a correção produzia um parecer contraditório que bloqueava o
+  // capítulo sem instrução de conserto (canário longo de 2026-08-03).
+  const correcoesDelta: Parecer["correcoes"] = [];
   for (const d of delta.acrescentar) {
     const medido = medidos.find((m) => m.sinal === d.sinal);
     let s = acharDisposto(d.sinal);
@@ -231,6 +237,12 @@ export function aplicarDelta(triagem: Parecer, delta: DeltaDecisao, medidos: Sin
     const oc: OcorrenciaCitada = { indice: d.indice };
     s.ocorrencias_citadas = [...(s.ocorrencias_citadas ?? []), oc];
     fecharConta(s, medido);
+    const trecho = medido?.exemplos[d.indice - 1];
+    correcoesDelta.push({
+      local: trecho ? `trecho: "${trecho.slice(0, 160)}"` : `ocorrência ${d.indice} de "${d.sinal}"`,
+      problema: `${d.sinal} — ocorrência ${d.indice} confirmada pela decisão: ${d.motivo}`,
+      instrucao: `reescreva o trecho eliminando esta ocorrência de ${d.sinal}, preservando conteúdo e voz`,
+    });
   }
 
   // Pedido de decisão humana é uma ENTRADA para esta passada, nunca uma saída.
@@ -251,9 +263,27 @@ export function aplicarDelta(triagem: Parecer, delta: DeltaDecisao, medidos: Sin
     s.evidencia = `${s.evidencia} · adjudicação automática: nenhuma ocorrência confirmada pela decisão`;
   }
 
+  // Falha alta, nunca composição silenciosa: se o delta confirmou violação e
+  // ainda assim nenhuma correção existe (único caminho: confirmar índice que a
+  // triagem já citava, num parecer sem correções), parar aqui com o nome da
+  // inconsistência vale mais que entregar a parede ao gate.
+  const correcoes = [...triagem.correcoes, ...correcoesDelta];
+  if (correcoes.length === 0) {
+    const confirmadosPeloDelta = [...new Set(delta.acrescentar.map((d) => d.sinal))].filter(
+      (nome) => acharDisposto(nome)?.disposicao === "violacao_confirmada"
+    );
+    if (confirmadosPeloDelta.length > 0) {
+      throw new Error(
+        `cascata comporia violação confirmada sem correção (${confirmadosPeloDelta.join(", ")}) — ` +
+          `o delta confirmou ocorrência sem produzir instrução de conserto`
+      );
+    }
+  }
+
   return {
     ...triagem,
     sinais: [...porSinal.values()],
+    correcoes,
     verdict: delta.veredito_sugerido,
     evidencias: [
       ...triagem.evidencias,

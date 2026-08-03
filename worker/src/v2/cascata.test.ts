@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { aplicarDelta, precisaEscalar, validarDelta, DESCARTE_QUE_PESA } from "./cascata.js";
-import { exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
+import { conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
 import type { SinalMedido } from "./sinais.js";
 import type { Parecer, SinalDisposto } from "./tipos.js";
 
@@ -222,6 +222,74 @@ describe("o que a decisão NÃO pode fazer", () => {
 
   it("schema errado é rejeitado", () => {
     expect(() => validarDelta(delta({ schema: "outro/v1" }), [medido()])).toThrow(/schema inválido/);
+  });
+});
+
+describe("o delta que eleva a violação sai com correção correspondente", () => {
+  // O caso do canário longo de 2026-08-03: a triagem descartou as 10 ocorrências
+  // de sanfona como falso positivo, a decisão reverteu 3 (índices 3, 5, 10) e o
+  // consolidado saiu com `correcoes: []` — violação confirmada sem instrução de
+  // conserto. O gate pegou a contradição e o capítulo virou parede.
+  const DEZ_EXEMPLOS = Array.from({ length: 10 }, (_, i) => `ocorrência medida número ${i + 1}, com coda generalizante`);
+  const medicaoSanfona = (): SinalMedido =>
+    ({ sinal: "sanfona", valor: 10, cota: { max: 1 }, fora_da_cota: true, exemplos: DEZ_EXEMPLOS }) as SinalMedido;
+  const triagemDescartouTudo = () =>
+    parecer([{ sinal: "sanfona", valor: 10, disposicao: "falso_positivo", evidencia: "enumerações descritivas legítimas", falsos_positivos: 10 }]);
+  const deltaReverteTres = () =>
+    validarDelta(
+      delta({
+        acrescentar: [
+          { sinal: "sanfona", indice: 3, motivo: "mesma arquitetura de três orações + coda, terceira vez no capítulo" },
+          { sinal: "sanfona", indice: 5, motivo: "repete a arquitetura da ocorrência 3, vira tique de cadência" },
+          { sinal: "sanfona", indice: 10, motivo: "relista sons já nomeados no mesmo capítulo" },
+        ],
+      }),
+      [medicaoSanfona()]
+    );
+
+  it("[canário 2026-08-03] 3 falso_positivo→violacao_confirmada produzem 3 correções — nunca parecer contraditório", () => {
+    const consolidado = aplicarDelta(triagemDescartouTudo(), deltaReverteTres(), [medicaoSanfona()]);
+
+    const s = consolidado.sinais[0];
+    expect(s.disposicao).toBe("violacao_confirmada");
+    expect(s.ocorrencias_citadas?.map((o) => o.indice)).toEqual([3, 5, 10]);
+    expect(s.falsos_positivos).toBe(7);
+
+    // A regra do sistema: toda violacao_confirmada exige entrada em correcoes.
+    expect(consolidado.correcoes).toHaveLength(3);
+    const conferencia = conferirParecer(consolidado, [medicaoSanfona()]);
+    expect(conferencia.problemas.join(" · ")).not.toMatch(/violação confirmada sem correção solicitada/);
+  });
+
+  it("cada correção sintetizada localiza o trecho medido e carrega o motivo da decisão", () => {
+    const consolidado = aplicarDelta(triagemDescartouTudo(), deltaReverteTres(), [medicaoSanfona()]);
+    const [c3] = consolidado.correcoes;
+    expect(c3.local).toContain(DEZ_EXEMPLOS[2]);
+    expect(c3.problema).toContain("sanfona");
+    expect(c3.problema).toContain("terceira vez no capítulo");
+    expect(c3.instrucao.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it("correções da triagem são preservadas, as do delta entram depois", () => {
+    const p = triagemDescartouTudo();
+    p.correcoes = [{ local: "L:9", problema: "ritmo", instrucao: "encurte a frase final" }];
+    const consolidado = aplicarDelta(p, deltaReverteTres(), [medicaoSanfona()]);
+    expect(consolidado.correcoes).toHaveLength(4);
+    expect(consolidado.correcoes[0]).toEqual({ local: "L:9", problema: "ritmo", instrucao: "encurte a frase final" });
+  });
+
+  it("falha alto se a elevação não puder sair com correção (índice já citado, correções vazias)", () => {
+    // Único caminho em que a síntese não produz correção: o delta confirma um
+    // índice que a triagem JÁ citava e o parecer segue sem correção nenhuma.
+    // Compor em silêncio aqui devolveria exatamente a parede do canário.
+    const p = parecer([
+      { sinal: "sanfona", valor: 10, disposicao: "violacao_confirmada", evidencia: "tique", ocorrencias_citadas: [{ indice: 3 }], falsos_positivos: 9 },
+    ]);
+    const d = validarDelta(
+      delta({ acrescentar: [{ sinal: "sanfona", indice: 3, motivo: "confirma a mesma ocorrência já citada pela triagem" }] }),
+      [medicaoSanfona()]
+    );
+    expect(() => aplicarDelta(p, d, [medicaoSanfona()])).toThrow(/violação confirmada sem correção/);
   });
 });
 
