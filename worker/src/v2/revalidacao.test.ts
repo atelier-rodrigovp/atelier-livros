@@ -5,6 +5,7 @@ import {
   capitulosAfetados,
   construirGrafo,
   decidirRevalidacao,
+  executarOndaRevalidacao,
   MAX_REESCRITAS_POR_ONDA,
   planejarAposReavaliacao,
   TETO_PROPAGACAO,
@@ -178,6 +179,35 @@ describe("reabrir NÃO é reescrever", () => {
 
   it("nenhum dependente = nenhuma ação", () => {
     expect(decidirRevalidacao([]).acao).toBe("nenhuma");
+  });
+
+  it("[DOD:K-04] consumidor transitivo mantém válidos e reescreve somente reprovados", async () => {
+    const chamadas: string[] = [];
+    const afetados = [
+      { capitulo: 5, motivos: [{ canal: "fio" as const, chave: "x", via: 4 }], distancia: 1 },
+      { capitulo: 11, motivos: [{ canal: "promessa" as const, chave: "P1", via: 4 }], distancia: 1 },
+    ];
+    const r = await executarOndaRevalidacao(afetados, {
+      reavaliar: async (capitulo) => {
+        chamadas.push(`avaliar:${capitulo}`);
+        return capitulo === 5
+          ? { capitulo, continuaValido: true, problemas: [] }
+          : { capitulo, continuaValido: false, problemas: ["P1 deixou de fechar"] };
+      },
+      reescrever: async (capitulo, problemas) => {
+        chamadas.push(`reescrever:${capitulo}:${problemas[0]}`);
+        return { capitulo, continuaValido: true, problemas: [] };
+      },
+    });
+
+    expect(r.status).toBe("concluida");
+    expect(r.mantidos).toEqual([5]);
+    expect(r.reescritos).toEqual([11]);
+    expect(chamadas).toEqual([
+      "avaliar:5",
+      "avaliar:11",
+      "reescrever:11:P1 deixou de fechar",
+    ]);
   });
 });
 

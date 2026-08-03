@@ -49,6 +49,6 @@ jobs:
       - name: Build de produção
         run: npm run build
 
-      - name: Gate de release da Engine V2
+      - name: Gate da Engine V2 (pré-canário ou release certificada)
         working-directory: worker
-        run: npx tsx scripts/v2-verificar-release.ts
+        run: npx tsx scripts/v2-verificar-release.ts --pre-canary

@@ -133,6 +133,46 @@ export function promessasForaDoDesfecho(arco: ArcoFundacao, total: number): stri
 export function motivoDocInsubstancial(conteudo: string): string | null {
   const t = (conteudo ?? "").trim();
   if (!t) return "vazio";
+  const linhas = t.split(/\r?\n/);
+  const trecho = (linha: string) => {
+    const limpo = linha.replace(/\s+/g, " ").trim();
+    return limpo.length > 120 ? `${limpo.slice(0, 117)}…` : limpo;
+  };
+
+  // Marcadores inequívocos podem aparecer no meio de uma frase/linha. A
+  // evidência cita o marcador e o trecho exatos para que o retry saiba o que
+  // corrigir — e para que o diagnóstico não dependa de adivinhação.
+  const fortes = [
+    // Case-sensitive de propósito: "todo" é palavra corrente em português.
+    { regex: /\bTODO\b/, rotulo: "TODO" },
+    { regex: /\bTBD\b/i, rotulo: "TBD" },
+    { regex: /\bLOREM IPSUM\b/i, rotulo: "LOREM IPSUM" },
+    { regex: /\bPLACEHOLDER\b/i, rotulo: "PLACEHOLDER" },
+  ];
+  for (const linha of linhas) {
+    for (const forte of fortes) {
+      const achado = forte.regex.exec(linha);
+      if (achado) {
+        return `contém marcador forte "${forte.rotulo}" no trecho "${trecho(linha)}"`;
+      }
+    }
+  }
+
+  // Reticências fazem parte da prosa normal; só são placeholder quando ocupam
+  // sozinhas uma linha (eventualmente como item de lista). "A definir" também
+  // só bloqueia como valor isolado/campo, não em frases como
+  // "não há nada a definir".
+  for (const linha of linhas) {
+    if (/^\s*(?:[-*+]\s*)?(?:\.{3}|…)\s*$/.test(linha)) {
+      return `contém marcador isolado "${trecho(linha)}"`;
+    }
+    if (
+      /^\s*(?:[-*+]\s*)?(?:(?:[^:\n]{1,60}):\s*)?(?:a definir|preencher|em branco)[.!]?\s*$/i.test(linha)
+    ) {
+      return `contém campo sem valor no trecho "${trecho(linha)}"`;
+    }
+  }
+
   const semTitulos = t
     .split("\n")
     .filter((l) => !/^\s*#{1,6}\s/.test(l))
@@ -140,9 +180,6 @@ export function motivoDocInsubstancial(conteudo: string): string | null {
     .trim();
   const palavras = semTitulos.split(/\s+/).filter(Boolean).length;
   if (palavras < 40) return `${palavras} palavra(s) de conteúdo fora dos títulos (mínimo 40)`;
-  if (/\b(TODO|TBD|A DEFINIR|PREENCHER|LOREM IPSUM|PLACEHOLDER|EM BRANCO|\.\.\.)\b/i.test(semTitulos)) {
-    return "contém marcador de placeholder (TODO/TBD/a definir/…)";
-  }
   return null;
 }
 
@@ -408,8 +445,15 @@ export function gateMacroMicroCoerentes(f: FundacaoV2): BloqueioFundacao[] {
   if (!f.arco) return out;
 
   const capitulos = new Set(f.estrutura.map((e) => e.capitulo));
-  const fioDoCapitulo = new Map(f.estrutura.map((e) => [e.capitulo, normalizarNome(e.fio)]));
-  const fiosNaEstrutura = new Set(f.estrutura.map((e) => normalizarNome(e.fio)));
+  const fiosDoCapitulo = new Map(
+    f.estrutura.map((e) => [
+      e.capitulo,
+      new Set([e.fio, ...(e.fios_avancados ?? [])].map(normalizarNome)),
+    ])
+  );
+  const fiosNaEstrutura = new Set(
+    f.estrutura.flatMap((e) => [e.fio, ...(e.fios_avancados ?? [])].map(normalizarNome))
+  );
   const nomesDoFio = (fio: { id: string; nome: string }) => [normalizarNome(fio.nome), normalizarNome(fio.id)];
   const problemas: string[] = [];
 
@@ -421,15 +465,15 @@ export function gateMacroMicroCoerentes(f: FundacaoV2): BloqueioFundacao[] {
   }
   // Fio declarado na micro que a macro não conhece: a micro inventou subtrama.
   const fiosDaMacro = new Set(f.arco.fios.flatMap(nomesDoFio));
-  for (const nome of new Set(f.estrutura.map((e) => normalizarNome(e.fio)))) {
+  for (const nome of fiosNaEstrutura) {
     if (nome && fiosDaMacro.size > 0 && !fiosDaMacro.has(nome)) {
       problemas.push(`estrutura usa o fio "${nome}", que a grade de arco não declara`);
     }
   }
 
   // 2. FIOS — abertura, escalada, clímax e fechamento caem em capítulos reais,
-  //    e no capítulo cujo fio é o próprio (o marco de um fio não pode cair num
-  //    capítulo que a micro entregou a outro fio).
+  //    e entre os fios avançados naquele capítulo. `fio` é apenas o principal:
+  //    clímax e fechamento frequentemente fazem vários fios convergirem.
   for (const fio of f.arco.fios) {
     const marcos: [string, number][] = [
       ["abre", fio.abre],
@@ -443,10 +487,11 @@ export function gateMacroMicroCoerentes(f: FundacaoV2): BloqueioFundacao[] {
         problemas.push(`fio "${fio.nome}" ${rotulo} no capítulo ${cap}, que a estrutura não declara`);
         continue;
       }
-      const fioDaMicro = fioDoCapitulo.get(cap);
-      if (fioDaMicro && !nomesDoFio(fio).includes(fioDaMicro)) {
+      const fiosDaMicro = fiosDoCapitulo.get(cap);
+      if (fiosDaMicro && !nomesDoFio(fio).some((nome) => fiosDaMicro.has(nome))) {
         problemas.push(
-          `fio "${fio.nome}" ${rotulo} no capítulo ${cap}, mas a estrutura entregou esse capítulo ao fio "${fioDaMicro}"`
+          `fio "${fio.nome}" ${rotulo} no capítulo ${cap}, mas a estrutura não o inclui em fios_avancados ` +
+          `(declarou: ${[...fiosDaMicro].join(", ") || "nenhum"})`
         );
       }
     }

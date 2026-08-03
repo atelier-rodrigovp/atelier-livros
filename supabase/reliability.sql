@@ -32,7 +32,54 @@ begin
 
   return query
   update public.jobs
-  set status = 'running', locked_by = p_worker, locked_at = now()
+  set
+    status = 'running',
+    locked_by = p_worker,
+    locked_at = now(),
+    -- retry_at e os rótulos de erro descrevem a ESPERA anterior. Se forem
+    -- preservados durante a nova execução, a interface exibe simultaneamente
+    -- "rodando" e "aguardando infraestrutura". O evento de infraestrutura não
+    -- é apagado: migra para um histórico append-only dentro do próprio progresso.
+    progresso = case
+      when progresso is null then null
+      when progresso ? 'infrastructure_retry' then
+        (
+          case
+            when progresso->>'quality_status' = 'blocked_infrastructure'
+              then progresso - 'quality_status'
+            else progresso
+          end
+          - 'retry_at'
+          - 'aguardando_reset'
+          - 'motivo'
+          - 'engine_erro_codigo'
+          - 'engine_erro_classe'
+          - 'engine_erro_detalhe'
+          - 'infrastructure_retry'
+        )
+        || jsonb_build_object(
+          'infrastructure_retry_history',
+          (
+            case
+              when jsonb_typeof(progresso->'infrastructure_retry_history') = 'array'
+                then progresso->'infrastructure_retry_history'
+              else '[]'::jsonb
+            end
+          )
+          || jsonb_build_array(
+            coalesce(progresso->'infrastructure_retry', '{}'::jsonb)
+            || jsonb_build_object('resolvido_em', now())
+          )
+        )
+      else
+        progresso
+        - 'retry_at'
+        - 'aguardando_reset'
+        - 'motivo'
+        - 'engine_erro_codigo'
+        - 'engine_erro_classe'
+        - 'engine_erro_detalhe'
+    end
   where id = p_job_id and owner = p_owner and status = 'queued'
   returning *;
 end;

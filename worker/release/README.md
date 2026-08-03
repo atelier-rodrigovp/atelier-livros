@@ -9,10 +9,13 @@ Fundação e escrita V2 operam em modo **fail-closed**. O worker procura
   raciocínio/julgamento e `Haiku 4.5` em fatos);
 - versões e hashes dos contratos;
 - versão e hash do corpus;
-- calibração/holdout prontos para todas as skills;
+- corpus automático íntegro, com calibration/holdout e classes aprovada/contraste;
 - canários com pelo menos dois capítulos por skill, todos `aprovado` pleno;
 - laboratório automático aprovado, sem regressão/vazamento;
-- avaliação cega automática e avaliação humana com pelo menos 80%.
+- avaliação cega automática com os pisos de distinguibilidade, aderência e notas.
+
+Não existe etapa de rotulagem ou avaliação manual obrigatória. O julgamento do
+autor acontece sobre os canários ou sobre a obra, não sobre linhas de detector.
 
 O arquivo só deve ser criado pelo comando `scripts/v2-certificar-release.ts`.
 Editar um JSON à mão não cria as evidências ausentes e o verificador rejeita

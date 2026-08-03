@@ -10,6 +10,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import type { RotuloAutorizacao } from "@/lib/autorizacaoV2";
+import type { ProntidaoNaTela } from "@/lib/prontidaoPublicada";
 import { Button } from "@/components/ui/button";
 import {
   ROTULO_CLASSE_BLOQUEIO,
@@ -30,7 +31,7 @@ export interface EstadoOperacionalProps {
   /** Handlers desta tela. Obrigatório e completo — ver `AcoesOperacionais`. */
   acoes: AcoesOperacionais;
   /** Rotulo da prontidao local; nunca confundir com producao certificada. */
-  prontidao?: { local: string; producao: string; bloqueios: string[]; indisponivel?: string | null };
+  prontidao?: ProntidaoNaTela;
   /** Autorizacao do projeto em `engine_autorizacoes_v2`. */
   autorizacao?: RotuloAutorizacao;
   /** Documento que a tela deveria oferecer e não conseguiu buscar. */
@@ -150,7 +151,8 @@ export function EstadoOperacional({
           {/* Saúde local e produção certificada são coisas diferentes, e a tela
               precisa dizer isso com todas as letras. */}
           <p>
-            Local: <strong>{prontidao.local}</strong> · Produção: <strong>{prontidao.producao}</strong>
+            Local: <strong>{prontidao.local}</strong> · Pré-canário: <strong>{prontidao.preCanary}</strong> · Produção:{" "}
+            <strong>{prontidao.producao}</strong>
           </p>
           {prontidao.bloqueios.length ? (
             <p data-testid="bloqueios-producao">Falta para produção: {prontidao.bloqueios.join(", ")}</p>

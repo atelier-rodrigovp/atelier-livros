@@ -21,7 +21,15 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { chaveStorage, documentosDaFundacao, hashesDosDocumentos, indiceDeDocumentos } from "../src/v2/documentos.js";
+import {
+  chaveStorage,
+  divergenciasManifestoDocumentos,
+  docsExigidosDoIndice,
+  documentosDaFundacao,
+  hashesDosDocumentos,
+  indiceDeDocumentos,
+  type IndiceDocumentos,
+} from "../src/v2/documentos.js";
 import { lerAutorizacaoProjeto } from "../src/v2/release.js";
 import type { FundacaoV2 } from "../src/v2/fundacao.js";
 
@@ -74,6 +82,30 @@ reg(
   aut ? `modo=${aut.modo} por=${aut.autorizado_por}` : "nenhuma autorizacao ativa — fail-closed"
 );
 
+const { sb, OWNER } = await import("../src/supabase.js");
+const { data: estadoLinha, error: erroEstado } = await sb
+  .from("engine_state")
+  .select("doc")
+  .eq("owner", OWNER)
+  .eq("project_id", projeto)
+  .maybeSingle();
+reg("estado canônico da fundação disponível", !erroEstado && !!estadoLinha, erroEstado?.message ?? (estadoLinha ? "engine_state encontrado" : "engine_state ausente"));
+const fundacaoEstado = (estadoLinha as {
+  doc?: {
+    fundacao?: {
+      docs?: Record<string, string>;
+      indice?: IndiceDocumentos;
+    };
+  };
+} | null)?.doc?.fundacao;
+reg(
+  "índice canônico da fundação disponível",
+  !!fundacaoEstado?.indice?.documentos?.length,
+  fundacaoEstado?.indice?.documentos?.length
+    ? `${fundacaoEstado.indice.documentos.length} documentos no índice`
+    : "índice ausente ou vazio"
+);
+
 // ---------------------------------------------------------------------------
 // 1. Reconstrói a FundacaoV2 a partir dos documentos JÁ RENDERIZADOS em disco.
 //    É o inverso exato de `documentosDaFundacao`; nenhuma inferência, nenhum
@@ -101,8 +133,13 @@ const fundacao: FundacaoV2 = {
   fios: estruturaBruta.fios,
   promessa_editorial: estruturaBruta.promessa,
   ...(estruturaBruta.arco ? { arco: estruturaBruta.arco } : {}),
+  docs_exigidos: docsExigidosDoIndice(fundacaoEstado?.indice, ler),
 };
-reg("fundacao reconstruida do disco (sem chamada de modelo)", true, `${fundacao.estrutura.length} capitulos, ${fundacao.mapa_personagens.length} personagens`);
+reg(
+  "fundacao reconstruida do disco (sem chamada de modelo)",
+  true,
+  `${fundacao.estrutura.length} capitulos, ${fundacao.mapa_personagens.length} personagens, ${Object.keys(fundacao.docs_exigidos ?? {}).length} documento(s) contratual(is)`
+);
 
 // ---------------------------------------------------------------------------
 // 2. ROUND-TRIP: o renderizador canônico tem de reproduzir o disco byte a byte.
@@ -123,8 +160,13 @@ const hashes = hashesDosDocumentos(docs);
 const indice = indiceDeDocumentos(docs, new Date().toISOString());
 reg("manifesto de hashes e indice gerados", Object.keys(hashes).length === docs.length && indice.documentos.length === docs.length,
   `${Object.keys(hashes).length} hashes, ${indice.documentos.length} entradas no indice`);
+const divergenciasManifesto = divergenciasManifestoDocumentos(docs, fundacaoEstado?.docs, fundacaoEstado?.indice);
+reg(
+  "estado + índice + lista canônica representam o mesmo conjunto completo",
+  divergenciasManifesto.length === 0,
+  divergenciasManifesto.length ? divergenciasManifesto.join(" | ") : `${docs.length} documentos, hashes semânticos conferidos`
+);
 
-const OWNER = process.env.OWNER_USER_ID;
 if (!OWNER) throw new Error("OWNER_USER_ID não definido");
 
 if (!confirmar) {
@@ -138,20 +180,37 @@ if (!confirmar) {
 // 4. Upload pelo caminho canônico + download de volta com conferência de hash.
 // ---------------------------------------------------------------------------
 const { uploadFile } = await import("../src/lib.js");
-const { sb } = await import("../src/supabase.js");
 const artefatos: { nome: string; hash: string; bytes: number }[] = [];
+
+async function baixarComoInterface(chave: string): Promise<{ bytes: Buffer | null; erro: string | null }> {
+  const { data: assinatura, error: erroAssinatura } = await sb.storage.from("manuscritos").createSignedUrl(chave, 60);
+  if (erroAssinatura || !assinatura?.signedUrl) {
+    return { bytes: null, erro: erroAssinatura?.message ?? "URL assinada ausente" };
+  }
+  try {
+    // A interface abre uma URL assinada nova. O sufixo impede que a própria
+    // prova seja satisfeita por uma resposta CDN anterior ao upsert.
+    const separador = assinatura.signedUrl.includes("?") ? "&" : "?";
+    const resposta = await fetch(`${assinatura.signedUrl}${separador}evidencia=${Date.now()}`);
+    if (!resposta.ok) return { bytes: null, erro: `HTTP ${resposta.status}` };
+    return { bytes: Buffer.from(await resposta.arrayBuffer()), erro: null };
+  } catch (e) {
+    return { bytes: null, erro: e instanceof Error ? e.message : String(e) };
+  }
+}
 
 for (const d of docs) {
   const chave = chaveStorage(OWNER, projeto, d.caminho);
   await uploadFile("manuscritos", chave, path.join(dirProjeto, d.caminho));
 
-  // O que importa não é "o upload não deu erro": é o que VOLTA do serviço.
-  const { data, error } = await sb.storage.from("manuscritos").download(chave);
-  if (error || !data) {
-    reg(`download de ${d.caminho}`, false, error?.message ?? "sem conteudo");
+  // O que importa não é "o upload não deu erro": é o que VOLTA pelo MESMO
+  // mecanismo que a interface usa (URL assinada nova).
+  const baixadoAssinado = await baixarComoInterface(chave);
+  if (baixadoAssinado.erro || !baixadoAssinado.bytes) {
+    reg(`download assinado de ${d.caminho}`, false, baixadoAssinado.erro ?? "sem conteudo");
     break;
   }
-  const baixado = Buffer.from(await data.arrayBuffer());
+  const baixado = baixadoAssinado.bytes;
   const hOrigem = sha(Buffer.from(d.conteudo, "utf8"));
   const hVolta = sha(baixado);
   reg(
@@ -167,10 +226,13 @@ const chaveIndice = chaveStorage(OWNER, projeto, "indice-documentos.json");
 const tmpIndice = path.join(dirProjeto, "indice-documentos.json");
 writeFileSync(tmpIndice, JSON.stringify(indice, null, 2), "utf8");
 await uploadFile("manuscritos", chaveIndice, tmpIndice);
-const rIdx = await sb.storage.from("manuscritos").download(chaveIndice);
-const bIdx = rIdx.data ? Buffer.from(await rIdx.data.arrayBuffer()) : Buffer.alloc(0);
-reg("indice-documentos.json publicado e conferido", bIdx.length > 0 && sha(bIdx) === sha(readFileSync(tmpIndice)),
-  `sha256 ${sha(bIdx).slice(0, 16)}… (${bIdx.length} bytes)`);
+const indiceBaixado = await baixarComoInterface(chaveIndice);
+const bIdx = indiceBaixado.bytes ?? Buffer.alloc(0);
+reg(
+  "indice-documentos.json publicado e conferido por URL assinada",
+  !indiceBaixado.erro && bIdx.length > 0 && sha(bIdx) === sha(readFileSync(tmpIndice)),
+  indiceBaixado.erro ?? `sha256 ${sha(bIdx).slice(0, 16)}… (${bIdx.length} bytes)`
+);
 artefatos.push({ nome: "indice-documentos.json", hash: sha(bIdx), bytes: bIdx.length });
 
 const saida = arg("--saida");
@@ -188,8 +250,10 @@ if (saida) {
         passos,
         artefatos,
         remoto: {
-          migrations_applied: ["engine_v2_autorizacoes", "engine_v2_historico"],
+          migrations_applied: ["engine_v2_autorizacoes.sql", "engine_v2_historico.sql", "engine_v2_fluxo.sql"],
           tabelas: ["engine_autorizacoes_v2", "engine_eventos_v2", "engine_excecoes_admin_v2", "engine_preferencias_v2"],
+          columns: ["projects.briefing_aprovado:jsonb"],
+          constraints: ["projects.projects_briefing_aprovado_schema:CHECK"],
           policies: ["engine_autorizacoes_v2_select", "engine_autorizacoes_v2_insert", "engine_autorizacoes_v2_revogar"],
           triggers: ["engine_autorizacoes_v2_imutavel", "engine_autorizacoes_v2_sem_delete"],
           indexes: ["engine_autorizacoes_v2_projeto_ativo"],

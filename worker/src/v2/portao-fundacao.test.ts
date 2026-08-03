@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { FundacaoV2 } from "./fundacao.js";
+import { parseEstruturaMicro, type FundacaoV2 } from "./fundacao.js";
 import {
   avaliarFundacaoV2,
   avaliarMacroFundacao,
   correcaoParaRetry,
   gateFundacao,
   gateMacroMicroCoerentes,
+  motivoDocInsubstancial,
 } from "./portao-fundacao.js";
 import type { ArcoFundacao, SkillContract } from "./tipos.js";
 
@@ -132,6 +133,26 @@ function fundacao(over: Partial<FundacaoV2> = {}): FundacaoV2 {
 }
 
 describe("portão da fundação — estrutura x total de capítulos", () => {
+  it("parse da micro preserva múltiplos fios e exige que o principal esteja incluído", () => {
+    expect(parseEstruturaMicro(JSON.stringify({
+      estrutura: [{
+        capitulo: 1,
+        fio: "investigacao",
+        fios_avancados: ["investigacao", "conspiracao"],
+        resumo_estrutural: "a pista liga a investigação à conspiração",
+      }],
+    }))[0].fios_avancados).toEqual(["investigacao", "conspiracao"]);
+
+    expect(() => parseEstruturaMicro(JSON.stringify({
+      estrutura: [{
+        capitulo: 1,
+        fio: "investigacao",
+        fios_avancados: ["conspiracao"],
+        resumo_estrutural: "a pista liga a investigação à conspiração",
+      }],
+    }))).toThrow(/fios_avancados inválido/);
+  });
+
   it("fundação íntegra passa", () => {
     const av = avaliarFundacaoV2(fundacao(), contrato, 12, ["dossie-factual.md"]);
     expect(av.bloqueios).toEqual([]);
@@ -351,6 +372,8 @@ describe("o que virou bloqueante (antes: aviso)", () => {
     const b = av.bloqueios.find((x) => x.codigo === "DOC_PLACEHOLDER");
     expect(b).toBeDefined();
     expect(b!.mensagem).toContain("dossie-factual.md");
+    expect(b!.mensagem).toContain('marcador forte "TODO"');
+    expect(b!.mensagem).toContain("TODO: preencher");
   });
 
   it("documento exigido substantivo passa", () => {
@@ -369,6 +392,54 @@ describe("o que virou bloqueante (antes: aviso)", () => {
       contrato, 12, ["dossie-factual.md"]
     );
     expect(av.bloqueios.some((x) => x.codigo === "DOC_PLACEHOLDER")).toBe(false);
+  });
+
+  it("reticências em prosa normal não são placeholder", () => {
+    const doc =
+      "# Dossiê factual\n\n" +
+      "A investigação começa no farol e continua pelo arquivo municipal... A pausa marca hesitação, não ausência de conteúdo. " +
+      "Os registros de 1987 possuem duas vias autenticadas, confrontadas com o livro de bordo e com fotografias da reforma. " +
+      "A maré de sizígia expõe o túnel em março e setembro, conforme as tabelas náuticas anexadas ao processo histórico.";
+    expect(motivoDocInsubstancial(doc)).toBeNull();
+  });
+
+  it("frase substantiva com 'não há nada a definir' não é placeholder", () => {
+    const doc =
+      "# Dossiê factual\n\n" +
+      "O protocolo histórico fixa data, local, responsáveis e cadeia de custódia; não há nada a definir sobre esses campos. " +
+      "A primeira via está no arquivo municipal, a segunda permanece no consulado e ambas registram a automatização em 1987. " +
+      "As coordenadas do túnel foram verificadas contra as cartas náuticas e contra o diário técnico do faroleiro.";
+    expect(motivoDocInsubstancial(doc)).toBeNull();
+  });
+
+  it("palavras portuguesas 'todo' e 'preencher' em prosa normal não são TODO técnico", () => {
+    const doc =
+      "# Dossiê factual\n\n" +
+      "Todo o arquivo municipal foi inventariado antes da reforma e cada caixa recebeu uma referência de proveniência. " +
+      "Marina precisou preencher o formulário de consulta para confrontar as duas vias autenticadas do registro de 1987. " +
+      "O campo estava em branco no fac-símile histórico, fato descrito pelo perito e não uma lacuna deste dossiê. " +
+      "As cartas náuticas confirmam as coordenadas e a periodicidade da maré de sizígia.";
+    expect(motivoDocInsubstancial(doc)).toBeNull();
+  });
+
+  it("reticências isoladas continuam sendo placeholder e citam a ocorrência", () => {
+    const doc =
+      "# Dossiê factual\n\n" +
+      "O protocolo registra a cadeia de custódia, as coordenadas e todos os responsáveis pela inspeção histórica do farol. " +
+      "A documentação foi confrontada com o diário técnico, as cartas náuticas e o inventário municipal de 1987.\n\n" +
+      "- ...\n\n" +
+      "As duas vias autenticadas permanecem preservadas e têm proveniência conhecida.";
+    expect(motivoDocInsubstancial(doc)).toBe('contém marcador isolado "- ..."');
+  });
+
+  it("campo 'a definir' isolado continua sendo placeholder e cita a linha", () => {
+    const doc =
+      "# Dossiê factual\n\n" +
+      "O protocolo registra a cadeia de custódia, as coordenadas e todos os responsáveis pela inspeção histórica do farol. " +
+      "A documentação foi confrontada com o diário técnico, as cartas náuticas e o inventário municipal de 1987.\n\n" +
+      "Responsável: a definir\n\n" +
+      "As duas vias autenticadas permanecem preservadas e têm proveniência conhecida.";
+    expect(motivoDocInsubstancial(doc)).toBe('contém campo sem valor no trecho "Responsável: a definir"');
   });
 });
 
@@ -455,11 +526,23 @@ describe("macro × micro por campo estruturado", () => {
     expect(mensagens(f)).toContain("escalada[1] no capítulo 88");
   });
 
-  it("[DOD:D6-01] CLÍMAX de fio num capítulo que a micro deu a OUTRO fio reprova", () => {
+  it("[DOD:D6-01] CLÍMAX ausente dos fios avançados pela micro reprova", () => {
     const f = base();
     // cap 9 pertence a "conspiracao" na estrutura coerente
     f.arco!.fios[0].climax = 9;
-    expect(mensagens(f)).toContain('entregou esse capítulo ao fio "conspiracao"');
+    expect(mensagens(f)).toContain('não o inclui em fios_avancados');
+  });
+
+  it("[DOD:D6-01] convergência de dois fios no mesmo capítulo é representável e verificável", () => {
+    const f = base();
+    f.arco!.fios[0].climax = 9;
+    const cap9 = f.estrutura.find((e) => e.capitulo === 9)!;
+    cap9.fios_avancados = ["conspiracao", "investigacao"];
+    expect(mensagens(f)).not.toContain('fio "investigacao" clímax no capítulo 9');
+
+    // Prova de consumo: remover apenas o fio secundário muda o veredito.
+    cap9.fios_avancados = ["conspiracao"];
+    expect(mensagens(f)).toContain('fio "investigacao" clímax no capítulo 9');
   });
 
   it("[DOD:D6-01] MARCO de arco em capítulo inexistente reprova", () => {

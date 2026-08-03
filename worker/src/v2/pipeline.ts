@@ -20,14 +20,22 @@ import {
   validarParecerConformidade,
   type ParecerConformidade,
 } from "./conformidade.js";
-import { entradasDaFicha, gateRevelacaoRepetida, renderizarLedger } from "./ledger.js";
+import { entradasDaFicha, gateRevelacaoRepetida, renderizarLedger, revelacoesDaFicha } from "./ledger.js";
 import { decidirIdioma, medirIdioma, resumoIdioma, validarParecerIdioma, type ParecerIdioma } from "./idioma.js";
 import { derivarMemoriaDaProsa, validarExtracaoProsa, type ExtracaoProsa } from "./memoria-prosa.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
-import { acharSinalMedido, conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
+import { aplicarDelta, precisaEscalar, validarDelta, type DeltaDecisao } from "./cascata.js";
+import { acharSinalMedido, conferirParecer, exigirDisposicaoCompleta, hidratarOcorrenciasCitadas, normalizarParecerBruto, validarParecer } from "./revisor.js";
 import { medirSinais, resumoSinais } from "./sinais.js";
+import {
+  decidirManeirismo,
+  detectarRepeticaoSemantica,
+  localizarTrechoSemantico,
+  medirManeirismosDoLivro,
+  repeticaoSemanticaBloqueia,
+} from "./repeticao.js";
 import { validarSpec } from "./spec.js";
 import {
   tarefaArquitetoCena,
@@ -39,6 +47,7 @@ import {
   tarefaExtratorMemoria,
   tarefaEscritorCorrecao,
   tarefaRevisor,
+  tarefaDecisaoCascata,
   type ModoCorrecao,
 } from "./tarefas.js";
 import {
@@ -181,6 +190,22 @@ export function validarSaidaAuditor(obj: unknown): SaidaAuditor {
   if (pov.ha === true && pov.detalhe.trim().length === 0) {
     throw new Error("pov_violado.ha=true exige `detalhe` não vazio citando o trecho que viola o POV");
   }
+  if (pov.ha === true) {
+    const detalheNormalizado = pov.detalhe
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    const negaAPropriaAcusacao = [
+      /nao (?:e|constitui|configura) (?:uma )?violacao/,
+      /consistente com (?:a )?ficha/,
+      /previst[oa] pel[ao] ficha/,
+    ].some((padrao) => padrao.test(detalheNormalizado));
+    if (negaAPropriaAcusacao) {
+      throw new Error(
+        "pov_violado contraditório: ha=true, mas o detalhe afirma que o trecho não viola o POV ou está previsto pela ficha"
+      );
+    }
+  }
   return { contradicoes, conhecimento_indevido: conhecimento, pov_violado: { ha: pov.ha, detalhe: pov.detalhe } };
 }
 
@@ -234,6 +259,12 @@ export async function escreverCapitulo(
      */
     textoBase?: string;
     /**
+     * Reavalia o texto-base sem qualquer correção automática. Todos os gates e
+     * papéis de julgamento rodam; o escritor só será chamado por uma etapa
+     * posterior se este veredito reprovar.
+     */
+    somenteRevalidacao?: boolean;
+    /**
      * Reescrita dirigida (meta-nota): sobre o textoBase, aplica as correções do avaliador
      * em modo "reescrita" como 1ª ação, seguindo depois o fluxo normal. Exige textoBase.
      */
@@ -256,7 +287,9 @@ export async function escreverCapitulo(
   // texto está adequado e o veredito é que estava errado. Corrigir a prosa aqui
   // mudaria o hash e destruiria justamente o que se quer rejulgar.
   const maxCorrecoes =
-    opts?.correcaoDirigida?.estrategia === "julgamento_alternativo" ? 0 : (deps.maxCorrecoes ?? 2);
+    opts?.somenteRevalidacao || opts?.correcaoDirigida?.estrategia === "julgamento_alternativo"
+      ? 0
+      : (deps.maxCorrecoes ?? 2);
 
   if (opts?.textoBase && !opts.fichaExistente) {
     throw new ErroEngine({
@@ -390,6 +423,7 @@ export async function escreverCapitulo(
   // e de quem JULGA; o gate roda contra o ledger inteiro, mesmo que o pacote tenha
   // degradado para janela.
   const ledger = estadoParaSpec.doc.ledger_revelacoes ?? [];
+  const memoriaProsa = estadoParaSpec.doc.memoria_prosa ?? [];
   const ledgerRender = renderizarLedger(ledger, opts?.fichaExistente);
   const secLedger: SecaoContexto[] = [
     {
@@ -529,7 +563,21 @@ export async function escreverCapitulo(
       fonte: "contextualizador",
     });
   }
-  const repeticoesRecentes = ctx.repeticoes_recentes;
+  // Camada acumulativa: os textos anteriores chegam completos, mas só sinais
+  // que atravessaram cinco capítulos entram como prevenção. Sem calibração
+  // humana são sinais para escritor/revisor, nunca bloqueio automático.
+  const sinaisManeirismoAnteriores = medirManeirismosDoLivro(
+    (opts?.anteriores ?? []).map((a) => ({ numero: a.numero, texto: a.trecho }))
+  )
+    .map((sinal) => {
+      const decisao = decidirManeirismo(sinal, { calibrados: {}, excecoesDoAutor: [] });
+      return decisao.acao === "sinalizar"
+        ? `MANEIRISMO ACUMULADO [${sinal.padrao}]: ${decisao.motivo}; exemplos: ` +
+            sinal.ocorrencias.slice(0, 2).map((o) => `cap ${o.capitulo}: "${o.trecho}"`).join(" · ")
+        : null;
+    })
+    .filter((sinal): sinal is string => sinal !== null);
+  const repeticoesRecentes = [...ctx.repeticoes_recentes, ...sinaisManeirismoAnteriores];
 
   // -------------------------------------------------------------------------
   // 3. ESCRITA (escritor) — o PIPELINE grava o arquivo, nunca o modelo
@@ -573,13 +621,37 @@ export async function escreverCapitulo(
   // -------------------------------------------------------------------------
   // 4. GATES UNIVERSAIS — com UMA rodada de correção dirigida por passagem
   // -------------------------------------------------------------------------
-  const rodarGates = (): ResultadoGate[] =>
-    rodarGatesCapitulo({
+  const acharRepeticoesSemanticas = () =>
+    revelacoesDaFicha(ficha).flatMap((novoEnunciado) =>
+      detectarRepeticaoSemantica({
+        capitulo,
+        novoEnunciado,
+        trechoAtual: localizarTrechoSemantico(texto, novoEnunciado),
+        ledger,
+        memoria: memoriaProsa,
+      })
+    );
+
+  const rodarGates = (): ResultadoGate[] => {
+    const resultados = rodarGatesCapitulo({
       texto,
       contrato: deps.contrato.contrato,
       ficha,
       anteriores: opts?.anteriores,
-    }).filter((g) => !g.passou);
+    });
+    const repeticoesSemanticas = acharRepeticoesSemanticas().filter(repeticaoSemanticaBloqueia);
+    resultados.push({
+      gate: "repeticao_semantica",
+      passou: repeticoesSemanticas.length === 0,
+      evidencia: repeticoesSemanticas.length
+        ? repeticoesSemanticas.slice(0, 3).map((a) =>
+            `cap ${a.capituloAnterior} (${Math.round(a.similaridade * 100)}%): ` +
+            `"${a.trechoAtual}" repete "${a.trechoAnterior}"`
+          ).join(" · ")
+        : undefined,
+    });
+    return resultados.filter((g) => !g.passou);
+  };
 
   const corrigirComEscritor = async (
     correcoes: { local: string; problema: string; instrucao: string }[],
@@ -643,14 +715,40 @@ export async function escreverCapitulo(
   const docsFactuais = deps.docsFactuais ?? [];
 
   for (;;) {
+    // O relatório e a decisão refletem apenas ESTE hash. Problemas de uma
+    // versão já reescrita ficam no ledger de runs, não contaminam a rodada nova.
+    problemas.length = 0;
     // 5. Sinais medidos + parecer do revisor literário
     const sinais = medirSinais(texto, deps.contrato.contrato);
+    const sinaisManeirismoAtuais = medirManeirismosDoLivro([
+      ...(opts?.anteriores ?? []).map((a) => ({ numero: a.numero, texto: a.trecho })),
+      { numero: capitulo, texto },
+    ])
+      .map((sinal) => {
+        const decisao = decidirManeirismo(sinal, { calibrados: {}, excecoesDoAutor: [] });
+        return decisao.acao === "sinalizar"
+          ? `MANEIRISMO ACUMULADO [${sinal.padrao}]: ${decisao.motivo}; exemplos: ` +
+              sinal.ocorrencias.slice(0, 3).map((o) => `cap ${o.capitulo}: "${o.trecho}"`).join(" · ")
+          : null;
+      })
+      .filter((sinal): sinal is string => sinal !== null);
+    const sinaisSemanticosNaoBloqueantes = acharRepeticoesSemanticas()
+      .filter((achado) => !repeticaoSemanticaBloqueia(achado))
+      .map((achado) =>
+        `REPETIÇÃO SEMÂNTICA A JULGAR: cap ${achado.capituloAnterior}, ` +
+        `"${achado.enunciadoAtual}" versus "${achado.enunciadoAnterior}" (evidência incompleta)`
+      );
+    const repeticoesParaJulgamento = [
+      ...repeticoesRecentes,
+      ...sinaisManeirismoAtuais,
+      ...sinaisSemanticosNaoBloqueantes,
+    ];
     const secaoTexto: SecaoContexto = { titulo: "TEXTO A AVALIAR", texto, fonte: "manuscrito" };
 
     const compRev = compilar("revisor_literario", alvoCap, {
       ficha,
       fatos: [...secoesJulgamento, ...secLedger, ...docsFactuais, ...fatos, secaoTexto],
-      repeticoesRecentes,
+      repeticoesRecentes: repeticoesParaJulgamento,
     });
     if (!compRev.ok) return bloquearPorCompilacao(compRev.bloqueios);
     const rRev = await executarPapel<Parecer>({
@@ -661,13 +759,72 @@ export async function escreverCapitulo(
       tarefa: tarefaRevisor(capitulo, resumoSinais(sinais), deps.contrato.contrato),
       // Parecer que omite disposição de sinal fora da cota = protocolo violado →
       // retry técnico do REVISOR (com o sinal nomeado), não reprova do capítulo.
-      parse: (t) => exigirDisposicaoCompleta(validarParecer(extrairJson(t)), sinais),
+      // Normaliza a ESCRITA antes de julgar: valor escrito como texto e rotulo
+      // superfluo de "dentro da cota" custavam um retry inteiro do revisor —
+      // ~22 mil tokens para reescrever um parecer cujo conteudo ja estava certo.
+      // Nenhuma regua muda aqui: a validacao recebe o mesmo julgamento.
+      // normalizar (escrita) -> validar (schema) -> conferir (medicao) -> HIDRATAR.
+      // A hidratacao e a ultima porque so grava o que ja passou: resolve o
+      // {indice} do modelo para {indice, trecho} usando ESTE array de medicao,
+      // antes de o parecer seguir para engine_reviews e para a correcao dirigida.
+      parse: (t) =>
+        hidratarOcorrenciasCitadas(
+          exigirDisposicaoCompleta(validarParecer(normalizarParecerBruto(extrairJson(t), sinais)), sinais),
+          sinais
+        ),
     });
     runs.push(rRev.runId);
     const parecer = rRev.valor;
-    const conferencia = conferirParecer(parecer, sinais);
-    problemas.push(...conferencia.problemas);
-    let verdictEfetivo = conferencia.verdictEfetivo;
+    const conferenciaTriagem = conferirParecer(parecer, sinais);
+    let conferenciaFinal = conferenciaTriagem;
+    let verdictEfetivo = conferenciaTriagem.verdictEfetivo;
+
+    // 5b. CASCATA DE JULGAMENTO. A triagem (modelo barato) ja opinou; a decisao
+    // (modelo caro) e chamada so quando ha o que decidir, e julga nos DOIS
+    // sentidos: derruba confirmacao que e falso positivo E acrescenta violacao
+    // que a triagem nao viu. So derrubar faria disto uma maquina de leniencia.
+    //
+    // O veredito continua tendo UM dono: `verdictEfetivo`, aqui. O delta ajusta
+    // os sinais e SUGERE veredito; os gates universais logo abaixo (contradicao,
+    // POV, conhecimento indevido, idioma) reprovam depois e por cima — sugestao
+    // de "aprovado" nao sobrevive a uma contradicao comprovada.
+    const escalada = precisaEscalar(parecer, sinais, {
+      vaiFechar: verdictEfetivo === "aprovado" || verdictEfetivo === "aprovado_com_excecao",
+    });
+    let parecerFinal = parecer;
+    if (escalada.escalar) {
+      const compDec = compilar("revisor_decisao", alvoCap, { ficha, fatos: [...secoesJulgamento, secaoTexto] });
+      if (!compDec.ok) return bloquearPorCompilacao(compDec.bloqueios);
+      const rDec = await executarPapel<DeltaDecisao>({
+        ...base,
+        papel: "revisor_decisao",
+        alvo: alvoCap,
+        pacote: compDec.pacote!,
+        tarefa: tarefaDecisaoCascata(capitulo, resumoSinais(sinais), parecer, escalada.motivo),
+        parse: (t) => validarDelta(extrairJson(t), sinais),
+        payload: { passada: "decisao", gatilho: escalada.motivo },
+      });
+      runs.push(rDec.runId);
+      // O consolidado volta pela MESMA validacao da triagem: nao existe segundo
+      // caminho de validacao, e o delta nao escapa de nenhuma regra.
+      parecerFinal = hidratarOcorrenciasCitadas(
+        exigirDisposicaoCompleta(validarParecer(aplicarDelta(parecer, rDec.valor, sinais)), sinais),
+        sinais
+      );
+      const conf2 = conferirParecer(parecerFinal, sinais);
+      conferenciaFinal = conf2;
+      verdictEfetivo = conf2.verdictEfetivo;
+    }
+    problemas.push(...conferenciaFinal.problemas);
+
+    // Defesa final: o caminho de produção nunca devolve uma decisão editorial
+    // ao usuário. A cascata deveria ter adjudicado acima; se um parecer legado
+    // ainda escapar, ele reprova automaticamente e segue para correção.
+    if (verdictEfetivo === "necessita_decisao_humana") {
+      verdictEfetivo = "reprovado";
+      problemas.push("pedido de decisão humana convertido em reprovação automática para correção");
+    }
+
 
     // 6. Auditoria factual — contradição comprovada é GATE universal
     const compAud = compilar("auditor_factual", alvoCap, { ficha, fatos: [...secoesJulgamento, ...docsFactuais, ...fatos, secaoTexto] });
@@ -754,11 +911,11 @@ export async function escreverCapitulo(
         text_hash: textHash,
         verdict: verdictEfetivo,
         run_id: rRev.runId,
-        parecer,
+        parecer: parecerFinal,
       });
       await deps.gravador.aprovarCapitulo(
         capitulo,
-        { id: reviewId, text_hash: textHash, verdict: verdictEfetivo, parecer },
+        { id: reviewId, text_hash: textHash, verdict: verdictEfetivo, parecer: parecerFinal },
         caminho,
         entradasDaFicha(capitulo, ficha)
       );
@@ -802,29 +959,11 @@ export async function escreverCapitulo(
       return { capitulo, status: verdictEfetivo, textHash, reviewId, gatesFalhos: [], problemas, runs };
     }
 
-    if (verdictEfetivo === "necessita_decisao_humana") {
-      const reviewId = await deps.persistencia.inserirReview({
-        project_id: deps.projectId,
-        edition_id: deps.editionId ?? null,
-        capitulo,
-        text_hash: textHash,
-        verdict: verdictEfetivo,
-        run_id: rRev.runId,
-        parecer,
-      });
-      await deps.gravador.registrarBloqueio(
-        "DECISAO_HUMANA",
-        alvoCap,
-        problemas.length ? problemas.join(" · ") : "revisor solicitou decisão humana"
-      );
-      return { capitulo, status: "necessita_decisao_humana", textHash, reviewId, gatesFalhos: [], problemas, runs };
-    }
-
     // Reprovado: correção dirigida se há instruções, orçamento e convergência.
     // O saldo pondera TODAS as fontes de reprovação (violações do revisor +
     // contradições bloqueantes e conhecimento indevido do auditor).
-    const violacoes = parecer.sinais.filter(
-      (s) => s.disposicao === "violacao_confirmada" || conferencia.rebaixados.includes(s.sinal)
+    const violacoes = parecerFinal.sinais.filter(
+      (s) => s.disposicao === "violacao_confirmada" || conferenciaFinal.rebaixados.includes(s.sinal)
     ).length;
     const saldo =
       violacoes + 2 * contradicoesBloqueantes.length + auditoria.conhecimento_indevido.length + (povViolado ? 2 : 0) + 2 * conformidade.problemas.length;
@@ -862,8 +1001,8 @@ export async function escreverCapitulo(
     // instrução global com a cota-alvo do contrato E os trechos que o detector
     // flagrou — o escritor precisa saber QUAIS frases contam (achados do canário
     // hoover).
-    const globais = parecer.sinais
-      .filter((s) => s.disposicao === "violacao_confirmada" || conferencia.rebaixados.includes(s.sinal))
+    const globais = parecerFinal.sinais
+      .filter((s) => s.disposicao === "violacao_confirmada" || conferenciaFinal.rebaixados.includes(s.sinal))
       .map((s) => {
         const medido = acharSinalMedido(s.sinal, sinais);
         const cota = medido?.cota;
@@ -883,7 +1022,11 @@ export async function escreverCapitulo(
         };
       });
 
-    const todasCorrecoes = [...parecer.correcoes, ...correcoesAuditor, ...globais];
+    const correcoesDoParecer = parecerFinal.correcoes;
+    // Sem instrução específica, a reprovação sobe intacta para a escada externa
+    // de cinco estratégias. Inventar aqui uma "reescrita genérica" consumiria o
+    // micro-orçamento e esconderia o diagnóstico do controlador/ledger.
+    const todasCorrecoes = [...correcoesDoParecer, ...correcoesAuditor, ...globais];
     if (todasCorrecoes.length > 0 && correcoesFeitas < maxCorrecoes && !semConvergencia) {
       saldoAnterior = saldo;
       correcoesFeitas++;
@@ -896,6 +1039,7 @@ export async function escreverCapitulo(
           ? "reescrita"
           : "cirurgico";
       await corrigirComEscritor(todasCorrecoes, modo);
+      problemas.length = 0;
       gatesFalhos = await garantirGates();
       if (gatesFalhos.length) return bloquearPorGates(gatesFalhos);
       continue; // re-roda sinais + revisor + auditor no texto corrigido
@@ -908,7 +1052,7 @@ export async function escreverCapitulo(
       text_hash: textHash,
       verdict: "reprovado",
       run_id: rRev.runId,
-      parecer,
+      parecer: parecerFinal,
     });
     await deps.gravador.registrarBloqueio(
       "QUALIDADE_REPROVADA",

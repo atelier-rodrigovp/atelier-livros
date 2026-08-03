@@ -5,11 +5,47 @@
 import { describe, expect, it } from "vitest";
 import {
   CAMPOS_OBRIGATORIOS,
+  deveEnfileirarFundacaoAposEntrevista,
   obrigatoriosNaoCobertos,
   promptEntrevista,
+  resolverSkillAposEntrevista,
   validarSaidaEntrevista,
   type QaEntrevista,
 } from "./entrevista.js";
+
+describe("encadeamento depois da entrevista", () => {
+  it("[DOD:E-04] não pula a aprovação autoral na V2", () => {
+    expect(deveEnfileirarFundacaoAposEntrevista("v2")).toBe(false);
+    expect(deveEnfileirarFundacaoAposEntrevista("v1")).toBe(true);
+    expect(deveEnfileirarFundacaoAposEntrevista(null)).toBe(true);
+  });
+
+  it("preserva a skill escolhida pelo autor na V2 sem exigir prosa pré-fundação", () => {
+    expect(
+      resolverSkillAposEntrevista({
+        engineMode: "v2",
+        skillDoWizard: "skill-romantasy",
+        skillSugerida: "skill-dan-brown",
+      })
+    ).toEqual({
+      skill: "skill-romantasy",
+      sugestaoDivergente: "skill-dan-brown",
+    });
+  });
+
+  it("mantém o comportamento legado fora da V2", () => {
+    expect(
+      resolverSkillAposEntrevista({
+        engineMode: "v1",
+        skillDoWizard: "skill-romantasy",
+        skillSugerida: "skill-dan-brown",
+      })
+    ).toEqual({
+      skill: "skill-dan-brown",
+      sugestaoDivergente: null,
+    });
+  });
+});
 
 // qa que cobre os 5 obrigatórios (campo OU texto da pergunta casa o conceito)
 const qaCompleto: QaEntrevista[] = [

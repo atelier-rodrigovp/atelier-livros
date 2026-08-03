@@ -7,17 +7,22 @@ export const ENGINE_V2_VERSION = "2.0.0";
 // Papéis e classes de capacidade (F3)
 // ---------------------------------------------------------------------------
 
-export type Papel =
-  | "arquiteto_enredo"      // fundação, estrutura, revelações, promessa editorial
-  | "arquiteto_cena"        // objetivo, obstáculo, evento, mudança, gancho (ficha)
-  | "contextualizador"      // fatos, continuidade, seleção de contexto — proibido prosa
-  | "escritor"              // ÚNICO autor de prosa
-  | "revisor_literario"     // voz, transparência, emoção, propulsão, aderência
-  | "auditor_factual"       // nomes, datas, geografia, continuidade, conhecimento
-  | "editor_estrutural"     // cortes, fusões, ordem, macro-ritmo (propõe; worker aplica)
-  | "conformidade_ficha"     // a prosa cumpriu a ficha? (fatia G) — evidência localizada
-  | "extrator_memoria"       // o que a PROSA APROVADA estabeleceu (fatia H)
-  | "julgamento_idioma";     // variante-alvo × narração e diálogo (fatia J)
+/** Lista canônica: o gate pré-canário compara execução real papel a papel. */
+export const PAPEIS_ENGINE_V2 = [
+  "arquiteto_enredo",      // fundação, estrutura, revelações, promessa editorial
+  "arquiteto_cena",        // objetivo, obstáculo, evento, mudança, gancho (ficha)
+  "contextualizador",      // fatos, continuidade, seleção de contexto — proibido prosa
+  "escritor",              // ÚNICO autor de prosa
+  "revisor_literario",     // voz, transparência, emoção, propulsão, aderência
+  "auditor_factual",       // nomes, datas, geografia, continuidade, conhecimento
+  "editor_estrutural",     // cortes, fusões, ordem, macro-ritmo (propõe; worker aplica)
+  "conformidade_ficha",    // a prosa cumpriu a ficha? (fatia G) — evidência localizada
+  "extrator_memoria",      // o que a PROSA APROVADA estabeleceu (fatia H)
+  "julgamento_idioma",     // variante-alvo × narração e diálogo (fatia J)
+  "revisor_decisao",       // 2a passada da cascata: julga o delta, não reescreve o parecer
+] as const;
+
+export type Papel = (typeof PAPEIS_ENGINE_V2)[number];
 // O "gravador de estado" NÃO é um papel: é código determinístico (gravador.ts).
 
 export type ClasseCapacidade = "raciocinio" | "fatos" | "prosa" | "julgamento";
@@ -34,6 +39,55 @@ export const CLASSE_POR_PAPEL: Record<Papel, ClasseCapacidade> = {
   conformidade_ficha: "julgamento",
   extrator_memoria: "fatos",
   julgamento_idioma: "julgamento",
+  revisor_decisao: "julgamento",
+};
+
+/** Níveis que o CLI aceita em `--effort`. Valor fora daqui é erro, não aviso. */
+export type EsforcoModelo = "low" | "medium" | "high" | "xhigh" | "max";
+
+export interface ExecucaoPapel {
+  esforco: EsforcoModelo;
+  timeoutMs: number;
+}
+
+/**
+ * Esforço e timeout POR PAPEL — configuração como dado, não número mágico.
+ *
+ * Antes: todo papel rodava no esforço padrão do CLI e com o mesmo teto de 600 s
+ * (mais dois `timeoutMs: 900000` soltos em `fundacao.ts`). `arquiteto_enredo`
+ * falhava metade das vezes por `timeout após 300000ms` — não era capacidade do
+ * modelo, era o relógio.
+ *
+ * REGRA PARA PAPEL NOVO: dimensione pela maior execução BEM-SUCEDIDA, com
+ * margem de ~3×, e piso de 120 s.
+ *
+ * Descarte a duração de run que falhou por timeout: ela mede o timeout, não o
+ * trabalho. O caso que ensina isso está no banco — o run `889f9fc9` do
+ * `arquiteto_enredo` aparece com 1621 s e `tokens_out` nulo: estourou aos 300 s
+ * e o `finished_at` foi carimbado 27 minutos depois. Não houve 1621 s de
+ * trabalho; houve um carimbo tardio. Com 9 runs, um artefato desses sozinho
+ * levou o p95 a 1106 s e quase justificou um teto inventado.
+ *
+ * O maior sucesso REAL do papel é o run `56d7cad7`: 333 s para 30.706 tokens.
+ * 3× isso dá ~1000 s — e é daí que vêm os 1200 s desta tabela, não da cauda
+ * contaminada.
+ */
+export const EXECUCAO_POR_PAPEL: Record<Papel, ExecucaoPapel> = {
+  // Cauda larga: mediana 54 s, p95 1106 s, máximo observado 1621 s.
+  arquiteto_enredo: { esforco: "high", timeoutMs: 1_200_000 },
+  escritor: { esforco: "high", timeoutMs: 300_000 },
+  revisor_literario: { esforco: "high", timeoutMs: 600_000 },
+  auditor_factual: { esforco: "medium", timeoutMs: 300_000 },
+  arquiteto_cena: { esforco: "medium", timeoutMs: 180_000 },
+  conformidade_ficha: { esforco: "medium", timeoutMs: 180_000 },
+  julgamento_idioma: { esforco: "medium", timeoutMs: 180_000 },
+  // Decisao da cascata: julga um DELTA sobre texto ja medido, nao reescreve o
+  // parecer. Esforco alto porque e o julgamento que vale; teto menor que o da
+  // triagem porque a saida e uma fracao dela.
+  revisor_decisao: { esforco: "high", timeoutMs: 300_000 },
+  editor_estrutural: { esforco: "medium", timeoutMs: 300_000 },
+  contextualizador: { esforco: "low", timeoutMs: 120_000 },
+  extrator_memoria: { esforco: "low", timeoutMs: 120_000 },
 };
 
 export interface MapaModelos {
@@ -174,13 +228,39 @@ export interface SceneSpec {
 
 export type Disposicao = "violacao_confirmada" | "excecao_valida" | "falso_positivo" | "necessita_decisao_humana";
 
+/**
+ * Uma ocorrência julgada pelo revisor.
+ *
+ * O MODELO escreve `{ indice }` — 1-based na lista numerada que o detector já
+ * imprime no prompt. Transcrever o trecho custava a maior parte da saída do
+ * parecer e produzia a maior classe de falha (`citação não corresponde a nenhuma
+ * ocorrência medida`), porque o modelo não reproduz texto caractere a caractere.
+ *
+ * O SISTEMA grava `{ indice, trecho }`: `engine_reviews` guarda o parecer e o
+ * hash do texto, e NÃO guarda a medição — um índice sozinho apontaria para um
+ * array que não existe em lugar nenhum, reconstruível só remedindo o texto com a
+ * versão de `sinais.ts` daquele dia. Detector muda; o "#3" de hoje pode ser outro
+ * trecho amanhã. A hidratação acontece no mesmo ciclo, com o mesmo array de
+ * medição usado na validação — nunca depois, nunca remedindo.
+ *
+ * `{ trecho }` sem índice é a forma antiga: continua válida para LEITURA do
+ * histórico. O produtor não a emite mais.
+ */
+export interface OcorrenciaCitada {
+  /** 1-based na lista de exemplos do detector. Forma que o modelo emite. */
+  indice?: number;
+  /** Trecho literal. Emitido pelo histórico; preenchido pelo sistema na gravação. */
+  trecho?: string;
+  posicao?: string;
+}
+
 export interface SinalDisposto {
   sinal: string;                  // ex.: "gnomico", "personificacao", "dialogo_baixo"
   valor: number | string;         // medição do detector
   disposicao: Disposicao;
   evidencia: string;              // trecho/linha localizados
   /** violacao_confirmada em sinal de contagem exige as ocorrências julgadas reais, citadas uma a uma */
-  ocorrencias_citadas?: { trecho: string; posicao?: string }[];
+  ocorrencias_citadas?: OcorrenciaCitada[];
   /** disposição parcial: nº de ocorrências medidas julgadas falso positivo (citadas + falsos = valor) */
   falsos_positivos?: number;
 }
@@ -546,6 +626,7 @@ export type GateUniversal =
   | "violacao_conhecimento"
   | "pov_impossivel"
   | "repeticao_quase_literal"
+  | "repeticao_semantica"
   | "estado_inconsistente"
   | "skill_ou_contexto_invalido"
   | "fora_do_schema"
@@ -554,6 +635,7 @@ export type GateUniversal =
   | "revelacao_repetida"
   | "rotacao_pov_violada"
   | "promessa_nao_paga"
+  | "memoria_prosa_incompleta"
   /** Ficha contradiz a grade de arco (ato, tensão-alvo, promessa tocada, marco). */
   | "ficha_fora_do_arco"
   | "fundacao_estrutura_incoerente"

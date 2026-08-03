@@ -73,7 +73,7 @@ export type Situacao =
   | "aguardando_cota"
   | "retry_infra"
   | "bloqueado_qualidade"
-  | "circuit_breaker" // não convergiu no orçamento — decisão humana com diagnóstico
+  | "circuit_breaker" // não convergiu no orçamento — falha da engine, nunca tarefa editorial do autor
   | "aguardando_decisao"
   | "producao_desativada" // pausa GLOBAL do usuário (worker_control)
   | "pausado_manual"
@@ -130,6 +130,7 @@ export interface OperationalButton {
 export type ClasseBloqueio =
   | "tecnico" // infra, cota, worker fora do ar: passa sozinho ou é problema de máquina
   | "editorial" // gate reprovou o texto: a engine está tentando corrigir
+  | "falha_sistema" // a engine esgotou as estratégias; reprova a execução, não pede julgamento ao autor
   | "decisao_humana" // a engine parou de propósito e espera o autor
   | "ausencia_de_prova"; // nada falhou; falta evidência (ex.: fundação pendente)
 
@@ -245,6 +246,7 @@ export function classeDeBloqueio(s: Situacao): ClasseBloqueio | null {
     case "aguardando_correcao":
       return "editorial";
     case "circuit_breaker":
+      return "falha_sistema";
     case "aguardando_decisao":
     case "pausado_manual":
       return "decisao_humana";
@@ -257,6 +259,7 @@ export function classeDeBloqueio(s: Situacao): ClasseBloqueio | null {
 export const ROTULO_CLASSE_BLOQUEIO: Record<ClasseBloqueio, string> = {
   tecnico: "Impedimento técnico — infraestrutura ou cota; passa sozinho, nada a decidir.",
   editorial: "Impedimento editorial — um gate reprovou o texto; a engine está corrigindo.",
+  falha_sistema: "Falha da engine — a execução não concluiu; não há decisão editorial para você tomar.",
   decisao_humana: "Decisão sua — a engine parou de propósito e espera você.",
   ausencia_de_prova: "Falta prova — nada falhou; um artefato ainda não foi comprovado.",
 };
@@ -413,24 +416,21 @@ function resolverInterno(input: ResolverInput): Omit<OperationalState, "classe_b
   if (job.status === "queued" && pg.infrastructure_retry && retryFuturo) {
     return { situacao: "retry_infra", badge: "Retomada de infraestrutura agendada", tone: "warning", mensagem_humana: "Instabilidade técnica — retomando automaticamente.", ...base, blocker_humano: null, proxima_acao: null, botoes };
   }
-  // 4a. circuit breaker (SG1-f): a engine tentou o orçamento inteiro e parou com
-  // diagnóstico — aqui a decisão é humana de verdade.
+  // 4a. circuit breaker (SG1-f): a engine tentou o orçamento inteiro e falhou.
+  // Isto reprova a execução/canário; não transforma o autor em etapa do pipeline.
   if (job.status === "paused" && pg.quality_categoria === "circuit_breaker") {
     const spec = pg.quality_stage === "SPEC_CAPITULO";
-    add("corrigir", spec ? `Revalidar spec do capítulo ${capituloBloqueado ?? ""}`.trim() : `Corrigir capítulo ${capituloBloqueado ?? ""}`.trim());
     add("ver_diagnostico", "Ver diagnóstico");
     return {
       situacao: "circuit_breaker",
-      badge: "Bloqueado após circuit breaker",
+      badge: "Engine não convergiu",
       tone: "danger",
       mensagem_humana: spec
-        ? `O planejamento do capítulo ${capituloBloqueado ?? "?"} não passou após ${pg.correcao?.total_tentativas ?? "várias"} tentativa(s); os capítulos já aprovados permanecem intactos.`
-        : `A correção automática do capítulo ${capituloBloqueado ?? "?"} não convergiu após ${pg.correcao?.total_tentativas ?? "várias"} tentativa(s) — decisão humana necessária (diagnóstico completo disponível).`,
+        ? `A engine não conseguiu validar o planejamento do capítulo ${capituloBloqueado ?? "?"} após ${pg.correcao?.total_tentativas ?? "várias"} tentativa(s); a execução foi reprovada e os capítulos já aprovados permanecem intactos.`
+        : `A engine não conseguiu corrigir o capítulo ${capituloBloqueado ?? "?"} após ${pg.correcao?.total_tentativas ?? "várias"} tentativa(s). A execução foi reprovada; você não precisa decidir nem editar o capítulo.`,
       ...base,
       blocker_humano: humanizarBlocker(pg.quality_blockers, capituloBloqueado),
-      proxima_acao: spec
-        ? `Revalidar o planejamento do capítulo ${capituloBloqueado ?? ""}`.trim()
-        : `Revisar o diagnóstico e decidir o capítulo ${capituloBloqueado ?? ""}`.trim(),
+      proxima_acao: null,
       botoes,
     };
   }

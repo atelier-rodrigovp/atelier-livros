@@ -44,8 +44,8 @@ export function payloadDaProntidao(rel: unknown): PayloadProntidaoPublicada {
     throw new ErroPublicacao(`relatório sem HEAD válido: ${String(r.head)}`);
   }
   if (!r.estados || typeof r.estados !== "object") throw new ErroPublicacao("relatório sem estados formais");
-  if (!r.estados.implementacao_local || !r.estados.release_producao) {
-    throw new ErroPublicacao("relatório sem `implementacao_local` ou `release_producao`");
+  if (!r.estados.implementacao_local || !r.estados.pre_canary || !r.estados.release_producao) {
+    throw new ErroPublicacao("relatório sem `implementacao_local`, `pre_canary` ou `release_producao`");
   }
   // Relatório com bloqueio local em aberto não vira publicação: a tela mostraria
   // um estado que a própria execução considerou reprovado.

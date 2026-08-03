@@ -8,7 +8,9 @@ import { LimiteMaxError, deveRecuperar } from "./limite-max.js";
 import { escolherProximo, normalizarMaxParalelo, type ProjInfo } from "./fila.js";
 import { aguardarConexao } from "./espera-conexao.js";
 import { comRetrySb, ehErroDeRede } from "./retry.js";
+import { mesclarContextoHeartbeat } from "./heartbeat-state.js";
 import { instalarTimestampsISO } from "./log-iso.js";
+import { lerVersaoCodigo, descreverVersao } from "./versao-codigo.js";
 import { recuperarOrfaos as recuperarOrfaosCore } from "./orfaos.js";
 import { InfrastructureBlockedError, InfrastructureRetryError, QualityBlockedError } from "./job-errors.js";
 import { tratarBloqueioQualidade } from "./correcao-fluxo.js";
@@ -60,6 +62,9 @@ if (!process.env.PYTHONUTF8) {
 }
 
 const WORKER_ID = process.env.WORKER_ID || "worker-local";
+// Lido UMA vez: descreve o codigo com que ESTE processo subiu, nao o disco de
+// agora. Commit nao e producao — sem isto, o achado A2 ficou sem causa raiz.
+const VERSAO_CODIGO = lerVersaoCodigo(fileURLToPath(new URL("../../", import.meta.url)));
 const POLL = Number(process.env.POLL_INTERVAL_MS || 5000);
 const STALE_MIN = Number(process.env.HEARTBEAT_STALE_MIN || 15);
 
@@ -70,7 +75,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // cada ~5min (numa outage de 83min o log tinha 166 linhas idênticas — ruído).
 let hbFalhasSeguidas = 0;
 let hbUltimoAviso = 0;
+let contextoHeartbeat: Record<string, unknown> = {};
 async function heartbeat(extra: Record<string, unknown> = {}) {
+  contextoHeartbeat = mesclarContextoHeartbeat(contextoHeartbeat, extra);
   const { error } = await comRetrySb(
     () =>
       sb.from("worker_heartbeats").upsert(
@@ -78,7 +85,9 @@ async function heartbeat(extra: Record<string, unknown> = {}) {
           worker_id: WORKER_ID,
           owner: OWNER,
           last_seen: new Date().toISOString(),
-          status: { ...extra },
+          // Vai em TODO heartbeat: quem le o painel nao precisa ter visto o log
+          // do arranque para saber qual codigo esta no ar.
+          status: { ...contextoHeartbeat, codigo: VERSAO_CODIGO },
         },
         { onConflict: "owner,worker_id" }
       ),
@@ -353,8 +362,18 @@ async function loop() {
   console.log(
     `[worker ${WORKER_ID}] conectado. owner=${OWNER} poll=${POLL}ms stale=${STALE_MIN}min`
   );
+  console.log(`[worker ${WORKER_ID}] ${descreverVersao(VERSAO_CODIGO)}`);
+  if (VERSAO_CODIGO.sujo) {
+    console.warn(
+      `[worker ${WORKER_ID}] ATENCAO: o codigo em execucao NAO e o do commit — ` +
+        `modificados: ${VERSAO_CODIGO.sujos.slice(0, 5).join(", ")}` +
+        (VERSAO_CODIGO.sujos.length > 5 ? ` (+${VERSAO_CODIGO.sujos.length - 5})` : "")
+    );
+  }
 
-  const hb = setInterval(() => heartbeat({ estado: "idle" }), 30_000);
+  // O pulso periódico renova presença sem inventar um estado novo. Antes, este
+  // timer sobrescrevia `paused` e `busy` com `idle` a cada 30 segundos.
+  const hb = setInterval(() => heartbeat(), 30_000);
   hb.unref?.();
 
   // Duas faixas concorrentes: pesados em série + interativos em paralelo.
@@ -553,6 +572,7 @@ async function processarJob(job: Job) {
             quality_status: classe === "qualidade" ? "blocked_quality" : "aguardando_decisao",
             engine_erro_codigo: e.codigo,
             engine_erro_classe: classe,
+            engine_erro_detalhe: e.detalhe ?? null,
             resumo:
               classe === "qualidade"
                 ? "Bloqueado por qualidade (escada de correção esgotada)"

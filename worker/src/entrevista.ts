@@ -27,6 +27,38 @@ export const SKILLS_ESCRITA = [
   "skill-romantasy",
 ] as const;
 
+/**
+ * A V2 para depois de consolidar o briefing: o autor ainda precisa revisar e
+ * aprovar o snapshot na interface. A V1 mantém o encadeamento legado.
+ */
+export function deveEnfileirarFundacaoAposEntrevista(engineMode: string | null | undefined): boolean {
+  return engineMode !== "v2";
+}
+
+/**
+ * Na V2, a skill escolhida pelo autor no wizard é autoridade desde a criação.
+ * A entrevista pode sugerir outra, mas não substitui a decisão em silêncio e
+ * não exige gerar prosa pré-fundação para preservar essa escolha.
+ */
+export function resolverSkillAposEntrevista(opts: {
+  engineMode: string | null | undefined;
+  skillDoWizard: string | null | undefined;
+  skillSugerida: string | null | undefined;
+}): { skill: string | null; sugestaoDivergente: string | null } {
+  const wizard = opts.skillDoWizard?.trim() || null;
+  const sugerida = opts.skillSugerida?.trim() || null;
+  if (opts.engineMode === "v2" && wizard) {
+    return {
+      skill: wizard,
+      sugestaoDivergente: sugerida && sugerida !== wizard ? sugerida : null,
+    };
+  }
+  return {
+    skill: sugerida ?? wizard,
+    sugestaoDivergente: null,
+  };
+}
+
 // Conceito obrigatório: precisa ter sido PERGUNTADO ao autor (coberto no qa),
 // não apenas inferido pelo agente. `sinonimos` casa com o id `campo` do qa.
 interface CampoObrigatorio {

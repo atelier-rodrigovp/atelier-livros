@@ -62,7 +62,12 @@ import { resolveChapterState, deveSincronizar } from "./chapter-state.js";
 import { executePublicationTransaction, type PublicationFile } from "./publication-transaction.js";
 import { advanceEditionStatus, type EditionStatus } from "./state-machine.js";
 import { classifyRunnerOutcome } from "./runner-outcome.js";
-import { promptEntrevista, validarSaidaEntrevista } from "./entrevista.js";
+import {
+  deveEnfileirarFundacaoAposEntrevista,
+  promptEntrevista,
+  resolverSkillAposEntrevista,
+  validarSaidaEntrevista,
+} from "./entrevista.js";
 import { concluirCorrecoesAprovadas, resumoCorrecaoDoDisco } from "./correcao-fluxo.js";
 import { markDeterministicDetectorApproved, shouldGenerateFoundation } from "./reconciliacao-legada.js";
 
@@ -424,16 +429,18 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
   if (resultado.tipo === "concluir") {
     const b = resultado.briefing;
     // Campos AUTORITATIVOS do wizard V2 nunca são descartados/sobrescritos pela
-    // entrevista: decisões do autor, canário de voz aprovado e a skill validada
-    // pelo canário. Se a entrevista sugerir outra skill, a sugestão fica
-    // registrada para reconfirmação (novo canário de voz), nunca aplicada.
-    const canarioAprovado = (briefing as any).canario_voz?.aprovado === true;
+    // entrevista. A skill já é decisão explícita do autor; não depende de gerar
+    // uma amostra de prosa antes da fundação para ser preservada.
     const skillSugerida = b.skill_escrita ?? null;
-    const skillAutoritativa = canarioAprovado ? (proj.skill_escrita ?? null) : (skillSugerida ?? proj.skill_escrita ?? null);
+    const decisaoSkill = resolverSkillAposEntrevista({
+      engineMode: proj.engine_mode,
+      skillDoWizard: proj.skill_escrita,
+      skillSugerida,
+    });
     const avisos = [...(resultado.avisos ?? [])];
-    if (canarioAprovado && skillSugerida && skillSugerida !== proj.skill_escrita) {
+    if (decisaoSkill.sugestaoDivergente) {
       avisos.push(
-        `a entrevista sugeriu a skill "${skillSugerida}", mas a skill "${proj.skill_escrita}" foi validada pelo canário de voz — troca exige reconfirmação com novo canário`
+        `a entrevista sugeriu a skill "${decisaoSkill.sugestaoDivergente}", mas o autor escolheu "${proj.skill_escrita}" no wizard — troca exige decisão autoral explícita`
       );
     }
     const merged = {
@@ -442,8 +449,8 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
       qa,
       ...((briefing as any).decisoes_autor !== undefined ? { decisoes_autor: (briefing as any).decisoes_autor } : {}),
       ...((briefing as any).canario_voz !== undefined ? { canario_voz: (briefing as any).canario_voz } : {}),
-      ...(canarioAprovado && skillSugerida && skillSugerida !== proj.skill_escrita
-        ? { skill_sugerida_pela_entrevista: skillSugerida }
+      ...(decisaoSkill.sugestaoDivergente
+        ? { skill_sugerida_pela_entrevista: decisaoSkill.sugestaoDivergente }
         : {}),
       _interview: { completo: true, avisos },
     };
@@ -459,12 +466,16 @@ async function entrevistar(job: Job, hb?: Heartbeat) {
         paginas_alvo: b.paginas_alvo ?? proj.paginas_alvo ?? null,
         piso_palavras: b.piso_palavras ?? proj.piso_palavras ?? 1400,
         meta_nota: b.meta_nota ?? proj.meta_nota ?? 9.0,
-        skill_escrita: skillAutoritativa,
+        skill_escrita: decisaoSkill.skill,
         idioma_origem: b.idioma ?? proj.idioma_origem ?? "pt-BR",
       }).eq("owner", OWNER).eq("id", job.project_id!)
     );
-    // entrevista validada -> dispara a fundação automaticamente
-    await must(sb.from("jobs").insert({ owner: OWNER, tipo: "criar_fundacao", project_id: job.project_id }));
+    // V2 exige aprovação EXPLÍCITA do snapshot consolidado pelo autor. Enfileirar
+    // a fundação aqui pulava exatamente esse portão e fazia a tela anunciar uma
+    // validação que não ocorreu. A V1 preserva o comportamento legado.
+    if (deveEnfileirarFundacaoAposEntrevista(proj.engine_mode)) {
+      await must(sb.from("jobs").insert({ owner: OWNER, tipo: "criar_fundacao", project_id: job.project_id }));
+    }
     await setProgress(job.id, { fase: "ENTREVISTA", completo: true });
   } else {
     const perguntas = resultado.perguntas;

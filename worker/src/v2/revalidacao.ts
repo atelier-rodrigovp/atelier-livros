@@ -253,6 +253,78 @@ export function planejarAposReavaliacao(resultados: ResultadoReavaliacao[]): Pla
   };
 }
 
+export interface ExecutorRevalidacao {
+  /** Julga o texto existente sem reescrevê-lo. */
+  reavaliar: (capitulo: number) => Promise<ResultadoReavaliacao>;
+  /** Só é chamado para um capítulo que a reavaliação reprovou. */
+  reescrever: (capitulo: number, problemas: string[]) => Promise<ResultadoReavaliacao>;
+}
+
+export type ResultadoOndaRevalidacao =
+  | {
+      status: "concluida";
+      resultados: ResultadoReavaliacao[];
+      mantidos: number[];
+      reescritos: number[];
+    }
+  | {
+      status: "decisao_humana";
+      resultados: ResultadoReavaliacao[];
+      mantidos: number[];
+      reescritos: number[];
+      motivo: string;
+    };
+
+/**
+ * Consumidor executável do plano transitivo. Primeiro reavalia todos os textos
+ * como estão; só depois chama o escritor para os reprovados. O breaker é
+ * conferido antes de cada reescrita e nenhuma reprovação residual vira sucesso.
+ */
+export async function executarOndaRevalidacao(
+  afetados: CapituloAfetado[],
+  executor: ExecutorRevalidacao
+): Promise<ResultadoOndaRevalidacao> {
+  const resultados: ResultadoReavaliacao[] = [];
+  for (const afetado of afetados) {
+    resultados.push(await executor.reavaliar(afetado.capitulo));
+  }
+  const plano = planejarAposReavaliacao(resultados);
+  const reescritos: number[] = [];
+  const estado: EstadoCascata = { reescritasNaOnda: 0, jaReabertos: [] };
+
+  for (const capitulo of plano.reescrever) {
+    const breaker = avaliarCascata(estado, capitulo);
+    if (!breaker.continua) {
+      return {
+        status: "decisao_humana",
+        resultados,
+        mantidos: plano.mantidos,
+        reescritos,
+        motivo: breaker.motivo,
+      };
+    }
+    const inicial = resultados.find((r) => r.capitulo === capitulo)!;
+    const corrigido = await executor.reescrever(capitulo, inicial.problemas);
+    resultados.push(corrigido);
+    estado.reescritasNaOnda += 1;
+    estado.jaReabertos.push(capitulo);
+    if (!corrigido.continuaValido) {
+      return {
+        status: "decisao_humana",
+        resultados,
+        mantidos: plano.mantidos,
+        reescritos,
+        motivo:
+          `capítulo ${capitulo} continuou inválido após reescrita transitiva: ` +
+          (corrigido.problemas.join(" · ") || "sem diagnóstico"),
+      };
+    }
+    reescritos.push(capitulo);
+  }
+
+  return { status: "concluida", resultados, mantidos: plano.mantidos, reescritos };
+}
+
 // ---------------------------------------------------------------------------
 // Circuit breaker de cascata
 // ---------------------------------------------------------------------------

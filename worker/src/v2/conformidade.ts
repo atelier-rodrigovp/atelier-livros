@@ -156,11 +156,10 @@ export function conferirConformidade(
     validadas.push(a);
   }
 
-  for (const a of parecer.afirmacoes) {
-    if (!(ITENS_CONFORMIDADE as readonly string[]).includes(a.item)) {
-      problemas.push({ item: a.item, motivo: "item_desconhecido", detalhe: `item fora do vocabulário: "${a.item}"` });
-    }
-  }
+  // Afirmações extras são ruído de saída do modelo, não falha da PROSA. O gate
+  // continua fail-closed para cada item exigido acima (inclusive item omitido),
+  // mas não reprova um capítulo porque o julgador acrescentou uma linha que a
+  // ficha não pediu.
 
   return { conforme: problemas.length === 0, problemas, validadas };
 }
@@ -261,6 +260,6 @@ export function validarParecerConformidade(obj: unknown): ParecerConformidade {
       trecho: x.trecho,
       justificativa: x.justificativa,
     };
-  });
+  }).filter((a) => (ITENS_CONFORMIDADE as readonly string[]).includes(a.item));
   return { schema: "conformidade-ficha-prosa/v1", afirmacoes };
 }

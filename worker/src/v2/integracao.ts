@@ -58,6 +58,86 @@ import {
   type SceneSpec,
 } from "./tipos.js";
 
+interface ProjetoFundacaoRow {
+  id: string;
+  titulo: string;
+  skill_escrita: string | null;
+  total_capitulos: number | null;
+  idioma_origem: string | null;
+  briefing: BriefingAutor;
+  briefing_aprovado: BriefingAprovado | null;
+}
+
+function registro(valor: unknown, nome: string): Record<string, unknown> {
+  if (!valor || typeof valor !== "object" || Array.isArray(valor)) {
+    throw new ErroEngine({
+      codigo: "DADO_BANCO_INVALIDO",
+      classe: "configuracao",
+      mensagem: `${nome} não é um objeto`,
+    });
+  }
+  return valor as Record<string, unknown>;
+}
+
+/**
+ * Fronteira tipada do banco. O cast antigo inventava `briefing_aprovado` mesmo
+ * sem a coluna existir/ser selecionada; aqui ausência é erro visível.
+ */
+export function lerProjetoFundacao(valor: unknown): ProjetoFundacaoRow {
+  const o = registro(valor, "projects");
+  if (!Object.prototype.hasOwnProperty.call(o, "briefing_aprovado")) {
+    throw new ErroEngine({
+      codigo: "COLUNA_BRIEFING_APROVADO_AUSENTE",
+      classe: "configuracao",
+      mensagem:
+        "projects.briefing_aprovado não foi retornado; aplique supabase/engine_v2_fluxo.sql e selecione a coluna explicitamente",
+    });
+  }
+  const briefing = registro(o.briefing ?? {}, "projects.briefing") as BriefingAutor;
+  let aprovacao: BriefingAprovado | null = null;
+  if (o.briefing_aprovado != null) {
+    const a = registro(o.briefing_aprovado, "projects.briefing_aprovado");
+    const snapshot = registro(a.briefing, "projects.briefing_aprovado.briefing") as BriefingAutor;
+    if (
+      a.schema !== "briefing-aprovado/v1" ||
+      typeof a.hash !== "string" ||
+      !/^[0-9a-f]{64}$/.test(a.hash) ||
+      typeof a.aprovado_por !== "string" ||
+      !a.aprovado_por.trim() ||
+      typeof a.aprovado_em !== "string"
+    ) {
+      throw new ErroEngine({
+        codigo: "BRIEFING_APROVACAO_INVALIDA",
+        classe: "configuracao",
+        mensagem: "projects.briefing_aprovado tem estrutura inválida",
+      });
+    }
+    aprovacao = {
+      schema: "briefing-aprovado/v1",
+      hash: a.hash,
+      aprovado_por: a.aprovado_por,
+      aprovado_em: a.aprovado_em,
+      briefing: snapshot,
+    };
+  }
+  if (typeof o.id !== "string" || typeof o.titulo !== "string") {
+    throw new ErroEngine({
+      codigo: "DADO_BANCO_INVALIDO",
+      classe: "configuracao",
+      mensagem: "projects.id/titulo ausentes",
+    });
+  }
+  return {
+    id: o.id,
+    titulo: o.titulo,
+    skill_escrita: typeof o.skill_escrita === "string" ? o.skill_escrita : null,
+    total_capitulos: typeof o.total_capitulos === "number" ? o.total_capitulos : null,
+    idioma_origem: typeof o.idioma_origem === "string" ? o.idioma_origem : null,
+    briefing,
+    briefing_aprovado: aprovacao,
+  };
+}
+
 /** Tipos de job que a V2 sabe executar (os demais permanecem na V1 mesmo em modo v2). */
 export const TIPOS_V2 = new Set([
   "escrever_livro",
@@ -67,6 +147,13 @@ export const TIPOS_V2 = new Set([
   "refinar_fundacao",
   "avaliar",
 ]);
+
+/**
+ * Controle determinístico usado pelos dois engines. Entrevista não produz prosa
+ * nem fundação e não deve ser anunciada como vazamento para a V1 só porque o
+ * handler histórico vive em jobs.ts.
+ */
+export const TIPOS_COMPARTILHADOS_V1_V2 = new Set(["entrevistar"]);
 
 export async function engineModeDoProjeto(projectId: string): Promise<string> {
   const { sb, OWNER } = await import("../supabase.js");
@@ -112,6 +199,13 @@ export async function executarJobRoteado(
     // Job exclusivo V2 (wizard): cena curta de amostra da voz antes da fundação.
     return executarCanarioVoz(job);
   }
+  if (job.project_id && TIPOS_COMPARTILHADOS_V1_V2.has(job.tipo)) {
+    const modo = await engineModeDoProjeto(job.project_id);
+    if (modo === "v2") {
+      registrarHandlerCompartilhado(job);
+      return executarV1(job, hb);
+    }
+  }
   if (job.project_id && TIPOS_V2.has(job.tipo)) {
     const modo = await engineModeDoProjeto(job.project_id);
     if (modo === "v2") {
@@ -132,7 +226,7 @@ export async function executarJobRoteado(
   // Projeto V2 cujo TIPO de job não tem implementação V2 (gerar_epub, traduzir,
   // gerar_capa…) cai aqui legitimamente — mas nunca em silêncio. Rota calada é
   // como um livro V2 seria montado por código V1 sem ninguém notar.
-  if (job.project_id && !TIPOS_V2.has(job.tipo)) {
+  if (job.project_id && !TIPOS_V2.has(job.tipo) && !TIPOS_COMPARTILHADOS_V1_V2.has(job.tipo)) {
     const modo = await engineModeDoProjeto(job.project_id).catch(() => "desconhecido");
     if (modo === "v2") registrarDesvioV1(job, `tipo '${job.tipo}' não tem implementação V2`);
   }
@@ -142,6 +236,11 @@ export async function executarJobRoteado(
 /** Toda vez que um projeto V2 executa por código V1, isso vai para o log. */
 export function registrarDesvioV1(job: Pick<Job, "id" | "tipo">, motivo: string): void {
   console.log(`[engine-v2] job ${job.id} (${job.tipo}) roteado para a V1 — ${motivo}`);
+}
+
+/** Handler comum não é desvio: deixa explícito que nenhum engine de prosa atuou. */
+export function registrarHandlerCompartilhado(job: Pick<Job, "id" | "tipo">): void {
+  console.log(`[engine-v2] job ${job.id} (${job.tipo}) executado pelo handler compartilhado V1/V2 — controle determinístico, sem prosa`);
 }
 
 async function atualizarProgresso(jobId: string, progresso: Record<string, unknown>): Promise<void> {
@@ -602,17 +701,25 @@ export async function executarEscritaV2(job: Job): Promise<ResultadoRoteado | vo
       return { continuar: { ...paradaLote, progresso } };
     }
 
-    // Trechos anteriores estritamente relevantes: cauda do capítulo anterior (gancho/continuidade local).
+    // Gates de repetição recebem TODOS os capítulos anteriores completos. O
+    // pacote do modelo continua pequeno: só a cauda de N-1 entra como contexto
+    // de continuidade. Garantia determinística não pode degradar com a janela.
     const anteriores: { numero: number; trecho: string }[] = [];
     const trechos: { titulo: string; texto: string; fonte: string }[] = [];
-    if (n > 1) {
-      const prev = path.join(deps.dirManuscrito, `capitulo-${String(n - 1).padStart(2, "0")}.md`);
+    for (let anterior = 1; anterior < n; anterior++) {
+      const prev = path.join(deps.dirManuscrito, `capitulo-${String(anterior).padStart(2, "0")}.md`);
       try {
         const t = await fs.readFile(prev, "utf8");
-        anteriores.push({ numero: n - 1, trecho: t });
-        trechos.push({ titulo: `FINAL DO CAPÍTULO ${n - 1} (continuidade imediata)`, texto: t.split(/\n{2,}/).slice(-3).join("\n\n"), fonte: `capitulo-${n - 1}` });
+        anteriores.push({ numero: anterior, trecho: t });
+        if (anterior === n - 1) {
+          trechos.push({
+            titulo: `FINAL DO CAPÍTULO ${anterior} (continuidade imediata)`,
+            texto: t.split(/\n{2,}/).slice(-3).join("\n\n"),
+            fonte: `capitulo-${anterior}`,
+          });
+        }
       } catch {
-        /* capítulo anterior fora do disco: o contextualizador cobre a continuidade */
+        /* arquivo ausente: estado/hash-bound e contextualizador continuam fail-closed */
       }
     }
 
@@ -1025,16 +1132,17 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
   const { sb, OWNER } = await import("../supabase.js");
   const { projDir, CLAUDE_BIN } = await import("../lib.js");
   const projectId = job.project_id!;
-  const { data: proj, error } = await sb
+  const { data, error } = await sb
     .from("projects")
-    .select("id,titulo,skill_escrita,total_capitulos,idioma_origem,briefing")
+    .select("id,titulo,skill_escrita,total_capitulos,idioma_origem,briefing,briefing_aprovado")
     .eq("owner", OWNER)
     .eq("id", projectId)
     .single();
-  if (error || !proj) {
+  if (error || !data) {
     throw new ErroEngine({ codigo: "PROJETO_AUSENTE", classe: "configuracao", mensagem: `projeto ${projectId} não encontrado: ${error?.message ?? ""}` });
   }
-  const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
+  const proj = lerProjetoFundacao(data);
+  const skillV1 = proj.skill_escrita ?? "";
   const contrato = carregarContrato(MAPA_SKILL_V1_V2[skillV1] ?? skillV1);
   const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId), "fundacao");
   const dirProjeto = projDir(projectId);
@@ -1042,7 +1150,7 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
   const { persistencia } = await criarPersistencia({ dirProjeto });
   const gravador = new Gravador({ persistencia, projectId });
 
-  const totalCaps = (proj as { total_capitulos?: number }).total_capitulos ?? 0;
+  const totalCaps = proj.total_capitulos ?? 0;
   if (!totalCaps || totalCaps < 1) {
     throw new ErroEngine({ codigo: "TOTAL_CAPITULOS_INDEFINIDO", classe: "configuracao", mensagem: "criar_fundacao V2 exige total_capitulos definido no projeto (wizard)" });
   }
@@ -1062,14 +1170,14 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
   // Fatia E — o briefing precisa estar COMPLETO, sem conflito e APROVADO pelo
   // autor. Antes, a fundação era gerada do que estivesse gravado, inclusive
   // contraditório, e nada registrava que o autor tinha visto aquilo.
-  const briefingBruto = ((proj as { briefing?: BriefingAutor }).briefing ?? {}) as BriefingAutor;
+  const briefingBruto = proj.briefing;
   const autorizacaoBriefing = autorizarFundacao(
     briefingBruto,
-    (proj as { briefing_aprovado?: BriefingAprovado | null }).briefing_aprovado ?? null,
+    proj.briefing_aprovado,
     {
-      idioma_origem: (proj as { idioma_origem?: string | null }).idioma_origem ?? null,
-      total_capitulos: (proj as { total_capitulos?: number | null }).total_capitulos ?? null,
-      skill_escrita: (proj as { skill_escrita?: string | null }).skill_escrita ?? null,
+      idioma_origem: proj.idioma_origem,
+      total_capitulos: proj.total_capitulos,
+      skill_escrita: proj.skill_escrita,
     }
   );
   if (!autorizacaoBriefing.permitido) {
@@ -1080,7 +1188,7 @@ export async function executarFundacaoV2Job(job: Job): Promise<void> {
       detalhe: { motivo: autorizacaoBriefing.motivo },
     });
   }
-  const briefingFundacao = briefingParaFundacao(proj as Parameters<typeof briefingParaFundacao>[0]);
+  const briefingFundacao = briefingParaFundacao(proj);
   if (!briefingFundacao.premissa) {
     throw new ErroEngine({ codigo: "BRIEFING_AUSENTE", classe: "configuracao", mensagem: "criar_fundacao V2 exige briefing.ideia_central" });
   }
@@ -1165,19 +1273,20 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
   }
   await registrarDecisaoAutor(projectId, instrucoes, "refinar_fundacao");
 
-  const { data: proj, error } = await sb
+  const { data, error } = await sb
     .from("projects")
-    .select("id,titulo,skill_escrita,total_capitulos,idioma_origem,briefing")
+    .select("id,titulo,skill_escrita,total_capitulos,idioma_origem,briefing,briefing_aprovado")
     .eq("owner", OWNER)
     .eq("id", projectId)
     .single();
-  if (error || !proj) {
+  if (error || !data) {
     throw new ErroEngine({ codigo: "PROJETO_AUSENTE", classe: "configuracao", mensagem: `projeto ${projectId} não encontrado: ${error?.message ?? ""}` });
   }
-  const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
+  const proj = lerProjetoFundacao(data);
+  const skillV1 = proj.skill_escrita ?? "";
   const contrato = carregarContrato(MAPA_SKILL_V1_V2[skillV1] ?? skillV1);
   const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId), "fundacao");
-  const totalCaps = (proj as { total_capitulos?: number }).total_capitulos ?? 0;
+  const totalCaps = proj.total_capitulos ?? 0;
   if (!totalCaps || totalCaps < 1) {
     throw new ErroEngine({ codigo: "TOTAL_CAPITULOS_INDEFINIDO", classe: "configuracao", mensagem: "refinar_fundacao V2 exige total_capitulos definido no projeto" });
   }
@@ -1188,14 +1297,14 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
   // Fatia E — o briefing precisa estar COMPLETO, sem conflito e APROVADO pelo
   // autor. Antes, a fundação era gerada do que estivesse gravado, inclusive
   // contraditório, e nada registrava que o autor tinha visto aquilo.
-  const briefingBruto = ((proj as { briefing?: BriefingAutor }).briefing ?? {}) as BriefingAutor;
+  const briefingBruto = proj.briefing;
   const autorizacaoBriefing = autorizarFundacao(
     briefingBruto,
-    (proj as { briefing_aprovado?: BriefingAprovado | null }).briefing_aprovado ?? null,
+    proj.briefing_aprovado,
     {
-      idioma_origem: (proj as { idioma_origem?: string | null }).idioma_origem ?? null,
-      total_capitulos: (proj as { total_capitulos?: number | null }).total_capitulos ?? null,
-      skill_escrita: (proj as { skill_escrita?: string | null }).skill_escrita ?? null,
+      idioma_origem: proj.idioma_origem,
+      total_capitulos: proj.total_capitulos,
+      skill_escrita: proj.skill_escrita,
     }
   );
   if (!autorizacaoBriefing.permitido) {
@@ -1206,7 +1315,7 @@ export async function executarRefinarFundacaoV2(job: Job): Promise<void> {
       detalhe: { motivo: autorizacaoBriefing.motivo },
     });
   }
-  const briefingFundacao = briefingParaFundacao(proj as Parameters<typeof briefingParaFundacao>[0]);
+  const briefingFundacao = briefingParaFundacao(proj);
   const detalhes = [briefingFundacao.detalhes, `- Instruções de refino do autor: ${instrucoes}`].filter(Boolean).join("\n");
 
   const depsF = {

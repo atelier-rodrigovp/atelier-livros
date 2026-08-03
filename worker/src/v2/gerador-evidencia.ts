@@ -22,6 +22,7 @@ import {
   type ArtefatoEvidencia,
   type EstadoRemoto,
   type EvidenciaExterna,
+  type ExecucoesReaisEvidencia,
   type FingerprintsCodigo,
   type PassoEvidencia,
   type TipoEvidencia,
@@ -50,6 +51,8 @@ export interface OpcoesGerador {
   introspectar?: () => Promise<Omit<EstadoRemoto, "remote_schema_hash">>;
   /** Baixa artefatos e devolve nome/hash/bytes do que REALMENTE veio. */
   baixarArtefatos?: () => Promise<ArtefatoEvidencia[]>;
+  /** Ledger observado; obrigatório para a prova dos 11 papéis e da cascata. */
+  execucoesReais?: () => Promise<ExecucoesReaisEvidencia>;
   agora?: () => string;
 }
 
@@ -128,6 +131,13 @@ export async function gerarEvidencia(opts: OpcoesGerador): Promise<ResultadoGera
     if (vazio) throw new ErroGerador(`artefato '${vazio.nome}' veio com 0 byte — download falhou`);
   }
 
+  let execucoes_reais: ExecucoesReaisEvidencia | undefined;
+  if (opts.tipo === "papeis_reais") {
+    if (!opts.execucoesReais) throw new ErroGerador("papeis_reais exige consulta do ledger engine_runs");
+    execucoes_reais = await opts.execucoesReais();
+    if (!execucoes_reais.papeis.length) throw new ErroGerador("ledger não observou nenhuma execução real");
+  }
+
   const evidencia: EvidenciaExterna = {
     schema: SCHEMA_EVIDENCIA,
     tipo: opts.tipo,
@@ -140,6 +150,7 @@ export async function gerarEvidencia(opts: OpcoesGerador): Promise<ResultadoGera
     worktree_limpa: true,
     fingerprints: opts.fingerprints,
     remoto,
+    execucoes_reais,
     passos,
     artefatos,
     erros,

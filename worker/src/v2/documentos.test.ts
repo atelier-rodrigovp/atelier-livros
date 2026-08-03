@@ -3,6 +3,8 @@
 import { describe, expect, it } from "vitest";
 import {
   chaveStorage,
+  divergenciasManifestoDocumentos,
+  docsExigidosDoIndice,
   docsExigidosFaltando,
   documentosDaFundacao,
   hashesDosDocumentos,
@@ -96,6 +98,49 @@ describe("hashes e índice", () => {
       expect(d.caminho).toBeTruthy();
       expect(d.hash).toMatch(/^[0-9a-f]{64}$/);
     }
+  });
+
+  it("reconstrói TODOS os documentos contratuais do índice, sem omiti-los no round-trip", () => {
+    const docs = documentosDaFundacao(
+      fundacao({ docs_exigidos: { "dossie-factual.md": "fatos", "matriz-de-relogios.md": "relógios" } })
+    );
+    const idx = indiceDeDocumentos(docs, "2026-07-31T00:00:00.000Z");
+    const porCaminho = new Map(docs.map((d) => [d.caminho, d.conteudo]));
+    const reconstruidos = docsExigidosDoIndice(idx, (caminho) => porCaminho.get(caminho) ?? "");
+    expect(reconstruidos).toEqual({
+      "dossie-factual.md": "fatos",
+      "matriz-de-relogios.md": "relógios",
+    });
+  });
+
+  it("rejeita índice contratual com caminho deslocado ou traversal normalizado", () => {
+    expect(() =>
+      docsExigidosDoIndice(
+        {
+          gerado_em: "2026-07-31T00:00:00.000Z",
+          documentos: [{ titulo: "dossiê", caminho: "outra-pasta/dossie.md", origem: "contrato", hash: "a".repeat(64) }],
+        },
+        () => "conteúdo"
+      )
+    ).toThrow(/caminho contratual inválido/);
+  });
+
+  it("a prova de manifesto falha se um documento contratual sumir do estado ou do índice", () => {
+    const docs = documentosDaFundacao(fundacao({ docs_exigidos: { "dossie-factual.md": "fatos" } }));
+    const hashes = hashesDosDocumentos(docs);
+    const idx = indiceDeDocumentos(docs, "2026-07-31T00:00:00.000Z");
+    expect(divergenciasManifestoDocumentos(docs, hashes, idx)).toEqual([]);
+
+    const semContrato = { ...hashes };
+    delete semContrato["fundacao/dossie-factual.md"];
+    expect(divergenciasManifestoDocumentos(docs, semContrato, idx)).toContainEqual(
+      expect.stringContaining("estado diverge da lista canônica")
+    );
+
+    const indiceSemContrato = { ...idx, documentos: idx.documentos.filter((d) => d.origem !== "contrato") };
+    expect(divergenciasManifestoDocumentos(docs, hashes, indiceSemContrato)).toContainEqual(
+      expect.stringContaining("índice diverge da lista canônica")
+    );
   });
 });
 

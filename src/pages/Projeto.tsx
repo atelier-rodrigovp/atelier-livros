@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, ArrowUp, BookOpen, Check, ClipboardCheck, Copy, Download, FileText, Gauge, Image, Languages, Loader2, Maximize2, Pencil, PenLine, Play, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, enqueueJob } from "@/lib/supabase";
-import { signedUrl, downloadText, deleteProject } from "@/lib/storage";
+import { abrirUrlAssinada, signedUrl, downloadText, deleteProject } from "@/lib/storage";
 import {
   Dialog,
   DialogContent,
@@ -38,6 +38,13 @@ import { Switch } from "@/components/ui/switch";
 import { ReviewReport } from "@/components/ReviewReport";
 import { EngineV2Panel } from "@/components/EngineV2Panel";
 import { chaveStorageDocumento, documentosParaExibir } from "@/lib/documentosFundacao";
+import { aprovarBriefingWeb, aprovacaoAindaCorresponde } from "@/lib/briefingAprovacao";
+import { useSession } from "@/hooks/useSession";
+import {
+  avaliarPrecondicoesEscrita,
+  avaliarPrecondicoesFundacao,
+  proximaAcaoAntesDaEscrita,
+} from "@/lib/precondicoesFundacaoV2";
 
 interface Edition { id: string; idioma: string; status: string; is_origem: boolean; nota_review: number | null; }
 interface Artifact { id: string; edition_id: string | null; tipo: string; storage_path: string; url_publica: string | null; created_at?: string; meta?: any; }
@@ -66,6 +73,7 @@ function JobStatus({ job, producaoPausada }: { job?: Job; producaoPausada?: bool
 export default function Projeto() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
+  const { session } = useSession();
   const { online: workerOnline, producaoAtiva } = useWorkerStatus();
   const [proj, setProj] = useState<Project | null>(null);
   const [editions, setEditions] = useState<Edition[]>([]);
@@ -76,7 +84,12 @@ export default function Projeto() {
   // Autorizacao e prontidao publicada: sem elas a tela nao distingue "nao posso"
   // de "esta quebrado", nem saude local de producao certificada.
   const [autorizacao, setAutorizacao] = useState<RotuloAutorizacao | null>(null);
+  const [autorizacaoLinhas, setAutorizacaoLinhas] = useState<AutorizacaoV2Row[]>([]);
   const [prontidao, setProntidao] = useState<ProntidaoNaTela | null>(null);
+  const [aprovacaoCorresponde, setAprovacaoCorresponde] = useState(false);
+  const [aprovandoBriefing, setAprovandoBriefing] = useState(false);
+  const [motivoAutorizacao, setMotivoAutorizacao] = useState("");
+  const [alterandoAutorizacao, setAlterandoAutorizacao] = useState(false);
   const [idiomasSel, setIdiomasSel] = useState<string[]>([]);
   const [capaUrls, setCapaUrls] = useState<Record<string, string | null>>({});
   const [capaBrief, setCapaBrief] = useState("");
@@ -146,17 +159,36 @@ export default function Projeto() {
       .from("engine_autorizacoes_v2")
       .select("project_id,modo,autorizado_por,motivo,ativo,revoked_at,created_at")
       .eq("project_id", id);
+    const linhasAut = (rAut.data as AutorizacaoV2Row[] | null) ?? [];
+    setAutorizacaoLinhas(linhasAut);
     setAutorizacao(
-      rotularAutorizacao(interpretarAutorizacao((rAut.data as AutorizacaoV2Row[] | null) ?? null, rAut.error))
+      rotularAutorizacao(interpretarAutorizacao(linhasAut, rAut.error))
     );
 
     // Mesma convencao da telemetria: linha em `jobs` com tipo dedicado.
     const rPront = await supabase.from("jobs").select("payload").eq("tipo", "prontidao_v2").limit(1).maybeSingle();
-    setProntidao(lerProntidaoPublicada((rPront.data as { payload?: unknown } | null)?.payload ?? null));
+    setProntidao(lerProntidaoPublicada(
+      (rPront.data as { payload?: unknown } | null)?.payload ?? null,
+      { shaEsperado: __COMMIT_SHA__ || undefined, buildSujo: __BUILD_DIRTY__ }
+    ));
     const counts: Record<string, number> = {};
     for (const c of (chs as { edition_id: string }[]) ?? []) counts[c.edition_id] = (counts[c.edition_id] ?? 0) + 1;
     setChapters(counts);
   }, [id]);
+
+  useEffect(() => {
+    let ativo = true;
+    if (!proj) {
+      setAprovacaoCorresponde(false);
+      return;
+    }
+    aprovacaoAindaCorresponde(proj.briefing_aprovado, proj.briefing).then((corresponde) => {
+      if (ativo) setAprovacaoCorresponde(corresponde);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [proj]);
 
   useEffect(() => {
     carregar();
@@ -234,9 +266,83 @@ export default function Projeto() {
     if (error) { toast.error(error.message); return; }
     setProj((p) => (p ? { ...p, briefing: novo } : p));
   }
+
+  async function aprovarBriefingAtual() {
+    if (!id || !proj || !session?.user) return;
+    const entrevistaCompleta = (proj.briefing as { _interview?: { completo?: boolean } })._interview?.completo === true;
+    if (!entrevistaCompleta) {
+      toast.error("Conclua a entrevista antes de aprovar o briefing.");
+      return;
+    }
+    setAprovandoBriefing(true);
+    try {
+      const por = session.user.email ?? session.user.id;
+      const aprovacao = await aprovarBriefingWeb(proj.briefing, por);
+      const { error } = await supabase.from("projects").update({ briefing_aprovado: aprovacao }).eq("id", id);
+      if (error) throw error;
+      setProj((atual) => (atual ? { ...atual, briefing_aprovado: aprovacao } : atual));
+      setAprovacaoCorresponde(true);
+      toast.success("Briefing aprovado. Alterações posteriores exigirão nova aprovação.");
+    } catch (erro) {
+      toast.error(`Não foi possível aprovar o briefing: ${(erro as Error).message}`);
+    } finally {
+      setAprovandoBriefing(false);
+    }
+  }
+
+  async function autorizarProjetoV2() {
+    if (!id || !session?.user || !motivoAutorizacao.trim()) {
+      toast.error("Explique por que este projeto está sendo autorizado.");
+      return;
+    }
+    setAlterandoAutorizacao(true);
+    try {
+      const { error } = await supabase.from("engine_autorizacoes_v2").insert({
+        owner: session.user.id,
+        project_id: id,
+        modo: "producao",
+        autorizado_por: session.user.email ?? session.user.id,
+        motivo: motivoAutorizacao.trim(),
+        ativo: true,
+      });
+      if (error) throw error;
+      setMotivoAutorizacao("");
+      await carregar();
+      toast.success("Projeto autorizado para produção. O certificado de release continua sendo exigido.");
+    } catch (erro) {
+      toast.error(`Não foi possível autorizar: ${(erro as Error).message}`);
+    } finally {
+      setAlterandoAutorizacao(false);
+    }
+  }
+
+  async function revogarAutorizacaoV2() {
+    if (!id) return;
+    setAlterandoAutorizacao(true);
+    try {
+      const ativa = autorizacaoLinhas.find((linha) => linha.ativo && !linha.revoked_at);
+      if (!ativa) throw new Error("não existe autorização ativa");
+      const { error } = await supabase
+        .from("engine_autorizacoes_v2")
+        .update({ ativo: false, revoked_at: new Date().toISOString() })
+        .eq("project_id", id)
+        .eq("ativo", true);
+      if (error) throw error;
+      await carregar();
+      toast.success("Autorização revogada. O histórico foi preservado.");
+    } catch (erro) {
+      toast.error(`Não foi possível revogar: ${(erro as Error).message}`);
+    } finally {
+      setAlterandoAutorizacao(false);
+    }
+  }
   // Uma so porta para "escrever": os quatro ids do resolvedor que significam
   // "toque a escrita" apontam para ca, em vez de repetir a chamada em cada um.
   function escreverAgora() {
+    if (!podeEscreverV2) {
+      toast.error(`Escrita bloqueada: ${pendenciasEscritaV2.join("; ")}.`);
+      return;
+    }
     void enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {});
   }
 
@@ -371,13 +477,44 @@ export default function Projeto() {
   }
 
   async function baixar(a: Artifact, bucket: string) {
-    const url = a.url_publica || (await signedUrl(bucket, a.storage_path));
-    if (url) window.open(url, "_blank");
-    else toast.error("Não consegui gerar o link.");
+    const resultado = await abrirUrlAssinada(async () => a.url_publica || signedUrl(bucket, a.storage_path));
+    if (resultado === "ausente") toast.error("Não consegui gerar o link.");
+    if (resultado === "bloqueado") toast.error("O navegador bloqueou a nova aba. Libere popups e tente novamente.");
+    if (resultado === "aberto" || resultado === "mesma_aba") toast.success("Download iniciado.");
   }
 
   if (!proj) return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
-  const hasActiveJob = jobs.some((j) => j.status === "queued" || j.status === "running");
+  const entrevistaCompleta =
+    (proj.briefing as { _interview?: { completo?: boolean } } | null)?._interview?.completo === true;
+  const autorizacaoAtiva = autorizacao?.autorizado === true;
+  const releaseCertificado =
+    prontidao?.indisponivel === null &&
+    prontidao.producao.startsWith("RELEASE_PRODUCAO_CERTIFICADO");
+  const precondicoesFundacaoV2 = avaliarPrecondicoesFundacao({
+    engineMode: proj.engine_mode,
+    entrevistaCompleta,
+    briefingAprovadoAtual: aprovacaoCorresponde,
+    projetoAutorizado: autorizacaoAtiva,
+    releaseCertificado,
+  });
+  const podeGerarFundacaoV2 = precondicoesFundacaoV2.podeGerar;
+  const pendenciasFundacaoV2 = precondicoesFundacaoV2.pendencias;
+  const fundacaoConcluidaV2 = jobMaisRecente(jobs, "criar_fundacao")?.status === "done";
+  const precondicoesEscritaV2 = avaliarPrecondicoesEscrita({
+    engineMode: proj.engine_mode,
+    fundacaoConcluida: fundacaoConcluidaV2,
+    projetoAutorizado: autorizacaoAtiva,
+    releaseCertificado,
+  });
+  const podeEscreverV2 = precondicoesEscritaV2.podeEscrever;
+  const pendenciasEscritaV2 = precondicoesEscritaV2.pendencias;
+  const motivoBloqueioEscritaV2 = podeEscreverV2
+    ? null
+    : `Antes de escrever: ${pendenciasEscritaV2.join("; ")}.`;
+  const activeJob = jobs
+    .filter((j) => j.status === "queued" || j.status === "running")
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0] ?? null;
+  const hasActiveJob = activeJob !== null;
   // Header pelo MESMO resolvedor único (S7): a escrita governa quando ativa/bloqueada;
   // senão, o ciclo de vida do projeto. Mesma OperationalState do dashboard e da aba.
   const sincronizadosProj = origem ? chapters[origem.id] ?? 0 : 0;
@@ -385,7 +522,12 @@ export default function Projeto() {
   const stProjeto = resolveOperationalState(buildResolverInput({ jobs, chapters: chapterRowsProj, totalCapitulos: Number(proj.total_capitulos ?? 0), workerOnline, producaoPausada: (proj.briefing as any)?.producao_pausada === true, producaoGlobalAtiva: producaoAtiva }));
   const sb = escritaGovernaCartao(stProjeto.situacao)
     ? { label: stProjeto.badge, variant: toneToVariant(stProjeto.tone), pulse: stProjeto.situacao === "executando" }
-    : displayProjectStatus({ projectStatus: proj.status, hasActiveJob, workerOnline });
+    : displayProjectStatus({
+        projectStatus: proj.status,
+        hasActiveJob,
+        workerOnline,
+        activeJobType: activeJob?.tipo ?? null,
+      });
   // Dados da saga: estado da SÉRIE inteira (idêntico em qualquer volume aberto).
   // Conta volumes distintos já criados (este + irmãos), não o nº do volume atual.
   const serieTotal = Number((proj.briefing as any)?.serie_total ?? 0);
@@ -618,6 +760,90 @@ export default function Projeto() {
               <CardDescription>Documentos gerados pela skill arquiteto-de-enredo.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
+              {proj.engine_mode === "v2" && (
+                <div className="space-y-4 rounded-lg border p-4">
+                  <div>
+                    <p className="font-medium">Portões antes da fundação</p>
+                    <p className="text-xs text-muted-foreground">
+                      A Engine V2 só aceita a fundação quando entrevista, aprovação autoral,
+                      autorização do projeto e código pré-canário limpo correspondem ao estado atual.
+                      O certificado final continua obrigatório antes de escrever prosa.
+                    </p>
+                  </div>
+                  <div className="grid gap-2 text-xs sm:grid-cols-2">
+                    <p><Badge variant={entrevistaCompleta ? "default" : "destructive"}>
+                      {entrevistaCompleta ? "Entrevista concluída" : "Entrevista incompleta"}
+                    </Badge></p>
+                    <p><Badge variant={aprovacaoCorresponde ? "default" : "destructive"}>
+                      {aprovacaoCorresponde ? "Briefing atual aprovado" : "Briefing sem aprovação válida"}
+                    </Badge></p>
+                    <p><Badge variant={autorizacaoAtiva ? "default" : "destructive"}>
+                      {autorizacao?.titulo ?? "Autorização desconhecida"}
+                    </Badge></p>
+                    <p><Badge variant={releaseCertificado ? "default" : "outline"}>
+                      {releaseCertificado ? "Release certificado" : "Pré-canário: somente fundação"}
+                    </Badge></p>
+                  </div>
+                  <details className="text-xs">
+                    <summary className="cursor-pointer font-medium">Revisar briefing que será aprovado</summary>
+                    <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-muted p-3">
+                      {JSON.stringify(proj.briefing ?? {}, null, 2)}
+                    </pre>
+                  </details>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant={aprovacaoCorresponde ? "outline" : "default"}
+                      disabled={!entrevistaCompleta || aprovandoBriefing}
+                      onClick={aprovarBriefingAtual}
+                    >
+                      {aprovandoBriefing && <Loader2 className="h-4 w-4 animate-spin" />}
+                      {aprovacaoCorresponde ? "Reaprovar briefing atual" : "Aprovar briefing atual"}
+                    </Button>
+                    {!entrevistaCompleta && (
+                      <Button size="sm" variant="outline" onClick={() => nav(`/novo-projeto?projeto=${proj.id}`)}>
+                        Retomar entrevista
+                      </Button>
+                    )}
+                  </div>
+                  <div className="space-y-2 rounded border p-3">
+                    <p className="font-medium">{autorizacao?.titulo ?? "Autorização indisponível"}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {autorizacao?.detalhe ?? "A consulta de autorização ainda não retornou."}
+                    </p>
+                    {autorizacaoAtiva ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={alterandoAutorizacao}
+                        onClick={revogarAutorizacaoV2}
+                      >
+                        Revogar autorização
+                      </Button>
+                    ) : (
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Input
+                          value={motivoAutorizacao}
+                          onChange={(evento) => setMotivoAutorizacao(evento.target.value)}
+                          placeholder="Motivo auditável da autorização"
+                        />
+                        <Button
+                          size="sm"
+                          disabled={alterandoAutorizacao || !motivoAutorizacao.trim()}
+                          onClick={autorizarProjetoV2}
+                        >
+                          Autorizar projeto
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  {!podeGerarFundacaoV2 && (
+                    <p className="rounded bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                      Fundação bloqueada: {pendenciasFundacaoV2.join("; ")}.
+                    </p>
+                  )}
+                </div>
+              )}
               {(() => {
                 const jf = jobMaisRecente(jobs, "criar_fundacao");
                 const pg = (jf?.progresso ?? {}) as any;
@@ -645,7 +871,15 @@ export default function Projeto() {
                   return (
                     <div className="space-y-3">
                       <p className="text-destructive">Falha ao gerar a fundação: {jf.erro?.slice(0, 200)}</p>
-                      <Button size="sm" variant="outline" onClick={() => enfileira("criar_fundacao", {})}>Tentar de novo</Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!podeGerarFundacaoV2}
+                        title={pendenciasFundacaoV2.join("; ")}
+                        onClick={() => enfileira("criar_fundacao", {})}
+                      >
+                        Tentar de novo
+                      </Button>
                     </div>
                   );
                 }
@@ -669,7 +903,14 @@ export default function Projeto() {
                   return (
                     <div className="space-y-3">
                       <p className="text-muted-foreground">A fundação ainda não foi gerada.</p>
-                      <Button size="sm" onClick={() => enfileira("criar_fundacao", {})}>Gerar fundação</Button>
+                      <Button
+                        size="sm"
+                        disabled={!podeGerarFundacaoV2}
+                        title={pendenciasFundacaoV2.join("; ")}
+                        onClick={() => enfileira("criar_fundacao", {})}
+                      >
+                        Gerar fundação
+                      </Button>
                     </div>
                   );
                 }
@@ -702,8 +943,12 @@ export default function Projeto() {
                       <div className="flex flex-wrap gap-2">
                         {documentosParaExibir(pg).map((d) => (
                           <Button key={d.caminho} variant="outline" size="sm" onClick={async () => {
-                            const url = await signedUrl("manuscritos", chaveStorageDocumento(proj.owner, proj.id, d.caminho));
-                            if (url) window.open(url, "_blank"); else toast.error(`Documento não encontrado no Storage: ${d.caminho}`);
+                            const resultado = await abrirUrlAssinada(() =>
+                              signedUrl("manuscritos", chaveStorageDocumento(proj.owner, proj.id, d.caminho))
+                            );
+                            if (resultado === "ausente") toast.error(`Documento não encontrado no Storage: ${d.caminho}`);
+                            if (resultado === "bloqueado") toast.error("O navegador bloqueou a nova aba. Libere popups e tente novamente.");
+                            if (resultado === "aberto" || resultado === "mesma_aba") toast.success("Download iniciado.");
                           }}>
                             <FileText className="h-4 w-4" /> {d.titulo}
                             {d.origem === "contrato" && (
@@ -777,6 +1022,18 @@ export default function Projeto() {
                 // chapters sincronizados são aprovados+hash (o worker só sincroniza aprovados).
                 const chapterRows = Array.from({ length: sincronizados }, (_, i) => ({ numero: i + 1, text_sha256: "synced", quality_status: "approved" }));
                 const st = resolveOperationalState(buildResolverInput({ jobs, chapters: chapterRows, totalCapitulos: Number(proj.total_capitulos ?? total), workerOnline, producaoPausada: (proj.briefing as any)?.producao_pausada === true, producaoGlobalAtiva: producaoAtiva }));
+                const idsEscrita = new Set(["iniciar_escrita", "tentar_agora", "corrigir", "continuar"]);
+                const stInterface = motivoBloqueioEscritaV2
+                  ? {
+                      ...st,
+                      proxima_acao: proximaAcaoAntesDaEscrita(pendenciasEscritaV2),
+                      botoes: st.botoes.map((botao) =>
+                        idsEscrita.has(botao.id)
+                          ? { ...botao, habilitado: false, motivo_indisponivel: motivoBloqueioEscritaV2 }
+                          : botao
+                      ),
+                    }
+                  : st;
                 // Nota oficial = avaliação independente (nota_review). Auto-nota da
                 // escrita fica separada e rotulada como provisória.
                 const notaOficial = origem?.nota_review != null ? Number(origem.nota_review) : null;
@@ -842,13 +1099,14 @@ export default function Projeto() {
                           ação excepcional ("Tentar agora" antecipa a janela do retry). */}
                       <Button
                         title={
+                          motivoBloqueioEscritaV2 ??
                           motivoEscritaIndisponivel(escrevendo, escritaPausada, st.situacao) ??
                           (st.situacao === "aguardando_correcao"
                             ? "Opcional: antecipa a tentativa automática (o fluxo segue sozinho sem clique)."
                             : dicaRefino)
                         }
-                        disabled={escrevendo || escritaPausada || st.situacao === "correcao_automatica"}
-                        onClick={() => enfileira("escrever_livro", semRevisao ? { sem_revisao_por_capitulo: true } : {})}
+                        disabled={!podeEscreverV2 || escrevendo || escritaPausada || st.situacao === "correcao_automatica"}
+                        onClick={escreverAgora}
                       >
                         {escrevendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenLine className="h-4 w-4" />}
                         {st.situacao === "aguardando_correcao"
@@ -876,7 +1134,7 @@ export default function Projeto() {
                         as ações com handler NESTA tela — controle sem handler
                         seria botão que o autor clica e nada acontece. */}
                     <EstadoOperacional
-                      estado={st}
+                      estado={stInterface}
                       autorizacao={autorizacao ?? undefined}
                       prontidao={prontidao ?? undefined}
                       acoes={{

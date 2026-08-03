@@ -18,13 +18,19 @@
 // recusa.
 
 import { createHash } from "node:crypto";
+import { PAPEIS_ENGINE_V2, type Papel } from "./tipos.js";
 
 export const SCHEMA_EVIDENCIA = "evidencia-externa/v2";
 
 /** Onde as evidências vivem. Relativo à raiz do repo, fora do versionamento. */
 export const DIR_EVIDENCIAS = ".evidencias";
 
-export type TipoEvidencia = "migracoes_remotas" | "integracao_real" | "ui_autenticada" | "provedor_real";
+export type TipoEvidencia =
+  | "migracoes_remotas"
+  | "integracao_real"
+  | "ui_autenticada"
+  | "provedor_real"
+  | "papeis_reais";
 
 export type ResultadoEvidencia = "aprovado" | "reprovado";
 
@@ -76,9 +82,44 @@ export interface EstadoRemoto {
   /** Migrations efetivamente observadas como aplicadas. */
   migrations_applied: string[];
   tabelas: string[];
+  /** Colunas relevantes no formato schema.tabela.coluna:tipo. */
+  columns: string[];
+  /** Constraints relevantes no formato schema.tabela.constraint:tipo. */
+  constraints: string[];
   policies: string[];
   triggers: string[];
   indexes: string[];
+}
+
+/** Linha real observada em `engine_runs`; nunca mock/fixture. */
+export interface RunRealEvidencia {
+  papel: Papel;
+  run_id: string;
+  project_id: string;
+  alvo: string;
+  status: "ok";
+  model_provider: string;
+  model_name: string;
+  parent_run_id: string | null;
+  output_hash: string;
+  started_at: string;
+  finished_at: string;
+}
+
+/** Duas passadas reais, sobre o mesmo alvo e no projeto exclusivo de prova. */
+export interface CascataRealEvidencia {
+  project_id: string;
+  alvo: string;
+  triagem_run_id: string;
+  decisao_run_id: string;
+  gatilho: string;
+  veredito_triagem: string;
+  veredito_consolidado: string;
+}
+
+export interface ExecucoesReaisEvidencia {
+  papeis: RunRealEvidencia[];
+  cascata: CascataRealEvidencia;
 }
 
 export interface EvidenciaExterna {
@@ -98,6 +139,8 @@ export interface EvidenciaExterna {
   worktree_limpa: boolean;
   fingerprints: FingerprintsCodigo;
   remoto: EstadoRemoto | null;
+  /** Obrigatório apenas em `papeis_reais`; observado por consulta ao ledger. */
+  execucoes_reais?: ExecucoesReaisEvidencia;
   passos: PassoEvidencia[];
   artefatos: ArtefatoEvidencia[];
   erros: string[];
@@ -221,8 +264,11 @@ export function validarEvidencia(ev: unknown, esperado: EsperadoEvidencia): Vali
         motivos.push("nenhuma migration observada como aplicada");
       }
       if (!Array.isArray(r.tabelas) || r.tabelas.length === 0) motivos.push("nenhuma tabela observada");
+      if (!Array.isArray(r.columns) || r.columns.length === 0) motivos.push("nenhuma coluna observada");
+      if (!Array.isArray(r.constraints) || r.constraints.length === 0) motivos.push("nenhuma constraint observada");
       if (!Array.isArray(r.policies) || r.policies.length === 0) motivos.push("nenhuma policy observada");
       if (!Array.isArray(r.triggers) || r.triggers.length === 0) motivos.push("nenhum trigger observado");
+      if (!Array.isArray(r.indexes) || r.indexes.length === 0) motivos.push("nenhum índice observado");
     }
   }
 
@@ -232,6 +278,78 @@ export function validarEvidencia(ev: unknown, esperado: EsperadoEvidencia): Vali
       for (const a of e.artefatos) {
         if (!a?.hash) motivos.push(`artefato ${a?.nome ?? "?"} sem hash`);
         if (!a?.bytes) motivos.push(`artefato ${a?.nome ?? "?"} com 0 byte`);
+      }
+    }
+  }
+
+  if (esperado.tipo === "papeis_reais") {
+    const x = e.execucoes_reais;
+    if (!x || typeof x !== "object" || !Array.isArray(x.papeis)) {
+      motivos.push("execuções reais dos papéis ausentes");
+    } else {
+      const esperados = new Set<string>(PAPEIS_ENGINE_V2);
+      const vistos = new Set<string>();
+      const porRun = new Map<string, RunRealEvidencia>();
+      for (const run of x.papeis) {
+        if (!run || typeof run !== "object") {
+          motivos.push("run real malformado");
+          continue;
+        }
+        if (!esperados.has(run.papel)) motivos.push(`papel inesperado: ${String(run.papel)}`);
+        if (vistos.has(run.papel)) motivos.push(`papel duplicado na evidência: ${run.papel}`);
+        vistos.add(run.papel);
+        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        if (!uuid.test(run.run_id ?? "")) motivos.push(`${run.papel}: run_id inválido`);
+        if (!uuid.test(run.project_id ?? "")) motivos.push(`${run.papel}: project_id inválido`);
+        if (run.status !== "ok") motivos.push(`${run.papel}: status ${String(run.status)} não comprova sucesso real`);
+        if (!run.alvo?.trim()) motivos.push(`${run.papel}: alvo ausente`);
+        const provedor = run.model_provider?.toLowerCase() ?? "";
+        if (!provedor.includes("claude") || provedor.includes("mock") || provedor.includes("fixture")) {
+          motivos.push(`${run.papel}: provedor não comprova modelo real (${run.model_provider || "ausente"})`);
+        }
+        // O ledger legado gravava os aliases fechados aceitos pelo próprio worker
+        // (`opus`, `sonnet`, `haiku`). Eles continuam sendo Claude real quando o
+        // provedor também é Claude; qualquer outro apelido ou híbrido é recusado.
+        const modelo = run.model_name?.trim() ?? "";
+        const modeloClaudeReal = /^claude-/i.test(modelo) || /^(?:opus|sonnet|haiku)$/i.test(modelo);
+        if (!modeloClaudeReal || /mock|fixture/i.test(modelo)) {
+          motivos.push(`${run.papel}: modelo não comprova Claude real (${run.model_name || "ausente"})`);
+        }
+        if (!/^[0-9a-f]{64}$/i.test(run.output_hash ?? "")) motivos.push(`${run.papel}: output_hash inválido`);
+        if (!Number.isFinite(Date.parse(run.started_at)) || !Number.isFinite(Date.parse(run.finished_at))) {
+          motivos.push(`${run.papel}: timestamps inválidos`);
+        }
+        porRun.set(run.run_id, run);
+      }
+      for (const papel of PAPEIS_ENGINE_V2) {
+        if (!vistos.has(papel)) motivos.push(`papel sem execução real: ${papel}`);
+      }
+      if (x.papeis.length !== PAPEIS_ENGINE_V2.length) {
+        motivos.push(`esperadas ${PAPEIS_ENGINE_V2.length} execuções, recebidas ${x.papeis.length}`);
+      }
+
+      const cascata = x.cascata;
+      if (!cascata || typeof cascata !== "object") {
+        motivos.push("cascata real ausente");
+      } else {
+        const triagem = porRun.get(cascata.triagem_run_id);
+        const decisao = porRun.get(cascata.decisao_run_id);
+        if (triagem?.papel !== "revisor_literario") motivos.push("cascata: triagem_run_id não aponta para revisor_literario");
+        if (decisao?.papel !== "revisor_decisao") motivos.push("cascata: decisao_run_id não aponta para revisor_decisao");
+        if (!triagem || !decisao || triagem.project_id !== cascata.project_id || decisao.project_id !== cascata.project_id) {
+          motivos.push("cascata: as duas passadas não pertencem ao projeto declarado");
+        }
+        if (!triagem || !decisao || triagem.alvo !== cascata.alvo || decisao.alvo !== cascata.alvo) {
+          motivos.push("cascata: as duas passadas não julgaram o mesmo alvo");
+        }
+        if (!triagem || !decisao || decisao.parent_run_id !== triagem.run_id) {
+          motivos.push("cascata: decisão não aponta para a triagem como parent_run_id");
+        }
+        if (cascata.project_id !== e.project_id) motivos.push("cascata: projeto não é o projeto exclusivo da evidência");
+        if (!cascata.gatilho?.trim()) motivos.push("cascata: gatilho ausente");
+        if (!cascata.veredito_triagem?.trim() || !cascata.veredito_consolidado?.trim()) {
+          motivos.push("cascata: vereditos ausentes");
+        }
       }
     }
   }
@@ -248,6 +366,8 @@ export function hashIntrospeccao(dump: Omit<EstadoRemoto, "remote_schema_hash">)
   const canonico = JSON.stringify({
     migrations_applied: [...dump.migrations_applied].sort(),
     tabelas: [...dump.tabelas].sort(),
+    columns: [...dump.columns].sort(),
+    constraints: [...dump.constraints].sort(),
     policies: [...dump.policies].sort(),
     triggers: [...dump.triggers].sort(),
     indexes: [...dump.indexes].sort(),

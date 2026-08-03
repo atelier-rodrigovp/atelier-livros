@@ -13,6 +13,7 @@ import {
   type EvidenciaExterna,
   type FingerprintsCodigo,
 } from "./evidencia-externa.js";
+import { PAPEIS_ENGINE_V2 } from "./tipos.js";
 
 const FP: FingerprintsCodigo = {
   migrations_source_hash: "mig-1",
@@ -33,6 +34,8 @@ const ESPERADO: EsperadoEvidencia = {
 const introspeccao = {
   migrations_applied: ["engine_v2_historico.sql"],
   tabelas: ["engine_eventos_v2"],
+  columns: ["public.projects.briefing_aprovado:jsonb"],
+  constraints: ["public.projects.projects_briefing_aprovado_schema:check"],
   policies: ["engine_eventos_v2_select"],
   triggers: ["engine_eventos_v2_sem_update"],
   indexes: ["engine_eventos_v2_projeto"],
@@ -59,9 +62,56 @@ function evidencia(over: Partial<EvidenciaExterna> = {}): EvidenciaExterna {
   };
 }
 
+const UUIDS = PAPEIS_ENGINE_V2.map((_, i) => `${String(i + 1).padStart(8, "0")}-0000-4000-8000-000000000000`);
+const PROJETO_PROVA = "99999999-0000-4000-8000-000000000000";
+
+function execucoesReais() {
+  const papeis = PAPEIS_ENGINE_V2.map((papel, i) => ({
+    papel,
+    run_id: UUIDS[i],
+    project_id: papel === "revisor_literario" || papel === "revisor_decisao" ? PROJETO_PROVA : `77777777-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
+    alvo: papel === "revisor_literario" || papel === "revisor_decisao" ? "pre-canary:sha" : `historico:${papel}`,
+    status: "ok" as const,
+    model_provider: "claude-code-cli",
+    model_name: "claude-sonnet-5",
+    parent_run_id: papel === "revisor_decisao" ? UUIDS[PAPEIS_ENGINE_V2.indexOf("revisor_literario")] : null,
+    output_hash: "a".repeat(64),
+    started_at: "2026-08-01T12:00:00.000Z",
+    finished_at: "2026-08-01T12:01:00.000Z",
+  }));
+  return {
+    papeis,
+    cascata: {
+      project_id: PROJETO_PROVA,
+      alvo: "pre-canary:sha",
+      triagem_run_id: UUIDS[PAPEIS_ENGINE_V2.indexOf("revisor_literario")],
+      decisao_run_id: UUIDS[PAPEIS_ENGINE_V2.indexOf("revisor_decisao")],
+      gatilho: "(d) triagem vai fechar",
+      veredito_triagem: "aprovado",
+      veredito_consolidado: "aprovado",
+    },
+  };
+}
+
 describe("evidência completa e atual", () => {
   it("vale quando tudo confere", () => {
     expect(validarEvidencia(evidencia(), ESPERADO)).toEqual({ valida: true, motivos: [] });
+  });
+
+  it("não certifica schema remoto sem colunas e constraints introspectadas", () => {
+    const semColunas = { ...introspeccao, columns: [], constraints: [] };
+    const resultado = validarEvidencia(
+      evidencia({
+        remoto: {
+          ...semColunas,
+          remote_schema_hash: hashIntrospeccao(semColunas),
+        },
+      }),
+      ESPERADO
+    );
+    expect(resultado.valida).toBe(false);
+    expect(resultado.motivos).toContain("nenhuma coluna observada");
+    expect(resultado.motivos).toContain("nenhuma constraint observada");
   });
 });
 
@@ -246,6 +296,64 @@ describe("download precisa provar o que baixou", () => {
   it("artefato sem hash não prova conteúdo", () => {
     const r = validarEvidencia(evidencia({ artefatos: [{ nome: "x.md", hash: "", bytes: 10 }] }), ESPERADO);
     expect(r.valida).toBe(false);
+  });
+});
+
+describe("11 papéis reais e cascata não viram um checkbox vazio", () => {
+  const esperadoPapeis: EsperadoEvidencia = { ...ESPERADO, tipo: "papeis_reais" };
+  const base = () =>
+    evidencia({
+      tipo: "papeis_reais",
+      project_id: PROJETO_PROVA,
+      remoto: null,
+      artefatos: [],
+      execucoes_reais: execucoesReais(),
+    });
+
+  it("aprova somente com os 11 papéis e as duas passadas no mesmo alvo", () => {
+    expect(validarEvidencia(base(), esperadoPapeis)).toEqual({ valida: true, motivos: [] });
+  });
+
+  it("remover um papel real derruba PRE_CANARY", () => {
+    const ev = base();
+    ev.execucoes_reais!.papeis = ev.execucoes_reais!.papeis.filter((r) => r.papel !== "extrator_memoria");
+    const r = validarEvidencia(ev, esperadoPapeis);
+    expect(r.valida).toBe(false);
+    expect(r.motivos.join(" ")).toContain("extrator_memoria");
+  });
+
+  it("mock não passa por modelo real", () => {
+    const ev = base();
+    ev.execucoes_reais!.papeis.find((r) => r.papel === "julgamento_idioma")!.model_provider = "ProvedorMock";
+    expect(validarEvidencia(ev, esperadoPapeis).motivos.join(" ")).toContain("provedor não comprova modelo real");
+  });
+
+  it("aceita somente os aliases legados fechados quando o provedor é Claude real", () => {
+    const legado = base();
+    legado.execucoes_reais!.papeis.find((r) => r.papel === "editor_estrutural")!.model_name = "sonnet";
+    expect(validarEvidencia(legado, esperadoPapeis)).toEqual({ valida: true, motivos: [] });
+
+    const hibrido = base();
+    hibrido.execucoes_reais!.papeis.find((r) => r.papel === "editor_estrutural")!.model_name = "gpt-sonnet";
+    expect(validarEvidencia(hibrido, esperadoPapeis).motivos.join(" ")).toContain("modelo não comprova Claude real");
+  });
+
+  it("decisão em outro alvo não comprova cascata", () => {
+    const ev = base();
+    ev.execucoes_reais!.papeis.find((r) => r.papel === "revisor_decisao")!.alvo = "outro-alvo";
+    expect(validarEvidencia(ev, esperadoPapeis).motivos.join(" ")).toContain("mesmo alvo");
+  });
+
+  it("decisão sem parent_run_id da triagem não comprova cascata", () => {
+    const ev = base();
+    ev.execucoes_reais!.papeis.find((r) => r.papel === "revisor_decisao")!.parent_run_id = null;
+    expect(validarEvidencia(ev, esperadoPapeis).motivos.join(" ")).toContain("parent_run_id");
+  });
+
+  it("run sem hash de saída não comprova execução concluída", () => {
+    const ev = base();
+    ev.execucoes_reais!.papeis.find((r) => r.papel === "extrator_memoria")!.output_hash = "";
+    expect(validarEvidencia(ev, esperadoPapeis).motivos.join(" ")).toContain("output_hash");
   });
 });
 

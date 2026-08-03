@@ -99,8 +99,10 @@ export function displayProjectStatus(args: {
   hasActiveJob: boolean;
   workerOnline: boolean;
   qualityBlocked?: boolean;
+  /** Tipo real do job ativo; impede chamar fundação/entrevista de "escrita". */
+  activeJobType?: string | null;
 }): { label: string; variant: BadgeVariant; pulse: boolean } {
-  const { projectStatus, hasActiveJob, workerOnline, qualityBlocked } = args;
+  const { projectStatus, hasActiveJob, workerOnline, qualityBlocked, activeJobType } = args;
   // Bloqueio de qualidade vence o status do projeto: "Escrevendo" com job
   // paused/blocked_quality é execução fantasma — o autor precisa decidir.
   if (qualityBlocked && !hasActiveJob) {
@@ -108,10 +110,15 @@ export function displayProjectStatus(args: {
   }
   const emEscrita = hasActiveJob || projectStatus === "escrevendo";
   if (emEscrita && !workerOnline) {
-    return { label: "Escrita pausada (worker offline)", variant: "warning", pulse: false };
+    const fase = activeJobType ? tipoLabel(activeJobType) : "Escrita";
+    return { label: `${fase} pausada (worker offline)`, variant: "warning", pulse: false };
   }
   if (hasActiveJob && workerOnline) {
-    return { label: "Escrevendo", variant: "warning", pulse: true };
+    return {
+      label: activeJobType ? tipoLabel(activeJobType) : "Escrevendo",
+      variant: "warning",
+      pulse: true,
+    };
   }
   const base = projectStatusBadge(projectStatus);
   return { ...base, pulse: false };

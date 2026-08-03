@@ -313,7 +313,7 @@ describe("exigirDisposicaoCompleta — sinal fora da cota omitido aciona retry d
     expect(resultado.problemas.filter((x) => /não corresponde/.test(x))).toHaveLength(0);
   });
 
-  it("sinal medido SEM exemplos (fragColados) aceita citações sem vínculo — violação não fica inauditável", () => {
+  it("sinal legado SEM exemplos aceita trecho literal, mas rejeita índice órfão", () => {
     const p = validarParecer(base([{
       sinal: "cadencia.fragmentos de ênfase COLADOS (Regra 4: nunca dois)",
       valor: 2,
@@ -328,6 +328,19 @@ describe("exigirDisposicaoCompleta — sinal fora da cota omitido aciona retry d
       exemplos: [], // o detector conta os pares mas não os lista (contrato do corpus v1)
     }]);
     expect(resultado.problemas.filter((x) => /não corresponde|duplicidade/.test(x))).toHaveLength(0);
+    const soIndice = validarParecer(base([{
+      sinal: "cadencia.fragmentos de ênfase COLADOS (Regra 4: nunca dois)",
+      valor: 1,
+      disposicao: "violacao_confirmada",
+      evidencia: "e",
+      ocorrencias_citadas: [{ indice: 1 }],
+    }])) as Parecer;
+    expect(() => exigirDisposicaoCompleta(soIndice, [{
+      sinal: "cadencia.fragmentos de ênfase COLADOS (Regra 4: nunca dois)",
+      valor: 1,
+      fora_da_cota: true,
+      exemplos: [],
+    }])).toThrow(/não publicou ocorrências numeradas/);
   });
 
   it("citação FABRICADA (texto que o detector não mediu) continua reprovada", () => {

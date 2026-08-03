@@ -43,7 +43,8 @@ valendo — que é o comportamento certo nos dois casos.
 
 São campos diferentes de propósito. `migrations_source_hash` é o hash dos `.sql`
 que estão no disco; `remoto.remote_schema_hash` é o hash da **introspecção do
-banco real** (tabelas, policies, triggers, índices, migrations observadas). A v1
+banco real** (tabelas, colunas, constraints, policies, triggers, índices e
+migrations observadas). A v1
 chamava um pelo nome do outro — certificava o schema remoto medindo arquivo
 local. A validação hoje recusa evidência em que os dois sejam iguais, porque
 isso significa que não houve introspecção nenhuma.

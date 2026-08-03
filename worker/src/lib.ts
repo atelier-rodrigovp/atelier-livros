@@ -6,6 +6,7 @@ import path from "node:path";
 import { sb, OWNER } from "./supabase.js";
 import { comRetrySb } from "./retry.js";
 import { assertSafeSegment, safeResolveWithin } from "./path-safety.js";
+import { cacheControlUpload } from "./storage-cache.js";
 
 export const WORK_DIR = process.env.WORK_DIR || "./atelier-work";
 export const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
@@ -173,6 +174,10 @@ export async function uploadFile(
     () =>
       sb.storage.from(bucket).upload(key, body, {
         contentType: CONTENT_TYPES[ext] ?? "application/octet-stream",
+        // Manuscritos são substituídos no mesmo caminho após correções. Sem
+        // cache-control explícito, o Storage usa uma hora e o Leitor pode abrir
+        // bytes vencidos mesmo depois de o estado/hash já terem avançado.
+        cacheControl: cacheControlUpload(bucket),
         upsert: true,
       }),
     { tentativas: 5, rotulo: `upload ${bucket}/${key}` }

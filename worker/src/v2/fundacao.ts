@@ -39,7 +39,14 @@ export interface FundacaoV2 {
   perfil_voz: string;
   biblia: string;
   mapa_personagens: PersonagemMapa[];
-  estrutura: { capitulo: number; fio: string; resumo_estrutural: string }[];
+  estrutura: {
+    capitulo: number;
+    /** Fio principal/POV do capítulo, usado pela rotação. */
+    fio: string;
+    /** Todos os fios que o capítulo avança; inclui o principal. */
+    fios_avancados?: string[];
+    resumo_estrutural: string;
+  }[];
   fios: string[];
   promessa_editorial: string;
   /**
@@ -80,6 +87,14 @@ export function parseEstruturaMicro(texto: string): FundacaoV2["estrutura"] {
       if (!Number.isInteger(e?.capitulo) || typeof e?.fio !== "string" || typeof e?.resumo_estrutural !== "string") {
         throw new Error("item de estrutura inválido (esperado {capitulo:int, fio:string, resumo_estrutural:string})");
       }
+      if (
+        e.fios_avancados !== undefined &&
+        (!Array.isArray(e.fios_avancados) ||
+          e.fios_avancados.some((fio) => typeof fio !== "string") ||
+          !e.fios_avancados.includes(e.fio))
+      ) {
+        throw new Error("fios_avancados inválido (esperado string[] contendo o fio principal)");
+      }
     }
     return bruto as FundacaoV2["estrutura"];
   });
@@ -105,6 +120,14 @@ export function parseFundacao(texto: string, opts: { exigirEstrutura?: boolean }
     for (const e of f.estrutura) {
       if (!Number.isInteger(e.capitulo) || typeof e.fio !== "string" || typeof e.resumo_estrutural !== "string") {
         throw new Error("item de estrutura inválido");
+      }
+      if (
+        e.fios_avancados !== undefined &&
+        (!Array.isArray(e.fios_avancados) ||
+          e.fios_avancados.some((fio) => typeof fio !== "string") ||
+          !e.fios_avancados.includes(e.fio))
+      ) {
+        throw new Error("fios_avancados inválido");
       }
     }
     if (!Array.isArray(f.fios) || f.fios.length < 1) throw new Error("fios vazios");
@@ -152,6 +175,157 @@ export interface ResultadoPortao {
 
 /** Teto de retries dirigidos do portão. Estourou = fundação reprovada, não vira livro. */
 export const MAX_RETRIES_PORTAO = 2;
+
+const SCHEMA_CHECKPOINT_MACRO = "engine-v2/fundacao-macro-checkpoint/v1";
+const SCHEMA_TENTATIVA_FUNDACAO = "engine-v2/fundacao-tentativa/v1";
+
+interface CheckpointMacroFundacao {
+  schema: typeof SCHEMA_CHECKPOINT_MACRO;
+  input_hash: string;
+  macro: FundacaoV2;
+  run_id_macro: string;
+  retries: number;
+  reprovacoes: string[];
+  avisos: string[];
+  salvo_em: string;
+}
+
+function diretorioControleFundacao(dirProjeto: string): string {
+  return path.join(dirProjeto, "engine-v2");
+}
+
+function hashEntradaFundacao(
+  briefing: BriefingFundacao,
+  contrato: ContratoCompilado,
+  pacoteHash: string,
+  tarefaMacro: string
+): string {
+  return hashJsonCanonico({
+    briefing,
+    contrato: {
+      id: contrato.contrato.id,
+      versao: contrato.contrato.versao,
+      hash: contrato.hash,
+    },
+    pacote_hash: pacoteHash,
+    tarefa_macro: tarefaMacro,
+  });
+}
+
+async function gravarJsonAtomico(destino: string, valor: unknown): Promise<void> {
+  await fs.mkdir(path.dirname(destino), { recursive: true });
+  const temporario = `${destino}.${process.pid}.tmp`;
+  await fs.writeFile(temporario, JSON.stringify(valor, null, 2) + "\n", "utf8");
+  await fs.rename(temporario, destino);
+}
+
+function nomeSeguro(valor: string): string {
+  return valor.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 96) || "sem-id";
+}
+
+async function registrarTentativaFundacao(opts: {
+  deps: DepsFundacao;
+  inputHash: string;
+  passada: "macro" | "micro";
+  tentativa: number;
+  runId: string;
+  valor: unknown;
+  bloqueios: { codigo: string; mensagem: string; severidade: string }[];
+  avisos: string[];
+}): Promise<string> {
+  const nome = [
+    opts.passada,
+    `tentativa-${opts.tentativa + 1}`,
+    nomeSeguro(opts.runId),
+  ].join("-");
+  const destino = path.join(
+    diretorioControleFundacao(opts.deps.dirProjeto),
+    "fundacao-tentativas",
+    `${nome}.json`
+  );
+  await gravarJsonAtomico(destino, {
+    schema: SCHEMA_TENTATIVA_FUNDACAO,
+    input_hash: opts.inputHash,
+    job_id: opts.deps.jobId ?? null,
+    passada: opts.passada,
+    tentativa: opts.tentativa + 1,
+    run_id: opts.runId,
+    resultado: opts.bloqueios.length ? "reprovada" : "aprovada",
+    bloqueios: opts.bloqueios,
+    avisos: opts.avisos,
+    capturado_em: new Date().toISOString(),
+    valor: opts.valor,
+  });
+  return destino;
+}
+
+async function carregarCheckpointMacro(
+  deps: DepsFundacao,
+  briefing: BriefingFundacao,
+  inputHash: string
+): Promise<CheckpointMacroFundacao | null> {
+  const destino = path.join(diretorioControleFundacao(deps.dirProjeto), "fundacao-macro-checkpoint.json");
+  let bruto: string;
+  try {
+    bruto = await fs.readFile(destino, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
+  }
+  try {
+    const salvo = JSON.parse(bruto) as Partial<CheckpointMacroFundacao>;
+    if (salvo.schema !== SCHEMA_CHECKPOINT_MACRO || salvo.input_hash !== inputHash) return null;
+    if (typeof salvo.run_id_macro !== "string" || !salvo.run_id_macro) return null;
+    const macro = parseFundacao(JSON.stringify(salvo.macro), { exigirEstrutura: false });
+    const av = avaliarMacroFundacao(
+      macro,
+      deps.contrato.contrato,
+      briefing.totalCapitulos,
+      Object.keys(macro.docs_exigidos ?? {})
+    );
+    if (av.bloqueios.length) return null;
+    return {
+      schema: SCHEMA_CHECKPOINT_MACRO,
+      input_hash: inputHash,
+      macro,
+      run_id_macro: salvo.run_id_macro,
+      retries: Number.isInteger(salvo.retries) && Number(salvo.retries) >= 0 ? Number(salvo.retries) : 0,
+      reprovacoes: Array.isArray(salvo.reprovacoes) ? salvo.reprovacoes.map(String) : [],
+      avisos: av.avisos,
+      salvo_em: typeof salvo.salvo_em === "string" ? salvo.salvo_em : "",
+    };
+  } catch {
+    // Um checkpoint corrompido nunca é confiado nem apagado: fica ao lado com
+    // nome de quarentena para investigação, e a macro é gerada novamente.
+    const quarentena = `${destino}.invalido-${Date.now()}`;
+    try { await fs.rename(destino, quarentena); } catch { /* diagnóstico best-effort */ }
+    return null;
+  }
+}
+
+async function salvarCheckpointMacro(opts: {
+  deps: DepsFundacao;
+  inputHash: string;
+  macro: FundacaoV2;
+  runIdMacro: string;
+  retries: number;
+  reprovacoes: string[];
+  avisos: string[];
+}): Promise<void> {
+  await gravarJsonAtomico(
+    path.join(diretorioControleFundacao(opts.deps.dirProjeto), "fundacao-macro-checkpoint.json"),
+    {
+      schema: SCHEMA_CHECKPOINT_MACRO,
+      input_hash: opts.inputHash,
+      macro: opts.macro,
+      run_id_macro: opts.runIdMacro,
+      retries: opts.retries,
+      reprovacoes: opts.reprovacoes,
+      avisos: opts.avisos,
+      salvo_em: new Date().toISOString(),
+    } satisfies CheckpointMacroFundacao
+  );
+}
 
 /**
  * Gera a fundação pelo papel arquiteto_enredo (pacote compilado; run no ledger)
@@ -201,16 +375,29 @@ export async function gerarFundacaoV2(
   const reprovacoes: string[] = [];
   let avisos: string[] = [];
   let retriesTotais = 0;
-
   // ---------------------------------------------------------------------------
   // PASSADA 1 — MACRO (sem a linha por capítulo)
   // ---------------------------------------------------------------------------
   const tarefaMacro = tarefaArquitetoEnredoMacro(briefing, deps.contrato.contrato);
+  const inputHash = hashEntradaFundacao(briefing, deps.contrato, comp.pacote!.hash, tarefaMacro);
+  const arquivosTentativas: string[] = [];
   let macro: FundacaoV2 | null = null;
   let runIdMacro = "";
   let correcao = "";
+  const checkpoint = await carregarCheckpointMacro(deps, briefing, inputHash);
+  if (checkpoint) {
+    macro = checkpoint.macro;
+    runIdMacro = checkpoint.run_id_macro;
+    retriesTotais = checkpoint.retries;
+    reprovacoes.push(...checkpoint.reprovacoes);
+    avisos = checkpoint.avisos;
+    console.log(
+      `[engine-v2] macro da fundação retomada do checkpoint ${runIdMacro} ` +
+      `(entrada ${inputHash.slice(0, 12)})`
+    );
+  }
 
-  for (let tentativa = 0; ; tentativa++) {
+  for (let tentativa = 0; macro === null; tentativa++) {
     const r = await executarPapel<FundacaoV2>({
       gravador: deps.gravador,
       provedor: deps.provedor,
@@ -221,7 +408,6 @@ export async function gerarFundacaoV2(
       pacote: comp.pacote!,
       tarefa: correcao ? `${tarefaMacro}\n\n## CORREÇÃO DO PORTÃO\n${correcao}` : tarefaMacro,
       parse: parseFundacaoMacro,
-      timeoutMs: 900000,
     });
     const av = avaliarMacroFundacao(
       r.valor,
@@ -229,15 +415,34 @@ export async function gerarFundacaoV2(
       briefing.totalCapitulos,
       Object.keys(r.valor.docs_exigidos ?? {})
     );
+    arquivosTentativas.push(await registrarTentativaFundacao({
+      deps,
+      inputHash,
+      passada: "macro",
+      tentativa,
+      runId: r.runId,
+      valor: r.valor,
+      bloqueios: av.bloqueios,
+      avisos: av.avisos,
+    }));
     avisos = av.avisos;
     if (av.bloqueios.length === 0) {
       macro = r.valor;
       runIdMacro = r.runId;
-      retriesTotais = tentativa;
+      await salvarCheckpointMacro({
+        deps,
+        inputHash,
+        macro,
+        runIdMacro,
+        retries: retriesTotais,
+        reprovacoes,
+        avisos,
+      });
       break;
     }
     const motivo = av.bloqueios.map((b) => `${b.codigo}: ${b.mensagem}`).join(" · ");
     reprovacoes.push(`[macro] ${motivo}`);
+    retriesTotais += 1;
     console.warn(`[engine-v2] portão da fundação reprovou a MACRO (tentativa ${tentativa + 1}): ${motivo}`);
     if (tentativa >= MAX_RETRIES_PORTAO) {
       throw new ErroEngine({
@@ -246,7 +451,7 @@ export async function gerarFundacaoV2(
         mensagem:
           `macro da fundação reprovada pelo portão após ${MAX_RETRIES_PORTAO} retry(s) dirigido(s); ` +
           `nenhum capítulo foi escrito. Último motivo — ${motivo}`,
-        detalhe: { passada: "macro", reprovacoes, avisos: av.avisos },
+        detalhe: { passada: "macro", reprovacoes, avisos: av.avisos, arquivos_tentativas: arquivosTentativas },
       });
     }
     correcao = correcaoParaRetry(av);
@@ -273,7 +478,6 @@ export async function gerarFundacaoV2(
       pacote: comp.pacote!,
       tarefa: correcao ? `${tarefaMicro}\n\n## CORREÇÃO DO PORTÃO\n${correcao}` : tarefaMicro,
       parse: parseEstruturaMicro,
-      timeoutMs: 900000,
     });
     const completa: FundacaoV2 = { ...macro, estrutura: r.valor };
     const av = avaliarFundacaoV2(
@@ -283,16 +487,39 @@ export async function gerarFundacaoV2(
       Object.keys(completa.docs_exigidos ?? {})
     );
     av.bloqueios.push(...gateMacroMicroCoerentes(completa));
+    arquivosTentativas.push(await registrarTentativaFundacao({
+      deps,
+      inputHash,
+      passada: "micro",
+      tentativa,
+      runId: r.runId,
+      valor: r.valor,
+      bloqueios: av.bloqueios,
+      avisos: av.avisos,
+    }));
     avisos = av.avisos;
     if (av.bloqueios.length === 0) {
       return {
         fundacao: completa,
         runId: r.runId,
-        portao: { retries: retriesTotais + tentativa, reprovacoes, avisos, runIdMacro },
+        portao: { retries: retriesTotais, reprovacoes, avisos, runIdMacro },
       };
     }
     const motivo = av.bloqueios.map((b) => `${b.codigo}: ${b.mensagem}`).join(" · ");
     reprovacoes.push(`[micro] ${motivo}`);
+    retriesTotais += 1;
+    // O checkpoint não guarda apenas a macro: acumula o histórico dos gates
+    // micro já consumidos em jobs anteriores. Assim a retomada não faz a
+    // telemetria "voltar a zero" só porque houve outage/restart.
+    await salvarCheckpointMacro({
+      deps,
+      inputHash,
+      macro,
+      runIdMacro,
+      retries: retriesTotais,
+      reprovacoes,
+      avisos,
+    });
     console.warn(`[engine-v2] portão da fundação reprovou a MICRO (tentativa ${tentativa + 1}): ${motivo}`);
     if (tentativa >= MAX_RETRIES_PORTAO) {
       throw new ErroEngine({
@@ -301,7 +528,13 @@ export async function gerarFundacaoV2(
         mensagem:
           `micro da fundação reprovada pelo portão após ${MAX_RETRIES_PORTAO} retry(s) dirigido(s); ` +
           `a macro segue aprovada e nenhum capítulo foi escrito. Último motivo — ${motivo}`,
-        detalhe: { passada: "micro", reprovacoes, avisos: av.avisos },
+        detalhe: {
+          passada: "micro",
+          reprovacoes,
+          avisos: av.avisos,
+          macro_checkpoint: path.join(diretorioControleFundacao(deps.dirProjeto), "fundacao-macro-checkpoint.json"),
+          arquivos_tentativas: arquivosTentativas,
+        },
       });
     }
     correcao = correcaoParaRetry(av);

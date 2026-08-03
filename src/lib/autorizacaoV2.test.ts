@@ -78,15 +78,20 @@ describe("prontidão publicada", () => {
     schema: SCHEMA_PRONTIDAO_PUBLICADA,
     head: "190868d0000000000000000000000000000000aa",
     gerado_em: "2026-07-28T16:00:00Z",
-    estados: { implementacao_local: "IMPLEMENTACAO_LOCAL_APROVADA", release_producao: "RELEASE_PRODUCAO_BLOQUEADO" },
-    bloqueios_producao: ["CALIBRACAO_HUMANA", "MIGRACOES_REMOTAS"],
+    estados: {
+      implementacao_local: "IMPLEMENTACAO_LOCAL_APROVADA",
+      pre_canary: "PRE_CANARY_BLOQUEADO: PAPEIS_REAIS",
+      release_producao: "RELEASE_PRODUCAO_BLOQUEADO",
+    },
+    bloqueios_producao: ["CERTIFICADO_RELEASE", "MIGRACOES_REMOTAS"],
   };
 
   it("lê local, produção e bloqueios", () => {
     const p = lerProntidaoPublicada(payload);
     expect(p.local).toBe("IMPLEMENTACAO_LOCAL_APROVADA");
+    expect(p.preCanary).toBe("PRE_CANARY_BLOQUEADO: PAPEIS_REAIS");
     expect(p.producao).toBe("RELEASE_PRODUCAO_BLOQUEADO");
-    expect(p.bloqueios).toEqual(["CALIBRACAO_HUMANA", "MIGRACOES_REMOTAS"]);
+    expect(p.bloqueios).toEqual(["CERTIFICADO_RELEASE", "MIGRACOES_REMOTAS"]);
     expect(p.indisponivel).toBeNull();
   });
 
@@ -111,5 +116,24 @@ describe("prontidão publicada", () => {
     expect(commitDaProntidao(payload)).toBe("190868d");
     expect(commitDaProntidao({ ...payload, head: "nao-e-sha" })).toBeNull();
     expect(commitDaProntidao(null)).toBeNull();
+  });
+
+  it("[DOD:R-08] prontidão de outro SHA ou build sujo nunca libera a interface", () => {
+    const outroSha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const divergente = lerProntidaoPublicada(payload, { shaEsperado: outroSha });
+    expect(divergente.indisponivel).toContain("prontidão vencida");
+    expect(divergente.indisponivel).toContain("190868d");
+    expect(divergente.indisponivel).toContain("aaaaaaa");
+
+    const sujo = lerProntidaoPublicada(payload, {
+      shaEsperado: payload.head,
+      buildSujo: true,
+    });
+    expect(sujo.indisponivel).toContain("arquivos rastreados modificados");
+
+    expect(lerProntidaoPublicada(payload, {
+      shaEsperado: payload.head,
+      buildSujo: false,
+    }).indisponivel).toBeNull();
   });
 });

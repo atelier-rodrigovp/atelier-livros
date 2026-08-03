@@ -14,6 +14,7 @@ create table if not exists projects (
   idioma_origem text default 'pt-BR',
   status text not null default 'rascunho', -- rascunho|fundacao|escrevendo|revisao|pronto|publicado
   briefing jsonb not null default '{}',
+  briefing_aprovado jsonb,                 -- snapshot hash-bound aprovado antes da fundação V2
   skill_escrita text,                      -- skill-dan-brown | hoover-mcfadden | skill-jk-rowling | vesper-escritor-de-capitulos | skill-romantasy | null
   engine_mode text not null default 'claude_code', -- claude_code (V1) | v2
   paginas_alvo int,

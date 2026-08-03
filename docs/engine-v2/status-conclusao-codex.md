@@ -1,5 +1,10 @@
 # Engine V2 — status de conclusão Codex
 
+> **Histórico substituído em 2026-08-01.** As exigências de rotulagem e
+> avaliação humana descritas abaixo foram removidas do produto por decisão do
+> autor. Este ledger não governa a operação atual; consulte
+> `ENGINE-V2-EXECUTION-STATE.md` e `docs/engine-v2/01-operacao.md`.
+
 Atualizado em 2026-07-25. Este documento é um ledger intermediário e não é uma
 declaração de conclusão.
 

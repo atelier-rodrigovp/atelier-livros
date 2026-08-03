@@ -394,6 +394,11 @@ export class Gravador {
     await this.mutarEstado((doc) => {
       const outros = (doc.memoria_prosa ?? []).filter((m) => m.capitulo !== capitulo);
       doc.memoria_prosa = [...outros, ...entradas].sort((a, b) => a.capitulo - b.capitulo);
+      // Uma extração bem-sucedida resolve o bloqueio técnico anterior deste
+      // capítulo. Sem isso, reprocessar a memória nunca permitiria fechar o livro.
+      doc.bloqueios = doc.bloqueios.filter(
+        (b) => !(b.codigo === "MEMORIA_PROSA_INCOMPLETA" && b.alvo === `capitulo:${capitulo}`)
+      );
       if (conflitos.length) {
         const anteriores = (doc.conflitos_ficha_prosa ?? []).filter((c) => c.capitulo !== capitulo);
         doc.conflitos_ficha_prosa = [...anteriores, ...conflitos];
@@ -406,12 +411,20 @@ export class Gravador {
     await this.mutarEstado((doc) => {
       const outros = (doc.memoria_prosa ?? []).filter((m) => m.capitulo !== capitulo);
       doc.memoria_prosa = outros;
-      doc.bloqueios.push({
-        codigo: "MEMORIA_PROSA_INCOMPLETA",
-        alvo: `capitulo:${capitulo}`,
-        detalhe: "o extrator de memória falhou; o fechamento não pode cobrar pistas deste capítulo",
-        desde: this.agora(),
-      });
+      const alvo = `capitulo:${capitulo}`;
+      const existente = doc.bloqueios.find(
+        (b) => b.codigo === "MEMORIA_PROSA_INCOMPLETA" && b.alvo === alvo
+      );
+      if (existente) {
+        existente.detalhe = "o extrator de memória falhou; o fechamento não pode cobrar pistas deste capítulo";
+      } else {
+        doc.bloqueios.push({
+          codigo: "MEMORIA_PROSA_INCOMPLETA",
+          alvo,
+          detalhe: "o extrator de memória falhou; o fechamento não pode cobrar pistas deste capítulo",
+          desde: this.agora(),
+        });
+      }
     });
   }
 

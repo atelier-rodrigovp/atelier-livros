@@ -175,6 +175,7 @@ describe("diagnosticarCadencia — ritmo (tiques reais do livro)", () => {
     const t = "Ele entrou na sala devagar, medindo cada passo até a mesa. Impossível. Não pode ser. Depois sentou e respirou fundo antes de abrir o envelope lacrado.";
     const q = diagnosticarCadencia(t).tiques.find((x) => /COLADOS/.test(x.nome))!;
     expect(q.acima).toBe(true);
+    expect(q.todosExemplos).toEqual(["Impossível. / Não pode ser."]);
   });
 
   it("FALSO-POSITIVO: ritmo legítimo (mix longo/curto, um único fragmento) NÃO dispara", () => {

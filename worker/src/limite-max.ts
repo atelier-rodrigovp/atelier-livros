@@ -21,7 +21,7 @@ export class LimiteMaxError extends Error {
 
 // Assinaturas FORTES do limite de uso (distingue de erros reais: skill, disco, crédito).
 const LIMITE_RE =
-  /(hit your (session|usage) limit|(session|usage) limit reached|usage limit|limit reached|limite de uso do plano max|plano max atingido)/i;
+  /(hit your (session|usage|weekly) limit|(session|usage|weekly) limit reached|(?:usage|weekly) limit|limit reached|limite de uso do plano max|plano max atingido)/i;
 
 // Forma ESTRUTURADA do mesmo limite (incidente 2026-07-21/22, 1.299 falhas):
 // o CLI devolve rc=1 com envelope JSON `"api_error_status":429` — a frase pode

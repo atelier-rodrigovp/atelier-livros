@@ -118,11 +118,11 @@ export function tarefaRevisorCanario(resumoSinais: string, contrato: SkillContra
   return [
     `Avalie a AMOSTRA DE VOZ (seção TEXTO A AVALIAR) contra o contrato da skill.`,
     `A amostra tem deliberadamente 300–500 palavras: NÃO a reprove por ficar abaixo da faixa de um capítulo completo.`,
-    `A amostra é UMA cena única, PRÉ-FUNDAÇÃO: exigências estruturais do livro (docs factuais/dossiê, rotação ou corte de fios, ficha de cena, montagem paralela) NÃO se aplicam — ausência delas não é defeito, não vira "necessita_decisao_humana" nem reprova. Julgue APENAS voz, cadência, transparência e a mecânica da cena (objetivo/obstáculo/virada/gancho).`,
-    `Responda APENAS JSON no schema "parecer/v1": { "schema":"parecer/v1", "dramatic_progression":{"nota":0-5,"evidencia":string}, "skill_adherence":{...}, "clarity":{...}, "emotional_effect":{...}, "continuity":{...}, "hook_effectiveness":{...}, "verdict":"aprovado"|"aprovado_com_excecao"|"reprovado"|"necessita_decisao_humana", "evidencias":[{"local","trecho","observacao"}], "sinais":[{"sinal","valor","disposicao","evidencia","ocorrencias_citadas"?:[{"trecho","posicao"?}],"falsos_positivos"?:number}], "correcoes":[{"local","problema","instrucao"}] }.`,
+    `A amostra é UMA cena única, PRÉ-FUNDAÇÃO: exigências estruturais do livro (docs factuais/dossiê, rotação ou corte de fios, ficha de cena, montagem paralela) NÃO se aplicam — ausência delas não é defeito nem reprova. Julgue APENAS voz, cadência, transparência e a mecânica da cena (objetivo/obstáculo/virada/gancho).`,
+    `Responda APENAS JSON no schema "parecer/v1": { "schema":"parecer/v1", "dramatic_progression":{"nota":0-5,"evidencia":string}, "skill_adherence":{...}, "clarity":{...}, "emotional_effect":{...}, "continuity":{...}, "hook_effectiveness":{...}, "verdict":"aprovado"|"aprovado_com_excecao"|"reprovado", "evidencias":[{"local","trecho","observacao"}], "sinais":[{"sinal","valor","disposicao","evidencia","ocorrencias_citadas"?:[{"indice":number}],"falsos_positivos"?:number}], "correcoes":[{"local","problema","instrucao"}] }.`,
     `## SINAIS MEDIDOS (a contagem de palavras foi removida porque esta é uma amostra curta)`,
     resumoSinais,
-    `Disponha todo sinal FORA DA COTA; sinal dentro da cota NÃO entra em "sinais". "disposicao" aceita SOMENTE: "violacao_confirmada", "excecao_valida", "falso_positivo", "necessita_decisao_humana" (rótulos como "conforme"/"ok" invalidam o parecer). Para "violacao_confirmada", cite exatamente cada ocorrência medida que é defeito real; use "falsos_positivos" para fechar a contagem.`,
+    `Disponha todo sinal FORA DA COTA; sinal dentro da cota NÃO entra em "sinais". "disposicao" aceita SOMENTE: "violacao_confirmada", "excecao_valida" ou "falso_positivo" (rótulos como "conforme"/"ok" invalidam o parecer). Para "violacao_confirmada", cite exatamente cada ocorrência medida que é defeito real; use "falsos_positivos" para fechar a contagem.`,
     `Aprovação exige evidência positiva localizada e aderência material aos testes da skill: ${contrato.testes_positivos.slice(0, 4).join("; ") || "—"}.`,
     `Se a voz estiver genérica, a cadência contrariar o contrato ou a amostra não tiver evento/virada/gancho, reprove e dê correções objetivas.`,
     `Não transforme preferência autoral em aprovação por exceção: "aprovado_com_excecao" continua sendo uma ressalva visível.`,
@@ -133,12 +133,12 @@ export function tarefaRevisorCanario(resumoSinais: string, contrato: SkillContra
 export function tarefaRevisor(capitulo: number, resumoSinais: string, contrato: SkillContract): string {
   return [
     `Avalie o capítulo ${capitulo} (seção TEXTO A AVALIAR) contra o contrato da skill e a ficha.`,
-    `Responda APENAS JSON no schema "parecer/v1": { "schema":"parecer/v1", "dramatic_progression":{"nota":0-5,"evidencia":string}, "skill_adherence":{...}, "clarity":{...}, "emotional_effect":{...}, "continuity":{...}, "hook_effectiveness":{...}, "verdict":"aprovado"|"aprovado_com_excecao"|"reprovado"|"necessita_decisao_humana", "evidencias":[{"local","trecho","observacao"}], "sinais":[{"sinal","valor","disposicao","evidencia","ocorrencias_citadas"?:[{"trecho","posicao"?}],"falsos_positivos"?:number}], "correcoes":[{"local","problema","instrucao"}] }.`,
+    `Responda APENAS JSON no schema "parecer/v1": { "schema":"parecer/v1", "dramatic_progression":{"nota":0-5,"evidencia":string}, "skill_adherence":{...}, "clarity":{...}, "emotional_effect":{...}, "continuity":{...}, "hook_effectiveness":{...}, "verdict":"aprovado"|"aprovado_com_excecao"|"reprovado", "evidencias":[{"local","trecho","observacao"}], "sinais":[{"sinal","valor","disposicao","evidencia","ocorrencias_citadas"?:[{"indice":number}],"falsos_positivos"?:number}], "correcoes":[{"local","problema","instrucao"}] }.`,
     `## SINAIS MEDIDOS (medições determinísticas reais — disponha cada um)`,
     resumoSinais,
-    `Para cada sinal medido acima, inclua um item em "sinais" com disposicao: "violacao_confirmada" (o sinal é defeito real AQUI), "excecao_valida" (a cena justifica; explique), "falso_positivo" (o detector errou; explique) ou "necessita_decisao_humana". Esses quatro rótulos são os ÚNICOS válidos — "conforme"/"ok"/"dentro_da_cota" invalidam o parecer; sinal dentro da cota e sem defeito fica FORA da lista "sinais".`,
-    `REGRA DOS SINAIS DE CONTAGEM (sanfona, gnômico, personificação, metáfora, cadência): o NÚMERO do detector NUNCA confirma violação sozinho — detectores por regex supercontam (enumerações e acúmulos legítimos contam como tique). As ocorrências medidas estão TODAS listadas e numeradas acima. Para dispor "violacao_confirmada": preencha "ocorrencias_citadas" com CADA ocorrência que julgou defeito real (trecho literal em "trecho"; "posicao" opcional) e justifique em "evidencia"; ocorrência não citada conta como falso positivo — se você citar menos ocorrências do que o valor medido, declare o resto em "falsos_positivos" (número; citadas + falsos_positivos = valor). Se, lidas as ocorrências, nenhuma for defeito real, a disposição correta é "falso_positivo" mesmo com contagem acima da cota.`,
-    `"necessita_decisao_humana" é RARO: reserve para escolha genuinamente autoral (voz, exceção de contrato, rumo da trama). Defeito de ofício corrigível (tique, cota estourada, cena morta) é "violacao_confirmada" + entrada em "correcoes" + veredito "reprovado" — a correção dirigida resolve sem parar a produção.`,
+    `Para cada sinal medido acima, inclua um item em "sinais" com disposicao: "violacao_confirmada" (o sinal é defeito real AQUI), "excecao_valida" (a cena justifica; explique) ou "falso_positivo" (o detector errou; explique). Esses três rótulos são os ÚNICOS válidos — "conforme"/"ok"/"dentro_da_cota" invalidam o parecer; sinal dentro da cota e sem defeito fica FORA da lista "sinais".`,
+    `REGRA DOS SINAIS DE CONTAGEM (sanfona, gnômico, personificação, metáfora, cadência): o NÚMERO do detector NUNCA confirma violação sozinho — detectores por regex supercontam (enumerações e acúmulos legítimos contam como tique). As ocorrências medidas estão TODAS listadas e numeradas acima. Para dispor "violacao_confirmada": preencha "ocorrencias_citadas" com o NÚMERO de CADA ocorrência que julgou defeito real, no formato {"indice": N} — N é o número que aparece na lista acima (1, 2, 3…). NÃO transcreva o trecho: cite o índice e justifique em "evidencia"; ocorrência não citada conta como falso positivo — se você citar menos ocorrências do que o valor medido, declare o resto em "falsos_positivos" (número; citadas + falsos_positivos = valor). Se, lidas as ocorrências, nenhuma for defeito real, a disposição correta é "falso_positivo" mesmo com contagem acima da cota.`,
+    `Você não devolve decisões ao autor. Escolha entre exceção válida e violação corrigível. Defeito de ofício (tique, cota estourada, cena morta) é "violacao_confirmada" + entrada em "correcoes" + veredito "reprovado" — a correção dirigida resolve sem parar a produção. Dúvida factual pertence ao auditor e não entra em "sinais".`,
     `REGRAS DO VEREDITO:`,
     `- "aprovado" exige evidência POSITIVA em "evidencias" (o que está vivo e funciona, localizado) — ausência de defeito não basta.`,
     `- Qualquer "violacao_confirmada" exige entrada correspondente em "correcoes" e veredito "reprovado".`,
@@ -185,7 +185,7 @@ export function tarefaArquitetoEnredo(briefing: BriefingFundacao, contrato: Skil
     `Monte a fundação do livro "${briefing.titulo}" (${briefing.totalCapitulos} capítulos, escrito em ${nomeIdioma(briefing.idioma)}) para a skill do pacote.`,
     `Premissa do autor: ${briefing.premissa}`,
     briefing.detalhes ? `BRIEFING COMPLETO DO AUTOR (decisões vinculantes — a fundação as respeita, nunca as substitui):\n${briefing.detalhes}` : "",
-    `Responda APENAS JSON: { "perfil_voz": string, "biblia": string, "mapa_personagens": [{"nome": string, "papel": string, "ferida": string, "segredo": string, "desejo": string, "voz": string, "arco": string}], "estrutura": [{"capitulo": number, "fio": string, "resumo_estrutural": string}], "fios": [string], "promessa_editorial": string, "arco": {"atos": [...], "promessas": [...], "fios": [...], "arcos": [...]}${docsExigidos.length ? `, "docs_exigidos": {${docsExigidos.map((d) => `"${d}": string`).join(", ")}}` : ""} }.`,
+    `Responda APENAS JSON: { "perfil_voz": string, "biblia": string, "mapa_personagens": [{"nome": string, "papel": string, "ferida": string, "segredo": string, "desejo": string, "voz": string, "arco": string}], "estrutura": [{"capitulo": number, "fio": string, "fios_avancados": [string], "resumo_estrutural": string}], "fios": [string], "promessa_editorial": string, "arco": {"atos": [...], "promessas": [...], "fios": [...], "arcos": [...]}${docsExigidos.length ? `, "docs_exigidos": {${docsExigidos.map((d) => `"${d}": string`).join(", ")}}` : ""} }.`,
     `- "perfil_voz": descrição de voz em markdown curto (≤300 palavras) coerente com o contrato (${contrato.familia_editorial}; ${contrato.acao_interioridade.relacao}). PROIBIDO incluir parágrafos-modelo, aforismos ou frases de exemplo — a fundação não semeia ornamento (o perfil descreve, não demonstra).`,
     `- "biblia": bíblia da obra em markdown (≤1200 palavras): mundo/ambientação, cânone factual, linha do tempo, final planejado e proibições do autor. Fatos secos e decisões — sem prosa de cena, sem diálogo, sem parágrafo-modelo.`,
     `- "mapa_personagens": um item por personagem relevante (protagonistas, antagonistas, apoio com função na trama); cada campo ≤25 palavras; "voz" descreve o registro de fala, nunca cita falas prontas.`,
@@ -254,9 +254,10 @@ export function tarefaArquitetoEnredoMicro(
     macro.arcoResumo,
     ``,
     `Escreva a estrutura capítulo a capítulo.`,
-    `Responda APENAS JSON: { "estrutura": [{"capitulo": number, "fio": string, "resumo_estrutural": string}] }.`,
+    `Responda APENAS JSON: { "estrutura": [{"capitulo": number, "fio": string, "fios_avancados": [string], "resumo_estrutural": string}] }.`,
     `- EXATAMENTE ${briefing.totalCapitulos} itens, numerados de 1 a ${briefing.totalCapitulos}, sem furo nem repetição.`,
     `- "fio" de cada capítulo é UM dos fios declarados acima, escrito igual.`,
+    `- "fios_avancados" contém o fio principal e TODOS os outros fios que avançam nesse capítulo. Um capítulo pode plantar, escalar, culminar ou fechar mais de um fio; não omita os fios simultâneos.`,
     `- "resumo_estrutural" aponta objetivo e virada em ≤25 palavras, sem prosa, sem diálogo.`,
     `- Cada capítulo tem função PRÓPRIA: dois capítulos com resumo intercambiável reprovam a fundação inteira (o portão compara por similaridade, não só por igualdade).`,
     `- Os capítulos de plantio, reforço e pagamento de cada promessa, e os de abertura/escalada/clímax/fechamento de cada fio, têm de bater com a macro acima.`,
@@ -285,6 +286,7 @@ export function tarefaAuditorFactual(capitulo: number): string {
     `Audite o capítulo ${capitulo} (seção TEXTO A AVALIAR) contra os FATOS e a ficha do pacote.`,
     `Responda APENAS JSON: { "contradicoes": [{"fato_estabelecido": string, "trecho_do_capitulo": string, "gravidade": "bloqueante"|"aviso"}], "conhecimento_indevido": [{"quem": string, "sabe_o_que_nao_deveria": string, "trecho": string}], "pov_violado": {"ha": boolean, "detalhe": string} }.`,
     `Só aponte contradição COMPROVADA pelo material do pacote (cite o fato e o trecho). Não julgue estilo.`,
+    `Em "pov_violado", "ha" e "detalhe" têm de concordar: corte ou rotação explicitamente permitido pela ficha recebe ha=false. Se ha=true, o detalhe cita a passagem que entra em percepção/pensamento fora do POV; jamais escreva ha=true junto de "não é violação", "consistente com a ficha" ou equivalente.`,
   ].join("\n");
 }
 
@@ -368,5 +370,43 @@ export function tarefaIdioma(capitulo: number, alvo: string, sinais: string): st
     `- "injustificadas": só divergência que não tem explicação no texto. Cite o trecho — acusação sem trecho não conta.`,
     `- O detector pode errar: se o que ele apontou for legítimo no contexto, diga isso em "intencionais" em vez de repetir a acusação.`,
     `Responda APENAS o JSON (sem cerca de código, sem comentário).`,
+  ].join("\n");
+}
+
+/**
+ * Segunda passada da cascata. O modelo caro NÃO reescreve o parecer — julga um
+ * delta sobre o que a triagem decidiu, e é daí que vem a economia.
+ *
+ * Ele recebe a instrução de julgar nos DOIS sentidos de propósito: um julgador
+ * que só derruba transforma a cascata numa máquina de leniência, e a régua cai
+ * sem ninguém ter decidido derrubá-la.
+ */
+export function tarefaDecisaoCascata(
+  capitulo: number,
+  resumoDosSinais: string,
+  triagem: unknown,
+  gatilho: string
+): string {
+  return [
+    `SEGUNDA PASSADA do julgamento do capítulo ${capitulo}. Motivo da escalada: ${gatilho}`,
+    ``,
+    `A primeira passada (triagem) já julgou. Seu trabalho NÃO é refazer o parecer: é dizer onde ela errou, nos dois sentidos.`,
+    ``,
+    `SINAIS MEDIDOS pelo detector, com as ocorrências numeradas:`,
+    resumoDosSinais,
+    ``,
+    `PARECER DA TRIAGEM:`,
+    JSON.stringify(triagem),
+    ``,
+    `Responda APENAS JSON: { "schema":"delta-decisao/v1", "derrubar":[{"sinal","indice","motivo"}], "acrescentar":[{"sinal","indice","motivo"}], "veredito_sugerido":"aprovado"|"aprovado_com_excecao"|"reprovado", "observacao": string }`,
+    ``,
+    `- "derrubar": ocorrência que a triagem confirmou como violação e NÃO é defeito real. Detectores por regex supercontam.`,
+    `- "acrescentar": ocorrência que a triagem descartou (ou nem citou) e É defeito real. Este lado é tão importante quanto o outro: se você só derruba, a régua desce sem decisão.`,
+    `- Se a triagem pediu decisão humana, VOCÊ a encerra: confirme ocorrências reais em "acrescentar" e reprove, ou descarte-as e aprove. Nunca devolva a decisão ao autor.`,
+    `- "indice": o NÚMERO da ocorrência na lista acima. Nunca transcreva o trecho.`,
+    `- "motivo": por que, em uma frase concreta. Sem motivo, o item é rejeitado.`,
+    `- "observacao": o que a triagem não viu nos SEIS EIXOS — capítulo competente mas morto, revelação reapresentada em paráfrase, gancho que não puxa. Nenhum detector pega isso; é o principal motivo de você existir.`,
+    `- "veredito_sugerido" é SUGESTÃO: contradição factual, POV violado, conhecimento indevido e idioma reprovam por cima, independentemente do que você sugerir.`,
+    `- Delta vazio é resposta legítima: se a triagem acertou, devolva listas vazias e diga isso na observação.`,
   ].join("\n");
 }

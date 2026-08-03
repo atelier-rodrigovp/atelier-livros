@@ -233,6 +233,25 @@ async function aprovarCapituloComFicha(n: number, over: Partial<SceneSpec> = {})
 }
 
 describe("mutação: promessa não paga bloqueia o FECHAMENTO do livro", () => {
+  it("[DOD:H-03] memória incompleta bloqueia o fechamento, mesmo sem arco", async () => {
+    await deps.gravador.registrarMemoriaIncompleta(2);
+    const r = await avaliarFechamentoLivro({
+      projectId: "proj-1",
+      total: 3,
+      arco: undefined,
+      estado: await deps.gravador.carregarEstado(),
+      persistencia: disco,
+    });
+    expect(r.passou).toBe(false);
+    expect(r.gates).toEqual([
+      expect.objectContaining({
+        gate: "memoria_prosa_incompleta",
+        passou: false,
+        evidencia: expect.stringContaining("capitulo:2"),
+      }),
+    ]);
+  });
+
   it("CONTROLE: promessa plantada e paga na ficha do capítulo 3 → fechamento passa", async () => {
     await aprovarCapituloComFicha(1, { promessas_tocadas: [{ id: "P7", acao: "planta" }] });
     await aprovarCapituloComFicha(2);
@@ -303,6 +322,65 @@ describe("o gate de fechamento NÃO reprova o capítulo que apenas planta a prom
     });
     expect(fech.passou).toBe(false);
     expect(fech.gates[0].evidencia).toContain("capitulo_de_pagamento_nao_aprovado");
+  });
+});
+
+describe("fiação das três camadas de repetição no pipeline", () => {
+  it("[DOD:I-05] repetição semântica com evidência nos dois capítulos bloqueia antes do revisor", async () => {
+    await aprovarCapituloComFicha(1, {
+      informacao_nova: "o nome do irmão consta como acompanhante",
+    });
+    const textoAnterior = PROSA_OK.replace("Capítulo 3", "Capítulo 1");
+    await deps.gravador.registrarMemoriaDaProsa(1, [{
+      id: "M01.1",
+      tipo: "revelacao",
+      capitulo: 1,
+      enunciado: "o nome do irmão consta como acompanhante",
+      trecho: "fotografou a linha com o nome do irmão",
+      confianca: "alta",
+      text_hash: hashText(textoAnterior),
+      origem: "prosa",
+      estado: "aberta",
+    }], []);
+
+    const atual = ficha({
+      capitulo: 3,
+      informacao_nova: "o nome do irmão consta como acompanhante",
+    });
+    const textoAtual = [
+      "## Capítulo 3",
+      "",
+      "Marina leu a coluna final do registro. Ao lado do nome do irmão, a palavra acompanhante surgia em tinta azul. Ela fechou o livro quando a maçaneta começou a girar.",
+    ].join("\n");
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", textoAtual);
+
+    const r = await escreverCapitulo(
+      { ...deps, maxCorrecoes: 0 },
+      3,
+      { fichaExistente: atual, anteriores: [{ numero: 1, trecho: textoAnterior }] }
+    );
+
+    expect(r.status).toBe("bloqueado");
+    expect(r.gatesFalhos.some((g) => g.gate === "repeticao_semantica")).toBe(true);
+    expect(provedor.chamadas.some((c) => c.papel === "revisor_literario")).toBe(false);
+  });
+
+  it("[DOD:I-06] maneirismo em cinco capítulos entra nos prompts de escrita e julgamento", async () => {
+    const anteriores = Array.from({ length: 5 }, (_, indice) => ({
+      numero: indice + 1,
+      trecho: `## Capítulo ${indice + 1}\n\nNão era medo, era cálculo. A porta fechou atrás dela.`,
+    }));
+    provedor.enfileirar("arquiteto_cena", JSON.stringify(ficha({ capitulo: 6 })));
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_OK.replace("Capítulo 3", "Capítulo 6"));
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecerAprovado()));
+    provedor.enfileirar("auditor_factual", auditor({ ha: false, detalhe: "" }));
+
+    const r = await escreverCapitulo(deps, 6, { anteriores });
+    expect(r.status).toBe("aprovado");
+    expect(provedor.chamadas.find((c) => c.papel === "escritor")?.prompt).toContain("MANEIRISMO ACUMULADO");
+    expect(provedor.chamadas.find((c) => c.papel === "revisor_literario")?.prompt).toContain("MANEIRISMO ACUMULADO");
   });
 });
 

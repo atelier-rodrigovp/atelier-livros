@@ -4,11 +4,12 @@
 // Papéis nunca tocam disco: quem persiste é o gravador (worker).
 
 import { hashJsonCanonico } from "./hash.js";
+import { LimiteMaxError } from "../limite-max.js";
 import type { Gravador } from "./gravador.js";
 import { renderizarPacote, type PacoteCompilado } from "./compilador.js";
 import { resolverModelo } from "./config.js";
 import { ErroProvedor, type ProvedorModelo, type RespostaModelo } from "./provedor.js";
-import { ErroEngine, type MapaModelos, type Papel } from "./tipos.js";
+import { ErroEngine, EXECUCAO_POR_PAPEL, type MapaModelos, type Papel } from "./tipos.js";
 
 export interface ExecucaoPapel<T> {
   papel: Papel;
@@ -61,6 +62,10 @@ function registrarFalhaInfra(escopo: string, papel: Papel): number {
 
 export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPapel<T>> {
   const { capacidade, modelo } = resolverModelo(e.papel, e.mapa);
+  const execucao = EXECUCAO_POR_PAPEL[e.papel];
+  // Versao do CLI vai para o run: sem ela nao da para dizer, depois, com que
+  // binario um capitulo foi produzido.
+  const versaoCli = typeof e.provedor.versao === "function" ? e.provedor.versao() : "nao-informada";
   const max = e.maxTentativas ?? 2;
   let parent: string | null | undefined = e.parentRunId;
   let ultimoErro = "";
@@ -90,13 +95,33 @@ export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPa
 
     let resposta: RespostaModelo;
     try {
-      resposta = await e.provedor.chamar({ papel: e.papel, capacidade, modelo, prompt, timeoutMs: e.timeoutMs });
+      // Esforco e timeout sao propriedade do PAPEL (EXECUCAO_POR_PAPEL), nao
+      // parametro de quem chama. `e.timeoutMs` sobrevive so como override
+      // explicito; sem ele, a tabela decide — era daqui que vinham os
+      // `timeout apos 300000ms` do arquiteto_enredo.
+      resposta = await e.provedor.chamar({
+        papel: e.papel,
+        capacidade,
+        modelo,
+        prompt,
+        timeoutMs: e.timeoutMs ?? execucao.timeoutMs,
+        esforco: execucao.esforco,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await e.gravador.falharRun(runId, { codigo: "PROVEDOR_FALHOU", classe: "infra", mensagem: msg });
       // Limite do plano Max: NÃO é falha do papel — atravessa sem retry técnico
       // (retry local não ajuda; o loop do worker pausa com retry_at sem contar tentativa).
-      if ((err as Error)?.name === "LimiteMaxError") throw err;
+      if (err instanceof LimiteMaxError || (err as Error)?.name === "LimiteMaxError") {
+        const limite = err as LimiteMaxError;
+        await e.gravador.falharRun(runId, {
+          codigo: "PROVEDOR_LIMITE",
+          classe: "quota",
+          mensagem: msg,
+          detalhe: { retry_at: limite.retryAt, aguardando_reset: limite.aguardandoReset },
+        });
+        throw err;
+      }
+      await e.gravador.falharRun(runId, { codigo: "PROVEDOR_FALHOU", classe: "infra", mensagem: msg });
       // Fallback/deriva de modelo é configuração inválida, não instabilidade:
       // repetir a mesma chamada apenas consumiria cota no modelo errado.
       if (err instanceof ErroProvedor && err.codigo === "PROVEDOR_MODELO_DIVERGENTE") {
@@ -149,11 +174,17 @@ export async function executarPapel<T>(e: ExecucaoPapel<T>): Promise<ResultadoPa
         output_hash: hashJsonCanonico(resposta.texto),
         tokens_in: resposta.tokensIn,
         tokens_out: resposta.tokensOut,
-        evidencias: [{
-          tipo: "metrica",
-          referencia: "modelo_executado",
-          detalhe: resposta.modeloExecutado,
-        }],
+        evidencias: [
+          { tipo: "metrica", referencia: "modelo_executado", detalhe: resposta.modeloExecutado },
+          // Sem o esforco gravado, a medicao de qualidade de amanha nao consegue
+          // dizer em que nivel cada capitulo foi produzido — e o experimento
+          // vira anedota.
+          { tipo: "metrica", referencia: "esforco_solicitado", detalhe: execucao.esforco },
+          { tipo: "metrica", referencia: "cli_versao", detalhe: versaoCli },
+          // Duracao da CHAMADA, medida no spawn. `finished_at` mede a linha, e ja
+          // saiu 27 min depois do trabalho (run 889f9fc9) — nao serve para medir ganho.
+          { tipo: "metrica", referencia: "duracao_chamada_ms", detalhe: String(resposta.duracaoMs ?? "") },
+        ],
       });
       return { valor, runId, resposta, tentativas: tentativa };
     } catch (err) {

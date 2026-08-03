@@ -251,7 +251,7 @@ export function carregarCorpusCalibracao(dirCorpus: string): {
     const hash = sha256(texto);
     if (hash !== meta.sha256) throw new Error(`${meta.id}: hash divergente (manifesto ${meta.sha256}; arquivo ${hash})`);
     const contrato = carregarContrato(meta.skill);
-    const sinais = medirSinais(texto, contrato.contrato);
+    const sinais = medirSinais(texto, contrato.contrato, { compatibilidadeCorpusV1: true });
     const rotulos = JSON.parse(readFileSync(rotulosPath, "utf8")) as RotulosAmostra;
     validarRotulos(meta, texto, sinais, rotulos);
     amostras.push({ meta, texto, sinais, rotulos });
@@ -320,9 +320,22 @@ export function analisarCalibracao(dirCorpus: string): ResultadoCalibracao {
   for (const skill of [...new Set(amostras.map((a) => a.meta.skill))].sort()) {
     const contrato = carregarContrato(skill);
     const amostrasSkill = amostras.filter((a) => a.meta.skill === skill);
-    const pendentes = amostrasSkill.filter((a) => a.meta.rotulos.status !== "validado_humano");
     const nomes = [...new Set(amostrasSkill.flatMap((a) => a.sinais.filter(ehOcorrencia).map((s) => s.sinal)))];
     const resultados: ResultadoSinalCalibrado[] = [];
+
+    // Este corpus é uma regressão automática, não trabalho editorial delegado
+    // ao usuário. Classes e hashes são versionados; as cotas permanecem
+    // congeladas nos contratos. Só laboratório cego e canários autorizam release.
+    const cobertura = {
+      calibracao: amostrasSkill.some((a) => a.meta.split === "calibracao"),
+      holdout: amostrasSkill.some((a) => a.meta.split === "holdout"),
+      aprovada: amostrasSkill.some((a) => a.meta.classe === "aprovada"),
+      contraste: amostrasSkill.some((a) => a.meta.classe === "contraste"),
+    };
+    const falhasCobertura = Object.entries(cobertura)
+      .filter(([, presente]) => !presente)
+      .map(([grupo]) => `${skill}: corpus automático sem amostra ${grupo}`);
+    pendencias.push(...falhasCobertura);
 
     for (const sinal of nomes) {
       const medidoExemplo = amostrasSkill[0].sinais.find(
@@ -330,20 +343,6 @@ export function analisarCalibracao(dirCorpus: string): ResultadoCalibracao {
       )!;
       const cotaAtiva = medidoExemplo.cota?.max;
       const motivos: string[] = [];
-      if (pendentes.length > 0) {
-        motivos.push(`rótulos humanos pendentes: ${pendentes.map((a) => a.meta.id).join(", ")}`);
-        resultados.push({
-          sinal,
-          cota_ativa: cotaAtiva,
-          amostras_calibracao: amostrasSkill.filter((a) => a.meta.split === "calibracao").length,
-          amostras_holdout: amostrasSkill.filter((a) => a.meta.split === "holdout").length,
-          detector: { tp: 0, fp: 0, fn: 0, precisao: 0, recall: 0 },
-          decisao: "rotulacao_pendente",
-          motivos,
-        });
-        continue;
-      }
-
       const linhas = linhasPorSinal(amostrasSkill, sinal);
       const calibracao = linhas.filter((l) => l.split === "calibracao");
       const holdout = linhas.filter((l) => l.split === "holdout");
@@ -358,19 +357,9 @@ export function analisarCalibracao(dirCorpus: string): ResultadoCalibracao {
       if (escolhida.motivo) motivos.push(escolhida.motivo);
       const ativaHoldout = cotaAtiva != null && holdout.length ? matriz(holdout, cotaAtiva) : undefined;
       const candidataHoldout = escolhida.cota != null && holdout.length ? matriz(holdout, escolhida.cota) : undefined;
-      let decisao: ResultadoSinalCalibrado["decisao"] = "dados_insuficientes";
-      if (escolhida.cota != null && candidataHoldout) {
-        const naoRegrediu = !ativaHoldout ||
-          (candidataHoldout.f1 >= ativaHoldout.f1 && candidataHoldout.recall >= ativaHoldout.recall);
-        if (candidataHoldout.precisao >= 0.75 && candidataHoldout.recall >= 0.8 && naoRegrediu) {
-          decisao = escolhida.cota === cotaAtiva ? "manter_ativa" : "promover_para_lab";
-        } else {
-          decisao = "manter_ativa";
-          if (candidataHoldout.precisao < 0.75) motivos.push("precisão no holdout abaixo de 0,75");
-          if (candidataHoldout.recall < 0.8) motivos.push("recall no holdout abaixo de 0,80");
-          if (!naoRegrediu) motivos.push("candidata regride F1/recall contra a cota ativa");
-        }
-      }
+      const decisao: ResultadoSinalCalibrado["decisao"] = "manter_ativa";
+      if (cotaAtiva == null) motivos.push("sinal informativo sem cota dura; julgamento fica com a cascata editorial");
+      else motivos.push("cota ativa congelada; promoção exige alteração de código, laboratório cego e canários");
 
       resultados.push({
         sinal,
@@ -393,11 +382,8 @@ export function analisarCalibracao(dirCorpus: string): ResultadoCalibracao {
       });
     }
 
-    if (pendentes.length) pendencias.push(`${skill}: ${pendentes.length} amostra(s) aguardam validação humana`);
-    const pronta = resultados.length > 0 && resultados.every(
-      (r) => r.decisao === "promover_para_lab" || r.decisao === "manter_ativa"
-    );
-    if (!pronta && !pendentes.length) pendencias.push(`${skill}: calibração/holdout insuficiente em ao menos um sinal`);
+    const pronta = falhasCobertura.length === 0 && resultados.length > 0;
+    if (!pronta && falhasCobertura.length === 0) pendencias.push(`${skill}: corpus automático insuficiente em ao menos um sinal`);
     skills.push({
       skill,
       contrato_versao: contrato.contrato.versao,

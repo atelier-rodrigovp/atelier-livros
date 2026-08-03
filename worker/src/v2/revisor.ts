@@ -17,6 +17,74 @@ const EIXOS = [
   "hook_effectiveness",
 ] as const;
 
+/**
+ * Rótulos com que o modelo diz "este sinal está dentro da cota". O protocolo
+ * manda NÃO listar sinal dentro da cota; quando ele lista assim mesmo, a
+ * entrada é ruído — desde que o detector concorde que o sinal está na cota.
+ */
+const ROTULOS_DENTRO_DA_COTA = new Set(["dentro_da_cota", "conforme", "ok", "dentro da cota", "na_cota"]);
+
+/**
+ * NORMALIZAÇÃO DETERMINÍSTICA — roda ANTES de `validarParecer` e não decide nada.
+ *
+ * A maior classe de falha do revisor era de FORMATO, não de julgamento: o modelo
+ * escrevia `"6 (cota máx 1)"` no lugar de `6`, ou listava um sinal dentro da cota
+ * com um rótulo fora do enum. Cada uma dessas custava um retry inteiro — 22 mil
+ * tokens para reescrever um parecer cujo CONTEÚDO já estava certo.
+ *
+ * O que esta função faz é estritamente sintático:
+ *   · extrai o inteiro de um valor escrito como texto ("6 (cota máx 1)" → 6);
+ *   · aceita `ocorrencias_citadas` dada como lista de strings;
+ *   · descarta entrada rotulada "dentro da cota" QUANDO o detector também diz
+ *     que está na cota — nesse caso a entrada não devia existir.
+ *
+ * O que ela NÃO faz, de propósito: não muda medição, não converte disposição em
+ * outra disposição, e não descarta entrada de sinal FORA DA COTA. Um valor que
+ * normaliza para 7 contra medição 6 continua reprovando; um "dentro_da_cota"
+ * sobre sinal fora da cota continua inválido, porque ali o modelo está
+ * contradizendo o detector — e isso é julgamento, não formato.
+ */
+export function normalizarParecerBruto(obj: unknown, medidos: SinalMedido[]): unknown {
+  if (typeof obj !== "object" || obj === null) return obj;
+  const p = { ...(obj as Record<string, unknown>) };
+  if (!Array.isArray(p.sinais)) return p;
+
+  const foraDaCota = new Map(medidos.map((m) => [m.sinal, m.fora_da_cota]));
+  const saida: unknown[] = [];
+  for (const bruto of p.sinais as unknown[]) {
+    if (typeof bruto !== "object" || bruto === null) { saida.push(bruto); continue; }
+    const s = { ...(bruto as Record<string, unknown>) };
+
+    // "6 (cota máx 1)" → 6. Só reinterpreta a ESCRITA do número; a comparação
+    // com a medição continua acontecendo depois, intacta.
+    if (typeof s.valor === "string") {
+      const m = /^\s*(-?\d+)/.exec(s.valor);
+      if (m) s.valor = Number(m[1]);
+    }
+
+    if (typeof s.disposicao === "string") {
+      const rotulo = s.disposicao.trim().toLowerCase();
+      if (ROTULOS_DENTRO_DA_COTA.has(rotulo)) {
+        // Detector concorda que está na cota → entrada supérflua, descartada.
+        // Detector diz que está FORA → mantida como está e reprovada adiante.
+        if (foraDaCota.get(String(s.sinal)) !== true) continue;
+      } else {
+        s.disposicao = rotulo;
+      }
+    }
+
+    // Ocorrências citadas como texto puro viram o objeto que o schema espera.
+    if (Array.isArray(s.ocorrencias_citadas)) {
+      s.ocorrencias_citadas = (s.ocorrencias_citadas as unknown[]).map((o) =>
+        typeof o === "string" ? { trecho: o } : o
+      );
+    }
+    saida.push(s);
+  }
+  p.sinais = saida;
+  return p;
+}
+
 /** Validação estrutural do JSON do parecer (usada como `parse` do executor de papel). */
 export function validarParecer(obj: unknown): Parecer {
   if (typeof obj !== "object" || obj === null) throw new Error("parecer não é objeto");
@@ -63,8 +131,19 @@ export function validarParecer(obj: unknown): Parecer {
       }
       for (const [i, o] of (citadas as unknown[]).entries()) {
         const oc = o as Record<string, unknown>;
-        if (typeof oc?.trecho !== "string" || !oc.trecho.trim()) {
-          throw new Error(`sinal "${x.sinal}": ocorrencias_citadas[${i}].trecho obrigatório (citação literal)`);
+        // Forma nova: índice na lista numerada do detector. Forma antiga: trecho
+        // literal (histórico). Uma das duas — nunca nenhuma.
+        const temIndice = typeof oc?.indice === "number";
+        const temTrecho = typeof oc?.trecho === "string" && oc.trecho.trim().length > 0;
+        if (!temIndice && !temTrecho) {
+          throw new Error(
+            `sinal "${x.sinal}": ocorrencias_citadas[${i}] exige "indice" (número da ocorrência medida) ou "trecho" (citação literal)`
+          );
+        }
+        if (temIndice && (!Number.isInteger(oc.indice) || (oc.indice as number) < 1)) {
+          throw new Error(
+            `sinal "${x.sinal}": ocorrencias_citadas[${i}].indice deve ser inteiro ≥ 1 (recebido ${JSON.stringify(oc.indice)})`
+          );
         }
       }
       const falsos = x.falsos_positivos ?? 0;
@@ -183,10 +262,17 @@ function problemasDeCitacao(parecer: Parecer, sinaisMedidos: SinalMedido[]): str
     }
     if (ehSinalEscalar(medido.sinal) || typeof medido.valor !== "number") continue;
 
-    // Sinal medido SEM exemplos (ex.: fragColados — o detector conta pares mas não
-    // os lista, para não invalidar os rótulos do corpus de calibração): não há como
-    // vincular; as citações do revisor são aceitas sem cross-check.
-    if (medido.exemplos.length === 0) continue;
+    // Sinal de ocorrência sem exemplos não pode aceitar um índice órfão: depois
+    // da gravação não existiria array capaz de resolvê-lo. Escalares já saíram
+    // acima. Este ramo é só uma defesa para detectores legados/incompletos.
+    if (medido.exemplos.length === 0) {
+      if ((disposto.ocorrencias_citadas ?? []).some((o) => typeof o.indice === "number" && !o.trecho?.trim())) {
+        problemas.push(
+          `sinal "${disposto.sinal}": detector não publicou ocorrências numeradas; cite o trecho literal em vez de índice`
+        );
+      }
+      continue;
+    }
     // MULTISET com prefixo: o mesmo trecho pode ocorrer N vezes ("Raspagem." ×3)
     // e o revisor cita cada uma; o exemplo do detector é truncado (110 chars),
     // então citação e exemplo casam também por prefixo longo (≥60 chars) — ainda
@@ -199,7 +285,37 @@ function problemasDeCitacao(parecer: Parecer, sinaisMedidos: SinalMedido[]): str
       (exm.length >= 60 && cit.startsWith(exm)) ||
       (cit.length >= 60 && exm.startsWith(cit));
     for (const ocorrencia of disposto.ocorrencias_citadas ?? []) {
-      const cit = normalizarTrechoLiteral(ocorrencia.trecho);
+      // CITAÇÃO POR ÍNDICE — verificação exata. O casamento por texto abaixo é
+      // aproximado por necessidade (aspas, separador, prefixo de 60 chars);
+      // o índice é igualdade de inteiro contra o intervalo medido, sem tolerância.
+      if (typeof ocorrencia.indice === "number") {
+        const i = ocorrencia.indice - 1;
+        if (i < 0 || i >= disponiveis.length) {
+          problemas.push(
+            `sinal "${disposto.sinal}": índice ${ocorrencia.indice} fora do medido (há ${disponiveis.length} ocorrência(s))`
+          );
+          continue;
+        }
+        if (usadas[i]) {
+          problemas.push(`sinal "${disposto.sinal}": índice ${ocorrencia.indice} citado em duplicidade`);
+          continue;
+        }
+        // Item MISTO: se veio índice e trecho, os dois têm de apontar o mesmo
+        // lugar — citar #3 e transcrever a ocorrência 5 é contradição, não erro
+        // de digitação.
+        if (typeof ocorrencia.trecho === "string" && ocorrencia.trecho.trim()) {
+          if (!casa(normalizarTrechoLiteral(ocorrencia.trecho), disponiveis[i])) {
+            problemas.push(
+              `sinal "${disposto.sinal}": índice ${ocorrencia.indice} e trecho citado apontam ocorrências diferentes`
+            );
+            continue;
+          }
+        }
+        usadas[i] = true;
+        continue;
+      }
+
+      const cit = normalizarTrechoLiteral(ocorrencia.trecho ?? "");
       const idx = disponiveis.findIndex((exm, i) => !usadas[i] && casa(cit, exm));
       if (idx >= 0) {
         usadas[idx] = true;
@@ -223,6 +339,42 @@ function problemasDeCitacao(parecer: Parecer, sinaisMedidos: SinalMedido[]): str
  * `conferirParecer` mantém a mesma checagem como segunda rede (fail-closed)
  * caso o parecer incompleto escape por outro caminho.
  */
+/**
+ * HIDRATAÇÃO — resolve `{indice}` para `{indice, trecho}` antes de gravar.
+ *
+ * `engine_reviews` guarda o parecer e o hash do texto, e NÃO guarda a medição.
+ * Um parecer arquivado só com `{"indice":3}` aponta para um array que não existe
+ * em lugar nenhum: reconstruí-lo exigiria remedir o texto com a versão de
+ * `sinais.ts` daquele dia, e detector muda. O "#3" de hoje pode ser outro trecho
+ * amanhã — a conferência ficaria mais rígida em voo e ilegível no arquivo.
+ *
+ * Roda no MESMO ciclo e com o MESMO array de medição usado na validação. Nunca
+ * depois, nunca remedindo. Índice que não resolve é reprovado antes de chegar
+ * aqui (`problemasDeCitacao`); se escapar, esta função lança em vez de gravar
+ * trecho vazio — arquivo com citação vazia é pior que arquivo sem citação.
+ */
+export function hidratarOcorrenciasCitadas(parecer: Parecer, sinaisMedidos: SinalMedido[]): Parecer {
+  const sinais = parecer.sinais.map((disposto) => {
+    if (!disposto.ocorrencias_citadas?.length) return disposto;
+    const medido = acharSinalMedido(disposto.sinal, sinaisMedidos);
+    const exemplos = medido?.exemplos ?? [];
+    const ocorrencias_citadas = disposto.ocorrencias_citadas.map((o) => {
+      if (typeof o.indice !== "number") return o;
+      const trecho = exemplos[o.indice - 1];
+      if (typeof trecho !== "string") {
+        throw new Error(
+          `sinal "${disposto.sinal}": índice ${o.indice} não resolve em nenhuma ocorrência medida — parecer não pode ser gravado`
+        );
+      }
+      // Mantém o índice: quem audita vê a que ocorrência da medição o revisor
+      // se referiu, e o trecho continua legível sem depender do detector.
+      return { ...o, trecho };
+    });
+    return { ...disposto, ocorrencias_citadas };
+  });
+  return { ...parecer, sinais };
+}
+
 export function exigirDisposicaoCompleta(parecer: Parecer, sinaisMedidos: SinalMedido[]): Parecer {
   const omitidos = sinaisMedidos.filter((m) => m.fora_da_cota && !acharDisposto(m.sinal, parecer.sinais));
   if (omitidos.length > 0) {

@@ -20,6 +20,11 @@ import { supabase, enqueueJob } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
 import { resolverEsperaWizardV2, TEXTO_ESPERA_WIZARD_V2 } from "@/lib/wizardV2";
+import {
+  ETAPAS_CRIACAO,
+  planoAposCriacao,
+  type FaseNovoProjeto,
+} from "@/lib/fluxoNovoProjeto";
 import type { ReviewV2 } from "@/lib/engineV2";
 import type { JobStatus } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
@@ -264,16 +269,12 @@ interface CanarioVoz {
   problemas_protocolo?: string[];
 }
 
-function TrilhaWizard({ fase }: { fase: "ideia" | "canario" | "entrevista" }) {
-  const etapas = [
-    { id: "ideia", label: "Projeto e skill" },
-    { id: "canario", label: "Prova de voz" },
-    { id: "entrevista", label: "Entrevista e fundação" },
-  ] as const;
-  const atual = etapas.findIndex((e) => e.id === fase);
+function TrilhaWizard({ fase }: { fase: FaseNovoProjeto }) {
+  const faseVisivel = fase === "canario" ? "entrevista" : fase;
+  const atual = ETAPAS_CRIACAO.findIndex((e) => e.id === faseVisivel);
   return (
     <ol className="grid grid-cols-3 border-y py-3 text-xs" aria-label="Progresso da criação">
-      {etapas.map((etapa, indice) => (
+      {ETAPAS_CRIACAO.map((etapa, indice) => (
         <li
           key={etapa.id}
           className={cn(
@@ -402,7 +403,7 @@ export default function NovoProjeto() {
   const [params, setParams] = useSearchParams();
   // Retomada por URL: ?projeto=<id> sobrevive a refresh e permite voltar do Dashboard.
   const projetoParam = params.get("projeto");
-  const [fase, setFase] = useState<"ideia" | "canario" | "entrevista">(
+  const [fase, setFase] = useState<FaseNovoProjeto>(
     projetoParam ? "entrevista" : "ideia"
   );
   const [titulo, setTitulo] = useState("");
@@ -452,7 +453,7 @@ export default function NovoProjeto() {
       qaRef.current = Array.isArray(b.qa) ? b.qa : [];
       const itv = b._interview || {};
       if (itv.completo) {
-        toast.success("Fundação validada! Gerando…");
+        toast.success("Entrevista concluída. Revise e aprove o briefing antes de gerar a fundação.");
         nav(`/projeto/${id}`);
         return;
       }
@@ -543,8 +544,9 @@ export default function NovoProjeto() {
     }
   }
 
-  // Retomada por URL: projeto V2 sem canário aprovado volta para a fase do canário
-  // (não direto pra entrevista). Roda uma única vez, na montagem.
+  // Retomada por URL sempre volta à entrevista. A prova de voz pré-fundação foi
+  // retirada do caminho crítico: ela gerava prosa antes dos gates que deveriam
+  // julgá-la.
   useEffect(() => {
     if (!projetoParam) return;
     (async () => {
@@ -554,37 +556,12 @@ export default function NovoProjeto() {
         .eq("id", projetoParam)
         .maybeSingle();
       if (!data) return;
-      const b: any = data.briefing || {};
-      if ((data as any).engine_mode === "v2" && !b.canario_voz?.aprovado) {
+      if ((data as any).engine_mode === "v2") {
         setEngineEscolhida("v2");
         const skillId = data.skill_escrita ? SKILL_ID_REVERSO[data.skill_escrita] : undefined;
         if (skillId) setSkillEscolhida(skillId);
         if (data.total_capitulos) setTotalCapitulos(data.total_capitulos);
-        setFase("canario");
-        const { data: jobsCanario } = await supabase
-          .from("jobs")
-          .select("id,status,erro,created_at,progresso")
-          .eq("project_id", projetoParam)
-          .eq("tipo", "canario_voz")
-          .order("created_at", { ascending: false })
-          .limit(1);
-        const ultimo = jobsCanario?.[0] as any;
-        if (ultimo) {
-          setCanarioJobId(ultimo.id);
-          setCanarioJob({
-            status: ultimo.status,
-            erro: ultimo.erro,
-            created_at: ultimo.created_at,
-            progresso: ultimo.progresso ?? {},
-          });
-          const resultado = ultimo.progresso?.canario_voz as CanarioVoz | undefined;
-          if (resultado?.texto) {
-            setCanarioResultado(resultado);
-            setCanarioTexto(resultado.texto);
-          }
-        } else {
-          setCanarioErro("Nenhum canário foi agendado para este projeto. Gere uma amostra para continuar.");
-        }
+        setFase("entrevista");
       }
     })();
   }, [projetoParam]);
@@ -851,13 +828,9 @@ export default function NovoProjeto() {
     setProjectId(data.id);
     setParams({ projeto: data.id }, { replace: true });
     setIniciando(false);
-    if (engineEscolhida === "v2" && contratoSel) {
-      setFase("canario");
-      await gerarCanario(data.id, contratoSel.id);
-    } else {
-      setFase("entrevista");
-      await agendarEntrevista(data.id);
-    }
+    const plano = planoAposCriacao();
+    setFase(plano.fase);
+    await agendarEntrevista(data.id);
   }
 
   async function responder() {
@@ -919,7 +892,7 @@ export default function NovoProjeto() {
           <h1 className="text-3xl font-semibold tracking-tight">Novo projeto</h1>
           <p className="mt-1 text-muted-foreground">
             Comece com uma ideia. O arquiteto-de-enredo conduz uma entrevista
-            curta (perguntas com recomendação), valida a fundação e gera tudo.
+            curta; você revisa e aprova o briefing antes de qualquer fundação ou prosa.
           </p>
         </div>
         <TrilhaWizard fase="ideia" />
@@ -1063,7 +1036,7 @@ export default function NovoProjeto() {
                   ) : (
                     <Wand2 className="h-4 w-4" />
                   )}
-                  {engineEscolhida === "v2" ? "Gerar canário de voz" : "Começar entrevista"}
+                  Começar entrevista
                 </Button>
               </div>
             </form>

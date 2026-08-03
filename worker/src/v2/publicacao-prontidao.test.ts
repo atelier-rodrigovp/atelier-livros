@@ -4,8 +4,12 @@ import { ErroPublicacao, payloadDaProntidao, SCHEMA_PRONTIDAO_PUBLICADA } from "
 const rel = (over: Record<string, unknown> = {}) => ({
   head: "190868d0000000000000000000000000000000aa",
   gerado_em: "2026-07-28T16:00:00Z",
-  estados: { implementacao_local: "IMPLEMENTACAO_LOCAL_APROVADA", release_producao: "RELEASE_PRODUCAO_BLOQUEADO" },
-  bloqueios_producao: ["CALIBRACAO_HUMANA"],
+  estados: {
+    implementacao_local: "IMPLEMENTACAO_LOCAL_APROVADA",
+    pre_canary: "PRE_CANARY_BLOQUEADO: PAPEIS_REAIS",
+    release_producao: "RELEASE_PRODUCAO_BLOQUEADO",
+  },
+  bloqueios_producao: ["CERTIFICADO_RELEASE"],
   bloqueios: [],
   ...over,
 });
@@ -15,7 +19,7 @@ describe("payload publicado", () => {
     const p = payloadDaProntidao(rel());
     expect(p.schema).toBe(SCHEMA_PRONTIDAO_PUBLICADA);
     expect(p.head).toHaveLength(40);
-    expect(p.bloqueios_producao).toEqual(["CALIBRACAO_HUMANA"]);
+    expect(p.bloqueios_producao).toEqual(["CERTIFICADO_RELEASE"]);
   });
 
   it("NÃO leva log, caminho de arquivo nem nada além do necessário", () => {
@@ -48,7 +52,11 @@ describe("o que NÃO pode ser publicado", () => {
   });
 
   it("relatório sem release_producao", () => {
-    expect(() => payloadDaProntidao(rel({ estados: { implementacao_local: "X" } }))).toThrow(/release_producao/);
+    expect(() => payloadDaProntidao(rel({ estados: { implementacao_local: "X", pre_canary: "Y" } }))).toThrow(/release_producao/);
+  });
+
+  it("relatório sem pre_canary", () => {
+    expect(() => payloadDaProntidao(rel({ estados: { implementacao_local: "X", release_producao: "Z" } }))).toThrow(/pre_canary/);
   });
 
   it("entrada ausente", () => {

@@ -69,6 +69,17 @@ describe("displayProjectStatus", () => {
     expect(r.pulse).toBe(true);
   });
 
+  it("online + fundação ativa mostra a fase real, não 'Escrevendo'", () => {
+    const r = displayProjectStatus({
+      projectStatus: "rascunho",
+      hasActiveJob: true,
+      workerOnline: true,
+      activeJobType: "criar_fundacao",
+    });
+    expect(r.label).toBe("Fundação");
+    expect(r.pulse).toBe(true);
+  });
+
   it("sem job ativo cai no mapeamento base", () => {
     expect(displayProjectStatus({ projectStatus: "pronto", hasActiveJob: false, workerOnline: true }).label).toBe("Pronto");
     expect(displayProjectStatus({ projectStatus: "fundacao", hasActiveJob: false, workerOnline: false }).label).toBe("Fundação");

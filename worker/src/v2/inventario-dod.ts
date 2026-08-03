@@ -57,6 +57,8 @@ export const INVENTARIO_DOD: GarantiaDoD[] = [
   { fatia: "E", escopo: "local", id: "E-01", garantia: "campo condicional aceita `não se aplica` explícito, nunca default silencioso", testes: ["src/v2/briefing-aprovacao.test.ts"] },
   { fatia: "E", escopo: "local", id: "E-02", garantia: "briefing contraditório ou não aprovado não gera fundação", testes: ["src/v2/briefing-aprovacao.test.ts"] },
   { fatia: "E", escopo: "local", id: "E-03", garantia: "briefing aprovado é persistido com hash e sem duplicidade com o wizard", testes: ["src/v2/briefing-aprovacao.test.ts"] },
+  { fatia: "E", escopo: "local", id: "E-04", garantia: "entrevista V2 concluída não enfileira fundação antes da aprovação autoral", testes: ["src/entrevista.test.ts"] },
+  { fatia: "E", escopo: "local", id: "E-05", garantia: "worker consome briefing_aprovado como coluna real e falha se ela não foi selecionada", testes: ["src/v2/fluxo-aprovacao.test.ts"] },
 
   // --- F/D6: fundação -------------------------------------------------------
   { fatia: "F", escopo: "local", id: "F-01", garantia: "fundação sem arco ou invariância explícita do protagonista é bloqueada", testes: ["src/v2/portao-fundacao.test.ts"] },
@@ -71,12 +73,16 @@ export const INVENTARIO_DOD: GarantiaDoD[] = [
   // --- H: memória derivada da prosa ----------------------------------------
   { fatia: "H", escopo: "local", id: "H-01", garantia: "promessa surgida apenas na prosa entra no ledger e exige payoff", testes: ["src/v2/memoria-prosa.test.ts"] },
   { fatia: "H", escopo: "local", id: "H-02", garantia: "conflito entre ficha e prosa gera evento explícito, nunca sobrescrita silenciosa", testes: ["src/v2/memoria-prosa.test.ts"] },
+  { fatia: "H", escopo: "local", id: "H-03", garantia: "memória de prosa incompleta bloqueia o fechamento do livro", testes: ["src/v2/fiacao-decisoria.test.ts"] },
+  { fatia: "H", escopo: "local", id: "H-04", garantia: "reprocessamento bem-sucedido resolve o bloqueio de memória incompleta", testes: ["src/v2/gravador.test.ts"] },
 
   // --- I: repetição ---------------------------------------------------------
   { fatia: "I", escopo: "local", id: "I-01", garantia: "repetição literal distante é detectada", testes: ["src/v2/repeticao.test.ts"] },
   { fatia: "I", escopo: "local", id: "I-02", garantia: "revelação parafraseada é detectada", testes: ["src/v2/repeticao.test.ts"] },
   { fatia: "I", escopo: "local", id: "I-03", garantia: "maneirismo repetido em cinco capítulos gera sinal acumulativo", testes: ["src/v2/repeticao.test.ts"] },
   { fatia: "I", escopo: "local", id: "I-04", garantia: "maneirismo não calibrado NÃO bloqueia automaticamente", testes: ["src/v2/repeticao.test.ts"] },
+  { fatia: "I", escopo: "local", id: "I-05", garantia: "repetição semântica altera o veredito no pipeline de produção", testes: ["src/v2/fiacao-decisoria.test.ts"] },
+  { fatia: "I", escopo: "local", id: "I-06", garantia: "maneirismo acumulado chega aos prompts de escritor e revisor", testes: ["src/v2/fiacao-decisoria.test.ts"] },
 
   // --- J: revisor, auditor e idioma ----------------------------------------
   { fatia: "J", escopo: "local", id: "J-01", garantia: "parecer abaixo do piso não aprova", testes: ["src/v2/revisor.test.ts"] },
@@ -87,6 +93,8 @@ export const INVENTARIO_DOD: GarantiaDoD[] = [
   { fatia: "K", escopo: "local", id: "K-01", garantia: "alteração no capítulo 4 reabre apenas os capítulos dependentes", testes: ["src/v2/revalidacao.test.ts"] },
   { fatia: "K", escopo: "local", id: "K-02", garantia: "revalidação não reescreve capítulo que continua válido", testes: ["src/v2/revalidacao.test.ts"] },
   { fatia: "K", escopo: "local", id: "K-03", garantia: "cascata acima do teto aciona decisão humana", testes: ["src/v2/revalidacao.test.ts"] },
+  { fatia: "K", escopo: "local", id: "K-04", garantia: "onda transitiva reavalia todos e reescreve somente os reprovados", testes: ["src/v2/revalidacao.test.ts"] },
+  { fatia: "K", escopo: "local", id: "K-05", garantia: "Meta9 executa revalidação transitiva no pipeline e preserva dependente válido", testes: ["src/v2/meta9.test.ts"] },
 
   // --- L: canário e invalidação --------------------------------------------
   { fatia: "L", escopo: "local", id: "L-01", garantia: "o perfil de voz deriva do snapshot aprovado do canário", testes: ["src/v2/canario-snapshot.test.ts"] },
@@ -111,6 +119,7 @@ export const INVENTARIO_DOD: GarantiaDoD[] = [
   // --- O: interface ---------------------------------------------------------
   { fatia: "O", escopo: "local", id: "O-01", garantia: "a tela mostra promessas, pistas, ledger, gates, estratégias tentadas e afetados por reescrita", testes: ["../src/lib/painelEditorial.test.ts"] },
   { fatia: "O", escopo: "local", id: "O-02", garantia: "a interface não promete o que o motor não cumpre (reescrita de capítulo aprovado)", testes: ["../src/lib/painelEditorial.test.ts"] },
+  { fatia: "O", escopo: "local", id: "O-03", garantia: "interface só habilita fundação V2 com entrevista, aprovação, autorização e release válidos", testes: ["../src/lib/precondicoesFundacaoV2.test.ts"] },
 
   // --- P/D4: histórico e RLS -----------------------------------------------
   { fatia: "P", escopo: "local", id: "P-01", garantia: "histórico protegido não aceita update/delete comum", testes: ["src/v2/historico.test.ts"] },
@@ -120,6 +129,15 @@ export const INVENTARIO_DOD: GarantiaDoD[] = [
   // --- Q: prontidão ---------------------------------------------------------
   { fatia: "Q", escopo: "local", id: "Q-01", garantia: "testes rodam da raiz e de `worker` sem depender do diretório corrente", testes: ["src/v2/rotulagem-csv.test.ts"] },
   { fatia: "Q", escopo: "local", id: "Q-02", garantia: "ciclo completo interface → worker → gates → Storage → Leitor passa com mock", testes: ["src/v2/integracao-mock.test.ts"] },
+  // --- R: fila de custo por capítulo (cascata, pins, versão do código) -------
+  { fatia: "R", escopo: "local", id: "R-01", garantia: "a decisão da cascata ACRESCENTA violação que a triagem descartou (não só derruba)", testes: ["src/v2/cascata.test.ts"] },
+  { fatia: "R", escopo: "local", id: "R-02", garantia: "`veredito_sugerido` da decisão não derruba gate universal", testes: ["src/v2/cascata-pipeline.test.ts"] },
+  { fatia: "R", escopo: "local", id: "R-03", garantia: "`MODELO_POR_PAPEL` é conjunto fechado: exceção nova quebra o teste", testes: ["src/v2/cascata-pipeline.test.ts"] },
+  { fatia: "R", escopo: "local", id: "R-04", garantia: "o worker carimba SHA e horário do código com que subiu", testes: ["src/versao-codigo.test.ts"] },
+  { fatia: "R", escopo: "local", id: "R-05", garantia: "worktree suja é declarada, nunca escondida atrás do SHA", testes: ["src/versao-codigo.test.ts"] },
+  { fatia: "R", escopo: "local", id: "R-06", garantia: "worker no mesmo SHA do repositório, worktree limpa, NÃO bloqueia", testes: ["../src/lib/versaoWorker.test.ts"] },
+  { fatia: "R", escopo: "local", id: "R-07", garantia: "worker em SHA diferente do repositório bloqueia, nomeando os dois SHAs", testes: ["../src/lib/versaoWorker.test.ts"] },
+  { fatia: "R", escopo: "local", id: "R-08", garantia: "interface rejeita prontidão de outro SHA e build feito sobre arquivos rastreados modificados", testes: ["../src/lib/autorizacaoV2.test.ts"] },
 ];
 
 /** Fatias que precisam estar comprovadas para a implementação ser aprovada. */
