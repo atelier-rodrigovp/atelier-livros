@@ -11,10 +11,16 @@ afirmação vem com a saída do comando que a sustenta.
 |---|---|---|
 | 1 | Uma só implementação da regra | ✅ `gerar-evidencia.ts` importa `fingerprintsAtuais`; `listar`/`hashDe`/`fingerprints` locais deixaram de existir |
 | 2 | Teste que falha se uma segunda voltar | ✅ 4 testes; **prova negativa: 2 vermelhos**, e o teste **nomeia o arquivo culpado** |
-| 3 | CI em push para master | ✅ diff colado |
+| 3 | CI em push para master | ✅ diff colado; **rodou de fato** (run `30820496520`) |
 | 4 | Impressões idênticas a `bebac0e` | ✅ os quatro pares, medidos antes e depois |
 
 **Terceira cópia da regra: não existe.** Varredura colada no F0.
+
+> **Achado que muda uma conclusão do PASSO 1:** ligar o CI no master revelou que o
+> gate de evidência vencida **nunca dispara no CI** — `.evidencias/` é git-ignored
+> e não chega ao runner, então lá as evidências são *ausentes* (que não reprova),
+> não *vencidas*. Eu havia previsto o contrário neste mesmo relatório e a medição
+> me desmentiu. Detalhe e opções de conserto no achado nº 1 da seção final.
 
 ---
 
@@ -254,11 +260,31 @@ $ npm run typecheck
    workflow_dispatch: {}
 ```
 
-**Consequência imediata e esperada:** este próprio commit vai disparar CI no
-`master`, e o CI **vai reprovar** com `GATE_EXIT=2` / `EVIDENCIA_EXTERNA_VENCIDA`,
-porque as cinco evidências continuam carimbadas em `928938d`. Está correto: é o
-gate fazendo exatamente o que foi construído para fazer. Não contornei, não
-adicionei exceção, não fiz o gate ignorar. Ver "decisão pendente" no fim.
+**O CI passou a rodar — e o resultado desmentiu a minha previsão.** Eu havia
+escrito aqui que ele reprovaria com `EVIDENCIA_EXTERNA_VENCIDA`. Rodou e passou
+**verde**:
+
+```
+$ gh run list --branch master --limit 3
+in_progress  fix(v2): escritor e leitor da impressão…  CI  master  push  30820496520  2026-08-03T13:59:02Z
+
+$ gh run view 30820496520 --json conclusion,status,headSha
+conclusion=success status=completed sha=d2a909a6c5e788a8a01c840fe0f4bb68d31b7c0e
+```
+
+O passo do gate, no log do CI:
+
+```
+Gate da Engine V2 (pré-canário ou release certificada)
+  PRE-CANÁRIO: DEPLOY TÉCNICO APROVADO
+  deploy técnico pré-canário permitido; release literária permanece fail-closed até certificado válido
+  - bloqueio preservado: certificado não encontrado em /home/runner/work/atelier-livros/atelier-livros/worker/release/engine-v2.json
+```
+
+A causa está medida no achado nº 1 da seção final: `.evidencias/` é git-ignored e
+**nunca chega ao runner**, então lá as cinco evidências são *ausentes*, não
+*vencidas* — e ausente não reprova, por decisão deliberada do PASSO 1. O gate está
+correto; o que ele não tem, no CI, é o que julgar.
 
 ---
 
@@ -334,32 +360,151 @@ EXIT_LINT=0
 mesmos pré-existentes (`react-refresh/only-export-components` em `CoverArt.tsx`,
 `ui/badge.tsx`, `ui/button.tsx`).
 
-<!-- CONGELAMENTO -->
+### Commit e push
 
-<!-- PRONTIDAO -->
+```
+$ git rev-parse HEAD ; git log --oneline -1
+d2a909a6c5e788a8a01c840fe0f4bb68d31b7c0e
+d2a909a fix(v2): escritor e leitor da impressão do código voltam a ser a mesma régua
+
+$ git push origin master
+   df21cc4..d2a909a  master -> master
+
+$ git rev-parse HEAD origin/master ; git rev-list --count origin/master..HEAD
+d2a909a6c5e788a8a01c840fe0f4bb68d31b7c0e
+d2a909a6c5e788a8a01c840fe0f4bb68d31b7c0e
+0
+```
+
+Quatro arquivos, +524/−37 — nenhum deles entra nas quatro impressões:
+
+```
+ .github/workflows/ci.yml          |   5 +
+ RELATORIO-PASSO1-5.md             | 393 ++++++++++++++++++++++++++++++++++++++
+ worker/scripts/gerar-evidencia.ts |  47 +----
+ worker/src/v2/regua-unica.test.ts | 116 +++++++++++
+```
+
+### Worker de produção
+
+```
+$ tail -1 worker/worker.log
+[2026-08-03T13:59:58.817Z] [worker pc-rodrigo] código: d2a909a (worktree limpa) — início 2026-08-03T13:59:57.423Z
+```
+
+### Prontidão regenerada
+
+```
+head: d2a909a6c5e788a8a01c840fe0f4bb68d31b7c0e
+gerado_em: 2026-08-03T14:04:06.853Z
+versao_worker: {"ok":true,"evidencia":"worker roda o código do repositório (d2a909a)"}
+prova_literaria: PROVA_LITERARIA_NAO_EXECUTADA
+bloqueios: 5 | nao_comprovados: 5
+EXIT_PRONTIDAO=1
+```
+
+Os 5 bloqueios continuam sendo as evidências vencidas — e é bom que continuem:
+**a prontidão local enxerga o que o CI não enxerga.**
+
+```
+--- VERIFICAÇÃO EXTERNA (fora do alcance desta máquina) ---
+  [FALHA] migrações aplicadas e verificadas no banco real — fingerprints.migrations_source_hash mudou desde a verificação · fingerprints.contratos_hash mudou desde a verificação · fingerprints.worker_hash mudou desde a verificação · fingerprints.interface_hash mudou desde a verificação
+  [FALHA] fluxo real interface → worker → Storage com download conferido — (idem)
+```
+
+Estados formais, completos:
+
+```
+  implementacao_local IMPLEMENTACAO_LOCAL_APROVADA
+  regressao_local     REGRESSAO_LOCAL_APROVADA
+  integracao_mock     INTEGRACAO_MOCK_APROVADA
+  acuracia            CORPUS_AUTOMATICO_PRONTO_PARA_LAB
+  migracoes_remotas   MIGRACOES_REMOTAS_NAO_COMPROVADAS
+  integracao_real     INTEGRACAO_REAL_NAO_COMPROVADA
+  ui_autenticada      UI_AUTENTICADA_NAO_COMPROVADA
+  provedor_real       PROVEDOR_REAL_NAO_COMPROVADO
+  papeis_reais        PAPEIS_REAIS_NAO_COMPROVADOS
+  pre_canary          PRE_CANARY_BLOQUEADO: MIGRACOES_REMOTAS, INTEGRACAO_REAL, DOWNLOAD_AUTENTICADO, PROVEDOR_REAL, ONZE_PAPEIS_E_CASCATA_REAL
+  release_producao    RELEASE_PRODUCAO_BLOQUEADO: MIGRACOES_REMOTAS, INTEGRACAO_REAL, DOWNLOAD_AUTENTICADO, PROVEDOR_REAL, ONZE_PAPEIS_E_CASCATA_REAL, CERTIFICADO_RELEASE
+  canarios_novos      BLOQUEADOS: MIGRACOES_REMOTAS, INTEGRACAO_REAL, DOWNLOAD_AUTENTICADO, PROVEDOR_REAL, ONZE_PAPEIS_E_CASCATA_REAL
+  projeto             PROJETO_NAO_AUTORIZADO (por projeto; consulte engine_autorizacoes_v2)
+  prova_literaria     PROVA_LITERARIA_NAO_EXECUTADA
+
+Bloqueios: 5 · Não comprovados: 5
+```
+
+---
+
+> ## CODIGO CONGELADO EM `d2a909a6c5e788a8a01c840fe0f4bb68d31b7c0e`
+>
+> **O PASSO 2 deve provar ESTE commit.**
+>
+> **As quatro impressões NÃO mudaram em relação a `bebac0e`** (medidas acima, no
+> F4). O congelamento de `bebac0e` **continua válido**: `d2a909a` é apenas o
+> ponteiro atual. Uma evidência gerada contra qualquer um dos dois vale para os
+> dois, porque a caducidade é por fingerprint e não por HEAD.
+>
+> Use `d2a909a` porque é onde `versao_worker` fica verde e é o que o worker de
+> produção executa agora.
 
 ---
 
 ## O que ficou pior ou não fechou
 
-### 1. O CI vai reprovar — agora também no master, e de propósito
+### 1. ACHADO — o gate de evidência vencida NUNCA dispara no CI
 
-Esta é a consequência combinada da TAREFA C do PASSO 1 (gate enxerga evidência
-vencida) com o F3 de hoje (CI roda no master). Até o PASSO 2 regenerar as
-evidências, **todo push no master vai ficar vermelho** com:
+**Minha previsão estava errada e a medição desmentiu.** Eu escrevia, tanto no
+relatório do PASSO 1 quanto no rascunho deste, que o CI reprovaria por evidência
+vencida. Ligar o CI no master permitiu medir, e ele passou **verde**.
+
+A causa, verificada:
 
 ```
-EVIDÊNCIA EXTERNA VENCIDA — o código mudou desde a verificação
-- migracoes_remotas (testou 928938d): fingerprints.* mudou desde a verificação
-GATE_EXIT=2
+$ grep -n "evidencias" .gitignore
+46:.evidencias/
+
+$ git ls-files .evidencias/
+(vazio = não versionado)
 ```
 
-É o comportamento correto e o motivo de o gate existir. **Não contornei.**
+`.evidencias/` é git-ignored — decisão deliberada e correta, porque o remoto é
+público e a evidência carrega `project_id`, caminhos de Storage e log de execução.
+Consequência: **a pasta nunca existe no runner do CI.** Lá, as cinco evidências
+não são *vencidas*, são *ausentes* — e ausente não reprova, por decisão explícita
+do PASSO 1 (`evidência AUSENTE não é o mesmo que vencida`).
 
-**Decisão pendente do autor:** o `master` fica com CI vermelho até o PASSO 2. As
-opções são (a) seguir assim — recomendado, é honesto e temporário; ou (b) rodar o
-PASSO 2 antes de qualquer outro commit no master. Não há terceira opção que não
-seja afrouxar o gate, e isso está fora das fronteiras.
+O gate está correto. O que falta a ele, no CI, é **o objeto do julgamento**.
+
+Isto significa que a TAREFA C do PASSO 1 protege **menos** do que eu declarei lá.
+Onde ela de fato funciona:
+
+| Onde | Enxerga evidência vencida? |
+|---|---|
+| `npm run prontidao` (máquina do autor) | **sim** — foi assim que os 5 bloqueios apareceram |
+| `v2-verificar-release.ts` rodado localmente | **sim** — `GATE_EXIT=2`, medido no PASSO 1 |
+| CI (GitHub Actions) | **não** — `.evidencias/` não chega ao runner |
+
+**Não "consertei" isto**, e a razão é que qualquer conserto é decisão de
+arquitetura sua, não minha:
+
+- **(a) versionar `.evidencias/`** — resolveria, mas reverte a decisão de não expor
+  `project_id` e logs num remoto público;
+- **(b) publicar só os fingerprints** (um resumo sem dados sensíveis, versionado) e
+  o gate do CI conferir esse resumo contra o código — resolve sem expor nada, mas é
+  um artefato novo;
+- **(c) aceitar que este gate é local** e documentá-lo como tal — barato, honesto,
+  e deixa o CI sem essa proteção.
+
+Minha recomendação é **(b)**, mas está fora do escopo desta tarefa e das
+fronteiras (`worker/src` está proibido aqui). **Decisão pendente do autor.**
+
+### 1b. O que isso muda para o PASSO 2
+
+Nada do que foi consertado hoje depende do CI: a unificação da régua vale para o
+escritor rodando na sua máquina, que é onde o PASSO 2 vai rodar. O efeito prático
+de F3 é menor do que o enunciado supunha — o CI agora roda no master (bom, pega
+teste/typecheck/build/lint quebrados), mas não é ele que vai barrar evidência
+vencida.
 
 ### 2. Este passo NÃO conserta as evidências que já existem
 
