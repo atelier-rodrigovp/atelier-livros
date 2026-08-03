@@ -255,7 +255,7 @@ function compararAvaliacao(a: AvaliacaoLivro, b: AvaliacaoLivro, meta: number): 
 }
 
 /** Lê os capítulos 1..total do disco (na ordem). Lança se algum arquivo faltar. */
-function lerCapitulos(dirManuscrito: string, total: number): { numero: number; texto: string; palavras: number }[] {
+export function lerCapitulos(dirManuscrito: string, total: number): { numero: number; texto: string; palavras: number }[] {
   const out: { numero: number; texto: string; palavras: number }[] = [];
   for (let n = 1; n <= total; n++) {
     const caminho = path.join(dirManuscrito, nomeCapitulo(n));
@@ -497,7 +497,7 @@ function resumirFicha(ficha: SceneSpec): Record<string, unknown> {
   };
 }
 
-async function avaliarLivro(
+export async function avaliarLivro(
   deps: DepsMeta9,
   meta: number,
   capitulos: { numero: number; texto: string; palavras: number }[],

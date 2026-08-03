@@ -34,6 +34,7 @@ import {
   type BriefingAutor,
 } from "./briefing.js";
 import { garantirEdicaoOrigem, marcarEdicaoEmRevisao, sincronizarCapitulosAprovados } from "./capitulos-db.js";
+import { gravarCustoV2Projeto } from "./custo-persistencia.js";
 import {
   aplicarEdicaoEstrutural,
   fundirTextosCapitulos,
@@ -209,18 +210,25 @@ export async function executarJobRoteado(
   if (job.project_id && TIPOS_V2.has(job.tipo)) {
     const modo = await engineModeDoProjeto(job.project_id);
     if (modo === "v2") {
-      if (job.tipo === "criar_fundacao") return executarFundacaoV2Job(job);
-      if (job.tipo === "refinar_fundacao") return executarRefinarFundacaoV2(job);
-      if (job.tipo === "avaliar") return executarAvaliarV2(job);
-      if (job.tipo === "revisar") {
-        // Revisão V2 opera na edição de ORIGEM; tradução segue o pipeline V1.
-        if (await edicaoEhTraducao(job.edition_id)) {
-          registrarDesvioV1(job, "revisão de tradução não tem pipeline V2");
-          return executarV1(job, hb);
+      // Custo por papel/capítulo é agregado ao FIM de toda execução V2, inclusive
+      // quando ela falha: o trabalho que falhou consumiu cota igual, e um custo
+      // que só existisse no caminho feliz mediria o livro pela metade.
+      try {
+        if (job.tipo === "criar_fundacao") return await executarFundacaoV2Job(job);
+        if (job.tipo === "refinar_fundacao") return await executarRefinarFundacaoV2(job);
+        if (job.tipo === "avaliar") return await executarAvaliarV2(job);
+        if (job.tipo === "revisar") {
+          // Revisão V2 opera na edição de ORIGEM; tradução segue o pipeline V1.
+          if (await edicaoEhTraducao(job.edition_id)) {
+            registrarDesvioV1(job, "revisão de tradução não tem pipeline V2");
+            return await executarV1(job, hb);
+          }
+          return await executarRevisarV2(job);
         }
-        return executarRevisarV2(job);
+        return await executarEscritaV2(job);
+      } finally {
+        await gravarCustoV2Projeto(job.project_id);
       }
-      return executarEscritaV2(job);
     }
   }
   // Projeto V2 cujo TIPO de job não tem implementação V2 (gerar_epub, traduzir,

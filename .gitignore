@@ -45,6 +45,10 @@ __pycache__/
 # log de execucao. O remoto e PUBLICO — nunca versionar.
 .evidencias/
 
+# Prova literaria: carrega project id, sha256 do manuscrito e o relatorio
+# editorial do LIVRO. Mesma razao da pasta acima — o remoto e publico.
+.prova-literaria/
+
 # Rotulagem humana PREENCHIDA (julgamento do autor sobre trechos da obra).
 # O template vazio fica versionado; o arquivo respondido, nao.
 calibracao-humana/*.local.csv

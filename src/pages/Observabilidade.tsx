@@ -4,6 +4,8 @@ import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
 import { useWorkerStatus } from "@/hooks/useWorkerStatus";
 import { resolveOperationalState, type ProgressoEscrita } from "@/lib/resolveOperationalState";
+import { CustoPorCapitulo, QuebraPorModelo, type CustoV2Payload } from "@/components/PainelCusto";
+import { fmtTok } from "@/lib/formato";
 import type { JobStatus } from "@/lib/types";
 
 // Espelha worker/src/telemetria.ts (payload da linha jobs tipo='telemetria').
@@ -37,7 +39,6 @@ type JobAtivo = { project_id: string; status: string; progresso: Progresso | nul
 // Projeto EM PRODUÇÃO agora: escrevendo/revisão OU com job escrever_livro ativo.
 type Vivo = { projectId: string; titulo: string; projStatus: string; workerOnline: boolean; job?: JobAtivo; tel?: Telemetria };
 
-const fmtTok = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}k` : String(n));
 const rotuloPapel = (p: string) =>
   p.replace("orquestrador/inline:", "orquestrador ").replace("subagente:", "subagente ")
     .replace("livro-", "").replace(/:/g, " ");
@@ -154,14 +155,17 @@ export default function Observabilidade() {
   const { online } = useWorkerStatus();
   const [rows, setRows] = useState<Row[]>([]);
   const [vivos, setVivos] = useState<Vivo[]>([]);
+  const [custosV2, setCustosV2] = useState<{ projectId: string; titulo: string; custo: CustoV2Payload }[]>([]);
   const [carregando, setCarregando] = useState(true);
 
   const carregar = useCallback(async () => {
-    const [{ data: tels }, { data: projs }, { data: ativos }] = await Promise.all([
+    const [{ data: tels }, { data: projs }, { data: ativos }, { data: custos }] = await Promise.all([
       supabase.from("jobs").select("project_id,payload").eq("tipo", "telemetria"),
       supabase.from("projects").select("id,titulo,status"),
       supabase.from("jobs").select("project_id,status,progresso,created_at")
         .eq("tipo", "escrever_livro").in("status", ["running", "queued", "paused"]).order("created_at", { ascending: false }),
+      // Custo por papel/capítulo da Engine V2 (linha jobs tipo='custo_v2').
+      supabase.from("jobs").select("project_id,payload").eq("tipo", "custo_v2"),
     ]);
     const titulo: Record<string, string> = {};
     const projStatus: Record<string, string> = {};
@@ -175,6 +179,13 @@ export default function Observabilidade() {
     }
     out.sort((a, b) => b.tel.custo_proxy_usd - a.tel.custo_proxy_usd);
     setRows(out);
+
+    const cst: { projectId: string; titulo: string; custo: CustoV2Payload }[] = [];
+    for (const c of (custos as { project_id: string; payload: CustoV2Payload }[]) ?? []) {
+      if (c.payload?.totais) cst.push({ projectId: c.project_id, titulo: titulo[c.project_id] ?? "—", custo: c.payload });
+    }
+    cst.sort((a, b) => b.custo.totais.total - a.custo.totais.total);
+    setCustosV2(cst);
 
     // Job ativo por projeto (running vence queued; o mais recente).
     const jobOf: Record<string, JobAtivo> = {};
@@ -293,10 +304,32 @@ export default function Observabilidade() {
                       )}
                     </p>
                   )}
+
+                  {/* Quebra por modelo: `telemetria.ts` já calculava e persistia,
+                      e não aparecia em tela nenhuma. */}
+                  <QuebraPorModelo porModelo={r.tel.por_modelo} />
                 </div>
               );
             })}
           </div>
+
+          {custosV2.length > 0 && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold tracking-tight">Quanto custa um capítulo — Engine V2</h2>
+              <p className="text-[11px] text-muted-foreground">
+                Medido no ledger <code>engine_runs</code> (tokens por papel e por capítulo), não em transcript.
+                A projeção do livro completo é extrapolação da média medida — vem rotulada como tal.
+              </p>
+              <div className="grid gap-4 lg:grid-cols-2">
+                {custosV2.map((c) => (
+                  <div key={c.projectId}>
+                    <p className="mb-1 truncate text-sm font-medium">{c.titulo}</p>
+                    <CustoPorCapitulo custo={c.custo} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <p className="text-[11px] text-muted-foreground">
             Custo-proxy pondera opus/sonnet/haiku só para ranquear papéis (não é fatura). Paralelizar (max_paralelo) aumenta throughput, não a cota semanal.
           </p>

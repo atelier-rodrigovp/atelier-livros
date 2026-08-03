@@ -12,7 +12,6 @@
 //      npm run prontidao -- --ciclo (inclui o nível 3)
 
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,9 +20,11 @@ import { CAMPOS_DECISORIOS, EXCECOES_NAO_DECISORIAS } from "../src/v2/campos-dec
 import { interpretarRelatorioVitest, type ExecucaoVitest, type RelatorioBruto } from "../src/v2/coleta-vitest.js";
 import { conferirDod, resumoConferencia, type ConferenciaDod } from "../src/v2/dod-conferencia.js";
 import { capturarHead, rodarComando } from "../src/v2/execucao.js";
-import { DIR_EVIDENCIAS, validarEvidencia, type FingerprintsCodigo, type TipoEvidencia } from "../src/v2/evidencia-externa.js";
+import { type TipoEvidencia } from "../src/v2/evidencia-externa.js";
+import { avaliarEvidenciasExternas } from "../src/v2/fingerprints.js";
 import { resumoLimitacoes } from "../src/limitacoes-conhecidas.js";
 import { fatiasDoInventario, INVENTARIO_DOD } from "../src/v2/inventario-dod.js";
+import { DIR_PROVA_LITERARIA, derivarEstadoProvaLiteraria, type EstadoProvaLiteraria } from "../src/v2/prova-literaria.js";
 import { compararVersaoWorker } from "../../src/lib/versaoWorker.js";
 import { workerOnline } from "../../src/lib/status.js";
 import { verificarReleaseAtual } from "../src/v2/release.js";
@@ -74,6 +75,8 @@ interface Relatorio {
   regressao: { itens: Item[] };
   /** O codigo que o worker no ar executa, comparado com o HEAD acima. */
   versao_worker: Item;
+  /** A única medição sobre o LIVRO: nota, piso e veredito por projeto provado. */
+  prova_literaria: { estado: string; itens: Item[] };
   externas: { itens: Item[] };
   /** Dívida reportada mas não bloqueante (bundle, lint warning). */
   avisos: string[];
@@ -555,96 +558,125 @@ async function versaoDoWorkerNoAr(): Promise<Item> {
 // Evidência externa — o que a máquina local não pode provar
 // ---------------------------------------------------------------------------
 
-/** Hash estável de um conjunto de arquivos, para carimbar a evidência. */
-function hashDe(arquivos: string[]): string {
-  const h = createHash("sha256");
-  for (const a of arquivos.sort()) {
-    h.update(a);
-    try {
-      h.update(readFileSync(a));
-    } catch {
-      h.update("<ausente>");
-    }
-  }
-  return h.digest("hex").slice(0, 16);
-}
+// A régua de fingerprint mora em `src/v2/fingerprints.ts` desde que o gate do CI
+// passou a precisar dela também: enquanto era privada deste script, o CI não
+// tinha como recusar evidência vencida — e passou verde com cinco caducas.
 
-function listarArquivos(dir: string, filtro: RegExp): string[] {
-  if (!existsSync(dir)) return [];
-  const saida: string[] = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) saida.push(...listarArquivos(p, filtro));
-    else if (filtro.test(e.name)) saida.push(p);
+// ---------------------------------------------------------------------------
+// Prova literária — a única medição sobre o LIVRO, e não sobre o sistema
+//
+// Este bloco existe porque o estado era a string "PROVA_LITERARIA_NAO_EXECUTADA"
+// escrita literalmente: uma constante que nenhuma execução mudava. Agora ele é
+// FUNÇÃO do artefato produzido por `v2-prova-literaria.ts`, com a mesma regra de
+// caducidade das evidências externas — prova de outro commit, ou sobre um
+// manuscrito que mudou, não vale.
+// ---------------------------------------------------------------------------
+
+/** sha256 do manuscrito consolidado do projeto, ou null se não estiver no disco. */
+async function manuscritoDoProjeto(projectId: string): Promise<string | null> {
+  try {
+    const { projDir } = await import("../src/lib.js");
+    const caminho = path.join(projDir(projectId), "MANUSCRITO-MESTRE.md");
+    if (!existsSync(caminho)) return null;
+    const { hashText } = await import("../src/quality-state.js");
+    return hashText(readFileSync(caminho, "utf8"));
+  } catch {
+    // WORK_DIR indisponível: ausência de prova, nunca aprovação por omissão.
+    return null;
   }
-  return saida;
 }
 
 /**
- * Impressao do CODIGO. Nao inclui o commit: a evidencia caduca por fingerprint,
- * nao por HEAD - senao commitar um README invalidaria uma verificacao remota que
- * continua valendo, que era a contradicao do modelo anterior.
+ * Varre `.prova-literaria/` e agrega. Fail-closed em dois sentidos: sem prova
+ * válida o estado é NAO_EXECUTADA, e uma única reprovação derruba o conjunto —
+ * um livro aprovado não compensa outro reprovado.
  */
-function fingerprintsAtuais(): FingerprintsCodigo {
-  const migracoes = listarArquivos(path.join(RAIZ, "supabase"), /\.sql$/);
-  return {
-    migrations_source_hash: hashDe(migracoes),
-    contratos_hash: hashDe(listarArquivos(path.join(DIR_WORKER, "skills-v2"), /contrato\.json$/)),
-    worker_hash: hashDe(listarArquivos(path.join(DIR_WORKER, "src"), /\.ts$/).filter((f) => !/\.test\.ts$/.test(f))),
-    interface_hash: hashDe(listarArquivos(path.join(RAIZ, "src"), /\.tsx?$/).filter((f) => !/\.test\.tsx?$/.test(f))),
-  };
+async function provaLiteraria(): Promise<{ estado: EstadoProvaLiteraria | string; itens: Item[] }> {
+  const dir = path.join(RAIZ, DIR_PROVA_LITERARIA);
+  const itens: Item[] = [];
+  let arquivos: string[] = [];
+  try {
+    arquivos = readdirSync(dir).filter((f) => f.endsWith(".json"));
+  } catch {
+    arquivos = [];
+  }
+  if (arquivos.length === 0) {
+    itens.push({
+      item: "prova literária (qualidade do LIVRO)",
+      ok: null,
+      evidencia: `nenhuma prova em ${DIR_PROVA_LITERARIA}/ — gere com \`npx tsx scripts/v2-prova-literaria.ts <project_id>\``,
+    });
+    return { estado: "PROVA_LITERARIA_NAO_EXECUTADA", itens };
+  }
+
+  const estados: EstadoProvaLiteraria[] = [];
+  for (const arquivo of arquivos.sort()) {
+    const projectId = arquivo.replace(/\.json$/, "");
+    let doc: unknown = null;
+    try {
+      doc = JSON.parse(readFileSync(path.join(dir, arquivo), "utf8"));
+    } catch (e) {
+      itens.push({ item: `prova literária — ${projectId}`, ok: false, evidencia: `prova ilegível: ${(e as Error).message}` });
+      estados.push("PROVA_LITERARIA_NAO_EXECUTADA");
+      continue;
+    }
+    const r = derivarEstadoProvaLiteraria(doc, {
+      head: capturarHead(RAIZ),
+      manuscrito_sha256: await manuscritoDoProjeto(projectId),
+    });
+    estados.push(r.estado);
+    const nota = (doc as { nota?: number; meta?: number; floor?: { nota?: number; dimensao?: string } });
+    itens.push({
+      item: `prova literária — ${projectId}`,
+      // Reprovada é FALHA (o livro não atingiu a meta), não ausência de prova.
+      ok: r.estado === "PROVA_LITERARIA_APROVADA" ? true : r.estado === "PROVA_LITERARIA_REPROVADA" ? false : null,
+      evidencia:
+        r.estado === "PROVA_LITERARIA_APROVADA"
+          ? `nota ${nota.nota} (meta ${nota.meta}), piso ${nota.floor?.nota} em ${nota.floor?.dimensao}`
+          : r.motivos.join(" · "),
+    });
+  }
+
+  // Pior caso ganha: reprovada > não executada > aprovada.
+  const estado: EstadoProvaLiteraria = estados.includes("PROVA_LITERARIA_REPROVADA")
+    ? "PROVA_LITERARIA_REPROVADA"
+    : estados.includes("PROVA_LITERARIA_NAO_EXECUTADA")
+      ? "PROVA_LITERARIA_NAO_EXECUTADA"
+      : "PROVA_LITERARIA_APROVADA";
+  return { estado, itens };
 }
 
 /** Ref do projeto Supabase esperado. Evidencia de outro projeto e recusada. */
 const PROJETO_SUPABASE_ESPERADO = process.env.SUPABASE_PROJECT_REF ?? "dzgbatsecbkjmucmigjv";
 
-const TIPOS_EXTERNOS: { tipo: TipoEvidencia; rotulo: string }[] = [
-  { tipo: "migracoes_remotas", rotulo: "migrações aplicadas e verificadas no banco real" },
-  { tipo: "integracao_real", rotulo: "fluxo real interface → worker → Storage com download conferido" },
-  { tipo: "ui_autenticada", rotulo: "interface autenticada: abertura e download dos documentos V2" },
-  { tipo: "provedor_real", rotulo: "smoke do provedor real (sem escrita literária)" },
-  { tipo: "papeis_reais", rotulo: "11 papéis com modelo real e cascata em duas passadas" },
-];
-
 /**
- * Cada verificação externa é um documento versionado no repositório, vinculado
- * ao commit e aos hashes do que estava valendo. Ausente ou caduca = NÃO
- * COMPROVADA — que não é zero, não é sucesso e não certifica nada.
+ * Cada verificação externa é um documento vinculado ao commit e aos hashes do
+ * que estava valendo. Ausente ou caduca = NÃO COMPROVADA — que não é zero, não
+ * é sucesso e não certifica nada. A conferência em si é de
+ * `avaliarEvidenciasExternas`, a MESMA que o gate do CI usa.
  */
 function externas(): { itens: Item[]; aprovadas: Record<TipoEvidencia, boolean> } {
-  const fingerprints = fingerprintsAtuais();
-  const dir = path.join(RAIZ, DIR_EVIDENCIAS);
+  const avaliacoes = avaliarEvidenciasExternas({
+    raiz: RAIZ,
+    dirWorker: DIR_WORKER,
+    ambiente: "producao",
+    supabaseProjectRef: PROJETO_SUPABASE_ESPERADO,
+  });
   const itens: Item[] = [];
   const aprovadas = {} as Record<TipoEvidencia, boolean>;
-  for (const { tipo, rotulo } of TIPOS_EXTERNOS) {
-    const arquivo = path.join(dir, `${tipo}.json`);
-    if (!existsSync(arquivo)) {
-      aprovadas[tipo] = false;
-      itens.push({
-        item: rotulo,
-        ok: null,
-        evidencia: `sem evidência em ${DIR_EVIDENCIAS}/${tipo}.json — gere com o harness; JSON escrito à mão não certifica`,
-      });
-      continue;
-    }
-    let doc: unknown;
-    try {
-      doc = JSON.parse(readFileSync(arquivo, "utf8"));
-    } catch (e) {
-      aprovadas[tipo] = false;
-      itens.push({ item: rotulo, ok: false, evidencia: `evidência ilegível: ${e instanceof Error ? e.message : String(e)}` });
-      continue;
-    }
-    const v = validarEvidencia(doc, { tipo, ambiente: "producao", supabase_project_ref: PROJETO_SUPABASE_ESPERADO, fingerprints });
-    aprovadas[tipo] = v.valida;
+  for (const a of avaliacoes) {
+    aprovadas[a.tipo] = a.valida === true;
     itens.push({
-      item: rotulo,
+      item: a.rotulo,
       // Evidência presente e INVÁLIDA é bloqueio (alguém afirmou algo que não
       // se sustenta); evidência ausente é apenas ausência de prova.
-      ok: v.valida ? true : false,
-      evidencia: v.valida
-        ? `evidência válida — testou ${String((doc as { tested_code_commit?: string }).tested_code_commit ?? "?").slice(0, 7)}, fingerprints do código conferem`
-        : v.motivos.join(" · "),
+      ok: a.valida === null ? null : a.valida,
+      evidencia:
+        a.valida === true
+          ? `evidência válida — testou ${String(a.testouCommit ?? "?").slice(0, 7)}, fingerprints do código conferem`
+          : a.valida === null
+            ? `${a.motivos.join(" · ")} — gere com o harness; JSON escrito à mão não certifica`
+            : a.motivos.join(" · "),
     });
   }
   return { itens, aprovadas };
@@ -671,6 +703,7 @@ const reg = regressao(suiteRaiz);
 console.log("Evidências externas…\n");
 const ext = externas();
 const versaoWorker = await versaoDoWorkerNoAr();
+const prova = await provaLiteraria();
 const releaseAtual = verificarReleaseAtual();
 const certificadoExiste = existsSync(path.join(DIR_WORKER, "release", "engine-v2.json"));
 const certificadoRelease: Item = {
@@ -685,7 +718,7 @@ const certificadoRelease: Item = {
 
 const bloqueios: string[] = [];
 const naoComprovados: string[] = [];
-for (const i of [...n1.itens, ...n2.itens, ...n3.itens, ...reg.itens, versaoWorker, ...ext.itens, certificadoRelease]) {
+for (const i of [...n1.itens, ...n2.itens, ...n3.itens, ...reg.itens, versaoWorker, ...ext.itens, ...prova.itens, certificadoRelease]) {
   if (i.ok === false) bloqueios.push(`${i.item}: ${i.evidencia}`);
   if (i.ok === null) naoComprovados.push(`${i.item}: ${i.evidencia}`);
 }
@@ -763,13 +796,15 @@ const relatorio: Relatorio = {
       : "CANARIO_AUTORIZADO_PELO_GATE",
     // Autorização é por projeto e vive no banco: este comando não a infere.
     projeto: "PROJETO_NAO_AUTORIZADO (por projeto; consulte engine_autorizacoes_v2)",
-    prova_literaria: "PROVA_LITERARIA_NAO_EXECUTADA",
+    // Derivado do artefato assinado, nunca constante. Ver `provaLiteraria()`.
+    prova_literaria: prova.estado,
   },
   nivel1: { comando: n1.comando, itens: n1.itens, dod: n1.dod },
   nivel2: { itens: n2.itens },
   nivel3: { executado: n3.executado, itens: n3.itens },
   regressao: { itens: reg.itens },
   versao_worker: versaoWorker,
+  prova_literaria: { estado: prova.estado, itens: prova.itens },
   externas: { itens: ext.itens },
   avisos: reg.avisos,
   bloqueios_producao: bloqueiosProducao,
@@ -788,6 +823,7 @@ secao("NÍVEL 2 — acurácia", n2.itens);
 secao("NÍVEL 3 — ciclo real", n3.itens);
 secao("REGRESSÃO LOCAL (DoD completa)", reg.itens);
 secao("CÓDIGO EM EXECUÇÃO", [versaoWorker]);
+secao("PROVA LITERÁRIA (qualidade do LIVRO, não do sistema)", prova.itens);
 secao("VERIFICAÇÃO EXTERNA (fora do alcance desta máquina)", ext.itens);
 secao("CERTIFICADO FINAL", [certificadoRelease]);
 
