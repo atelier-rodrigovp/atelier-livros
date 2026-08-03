@@ -444,8 +444,10 @@ Bloqueios: 5 · Não comprovados: 5
 > ponteiro atual. Uma evidência gerada contra qualquer um dos dois vale para os
 > dois, porque a caducidade é por fingerprint e não por HEAD.
 >
-> Use `d2a909a` porque é onde `versao_worker` fica verde e é o que o worker de
-> produção executa agora.
+> Use `d2a909a`: é o **último commit que toca código**. Os commits seguintes são
+> só este relatório (`.md`) e não movem nenhuma das quatro impressões — o mesmo
+> padrão já medido no PASSO 1. O worker de produção é religado no HEAD final para
+> manter `versao_worker` verde, o que não altera nada do que o PASSO 2 vai provar.
 
 ---
 
