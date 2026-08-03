@@ -752,3 +752,27 @@ Regenerar contra o HEAD expôs a caducidade. Nada foi afrouxado para maquiar iss
 
 Não executada: **revogação de autorização** — a do `5ac9d614` já estava revogada
 desde 2026-07-29.
+
+5. Commit e push deste relatório em `master`. Por ser `*.md`, o `paths-ignore` do
+   `deploy.yml` **não** dispara novo deploy — confirmado: nenhum run novo em
+   `gh run list --branch master` após o push.
+
+---
+
+## Adendo — worker religado no commit deste relatório
+
+Publicar este relatório move o HEAD, e `compararVersaoWorker` compara SHA puro:
+o worker carimbado em `cf801cf` passaria a divergir do repositório e
+`versao_worker` voltaria a `ok:false`, ainda que **nenhuma linha de código do
+worker** tenha mudado (o commit é só Markdown).
+
+Para o objetivo (5) valer no estado final e não só no instante do merge, o worker
+foi parado e reiniciado **de novo**, já no commit deste relatório, com o mesmo
+procedimento (`Stop-Process -Force` no PID do node; o wrapper `worker-wrapper.cmd`
+reergue sozinho). O carimbo final está em `worker/worker.log` e no
+`worker_heartbeats` — e é o SHA do commit que contém este adendo.
+
+Fica registrada a característica do gate: **todo commit no repositório, mesmo de
+documentação, exige reinício do worker** para manter `versao_worker` verde. É o
+preço do carimbo ser SHA puro em vez de hash do código do worker. Não alterei o
+gate — seria afrouxar rigor, e a decisão é do autor.
