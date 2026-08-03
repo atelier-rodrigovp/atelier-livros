@@ -12,14 +12,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHash } from "node:crypto";
-import { readdirSync } from "node:fs";
 import { gerarEvidencia } from "../src/v2/gerador-evidencia.js";
+import { fingerprintsAtuais } from "../src/v2/fingerprints.js";
 import type {
   ArtefatoEvidencia,
   EstadoRemoto,
   ExecucoesReaisEvidencia,
-  FingerprintsCodigo,
   TipoEvidencia,
 } from "../src/v2/evidencia-externa.js";
 
@@ -32,39 +30,14 @@ function arg(nome: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
-function listar(dir: string, filtro: RegExp): string[] {
-  if (!existsSync(dir)) return [];
-  const saida: string[] = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) saida.push(...listar(p, filtro));
-    else if (filtro.test(e.name)) saida.push(p);
-  }
-  return saida;
-}
-
-function hashDe(arquivos: string[]): string {
-  const h = createHash("sha256");
-  for (const a of arquivos.sort()) {
-    h.update(a);
-    try {
-      h.update(readFileSync(a));
-    } catch {
-      h.update("<ausente>");
-    }
-  }
-  return h.digest("hex").slice(0, 16);
-}
-
-/** Mesma receita do `prontidao.ts`: a evidência caduca junto com o código. */
-function fingerprints(): FingerprintsCodigo {
-  return {
-    migrations_source_hash: hashDe(listar(path.join(RAIZ, "supabase"), /\.sql$/)),
-    contratos_hash: hashDe(listar(path.join(DIR_WORKER, "skills-v2"), /contrato\.json$/)),
-    worker_hash: hashDe(listar(path.join(DIR_WORKER, "src"), /\.ts$/).filter((f) => !/\.test\.ts$/.test(f))),
-    interface_hash: hashDe(listar(path.join(RAIZ, "src"), /\.tsx?$/).filter((f) => !/\.test\.tsx?$/.test(f))),
-  };
-}
+// A impressão do código vem de `fingerprintsAtuais` — a MESMA função que a
+// prontidão e o gate do CI usam para LER. Este arquivo já teve uma cópia local
+// da receita, com o comentário "Mesma receita do prontidao.ts": era verdade até
+// o PASSO 1 mudar a régua do leitor (caminho relativo + EOL normalizado) e não a
+// daqui. O resultado seria evidência nascendo inválida nos QUATRO campos, com a
+// mensagem "fingerprints.* mudou desde a verificação" — indistinguível de código
+// que mudou de verdade. Escritor e leitor agora compartilham uma implementação
+// só, e um teste quebra se uma segunda voltar a aparecer.
 
 interface Entrada {
   tipo: TipoEvidencia;
@@ -94,7 +67,7 @@ const r = await gerarEvidencia({
   project_id: e.project_id,
   executor_ref: e.executor_ref,
   raiz: RAIZ,
-  fingerprints: fingerprints(),
+  fingerprints: fingerprintsAtuais(RAIZ, DIR_WORKER),
   caminhosLimpeza: e.caminhosLimpeza,
   // Os passos já rodaram: o harness apenas transporta o código de saída real.
   // Nenhum deles é re-executado aqui, e nenhum pode ser "declarado" aprovado.
