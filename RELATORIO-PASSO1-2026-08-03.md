@@ -732,7 +732,58 @@ piora real, ainda que revertida na mesma sessão.
   `.evidencias/`: o remoto é público e a prova carrega `project_id`, sha256 do
   manuscrito e o relatório editorial do livro.
 
-### 6. Fronteiras — nada tocado
+### 6. O HEAD final não é o commit congelado — e isso não muda nada
+
+Depois do commit de código veio o commit deste relatório, que é `.md`. O estado
+final é:
+
+| | SHA | conteúdo |
+|---|---|---|
+| **CÓDIGO CONGELADO** | `bebac0e` | último commit que toca código |
+| HEAD / `origin/master` | `dc4699a` | `bebac0e` + este relatório (só Markdown) |
+
+```
+$ git diff --name-only bebac0e..HEAD
+RELATORIO-PASSO1-2026-08-03.md
+```
+
+**Medido, não presumido:** as quatro fingerprints são idênticas nos dois commits.
+Calculei em `bebac0e` num worktree limpo (`git worktree add`) e no HEAD atual:
+
+```
+=== fingerprints no COMMIT CONGELADO bebac0e (worktree em /tmp, sem o .md) ===
+{
+  "migrations_source_hash": "94f4fef631059f5e",
+  "contratos_hash": "28e6eb44e879e07e",
+  "worker_hash": "0825a803a792cd25",
+  "interface_hash": "fcd4dd3f03e17cf2"
+}
+
+=== fingerprints em HEAD (dc4699a, com o relatório) ===
+{
+  "migrations_source_hash": "94f4fef631059f5e",
+  "contratos_hash": "28e6eb44e879e07e",
+  "worker_hash": "0825a803a792cd25",
+  "interface_hash": "fcd4dd3f03e17cf2"
+}
+```
+
+Consequência prática para o PASSO 2: **a evidência gerada em qualquer um dos dois
+SHAs vale para os dois**, porque a caducidade é por fingerprint e não por HEAD —
+que é exatamente o design descrito em `evidencia-externa.ts`. Commitar
+documentação não invalida prova.
+
+De quebra, essa medição é a prova prática da correção de caminho da TAREFA D: o
+worktree estava em `/tmp/tmp.4cESg117Wk/cong` e o repositório em
+`C:/Users/Rodrigo Paiva/…`, dois diretórios completamente diferentes, e os hashes
+bateram. No algoritmo antigo teriam divergido.
+
+**O que ainda exige atenção:** `versao_worker` compara SHA puro, não fingerprint.
+Por isso todo commit — mesmo de documentação — exige reiniciar o worker para o
+item continuar verde. Registrado como característica conhecida do gate, já
+apontada no relatório da Onda 1; não foi alterada aqui.
+
+### 7. Fronteiras — nada tocado
 
 Nenhum `meta_nota`, `max_reescritas`, limiar, cota ou `contrato.json` foi alterado
 (conferido por git acima). Nenhuma cota de modelo gasta. Nenhum livro antigo
