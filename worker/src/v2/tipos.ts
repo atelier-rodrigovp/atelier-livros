@@ -625,6 +625,8 @@ export type GateUniversal =
   | "contradicao_factual"
   | "violacao_conhecimento"
   | "pov_impossivel"
+  /** Auto-repetição do mesmo molde/n-grama acima do limiar do acervo (A3). */
+  | "auto_repeticao"
   | "repeticao_quase_literal"
   | "repeticao_semantica"
   | "estado_inconsistente"
