@@ -62,10 +62,11 @@ describe("medirSinais — cotas vêm SÓ do contrato (comportamento atual)", () 
     expect(s.fora_da_cota).toBe(false);
   });
 
-  it("políticas do contrato viram cota: metáfora (dan-brown máx 6) e diálogo (mín 5%)", () => {
+  it("políticas do contrato viram cota: metáfora (dan-brown máx 12) e diálogo (mín 5%)", () => {
     const db = carregarContrato("dan-brown").contrato;
     const sinais = medirSinais(TEXTO_GNOMICO, db);
-    expect(sinais.find((x) => x.sinal === "metafora_elaborada")!.cota).toEqual({ max: 6 });
+    // 12 = teto humano medido em 2026-08-05 (ver procedencia_cota no contrato).
+    expect(sinais.find((x) => x.sinal === "metafora_elaborada")!.cota).toEqual({ max: 12 });
     const dialogo = sinais.find((x) => x.sinal === "dialogo_pct")!;
     expect(dialogo.cota).toEqual({ min: 5 });
     expect(dialogo.fora_da_cota).toBe(true); // texto sem nenhuma linha de diálogo

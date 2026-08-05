@@ -1,7 +1,7 @@
 {
   "schema": "skill-contract/v1",
   "id": "hoover-mcfadden",
-  "versao": "1.1.0",
+  "versao": "1.2.0",
   "nome": "Hoover–McFadden — suspense intimista com narradora não-confiável",
   "familia_editorial": "suspense_intimista",
   "motor_narrativo": "cena vivida em 1ª pessoa → relógio aperta → omissão/revelação da narradora → gancho",
@@ -43,11 +43,13 @@
   "politica_exposicao": "a informação passa pelo filtro da narradora — o que ela percebe, omite ou enquadra AGORA; fair-play: nada sonegado do leitor que ela já saiba; o twist se sustenta na releitura",
   "politica_dialogo": {
     "descricao": "sem piso de diálogo nem de declarativas (lição CR4) — densidade de sentimento é a voz; o evento continua obrigatório, mas cobrado pela régua de interioridade-sem-evento, nunca como 'pouca declarativa'",
-    "justificativa_sem_piso": "lição CR4: densidade de sentimento é a voz; o evento é cobrado pela régua de interioridade-sem-evento, nunca como 'pouca declarativa'"
+    "justificativa_sem_piso": "lição CR4: densidade de sentimento é a voz; o evento é cobrado pela régua de interioridade-sem-evento, nunca como 'pouca declarativa'",
+    "medicao_2026_08_05": "AUSÊNCIA MANTIDA POR DECISÃO DO AUTOR, e agora informada. Tentou-se derivar um piso do corpus humano de docs/engine-v2/09-teto-humano.md e NÃO foi possível: o detector sinalDialogoInterioridade conta palavras em PARÁGRAFOS que abrem com travessão, e a extração `pdftotext` dos três romances não preserva quebra de parágrafo (os três livros saem como 1 parágrafo). O dialogo_pct medido no corpus humano dá 0 ou 100 por janela — lixo, não medida. Dívida nomeada: para medir isto é preciso outro corpus (com parágrafos preservados) ou outro detector. Nenhum número foi adotado sem medição."
   },
   "politica_metafora": {
     "descricao": "metáfora sentimental ISOLADA é feature (teto generoso, sem cota) — só a CADEIA de 2+ metáforas em poucas linhas é defeito",
-    "justificativa_sem_cota": "metáfora sentimental isolada é feature da skill; o defeito é a CADEIA de 2+ em poucas linhas, medida por sanfona/cadência"
+    "justificativa_sem_cota": "metáfora sentimental isolada é feature da skill; o defeito é a CADEIA de 2+ em poucas linhas, medida por sanfona/cadência",
+    "medicao_2026_08_05": "AUSÊNCIA MANTIDA POR DECISÃO DO AUTOR, e agora informada — deixa de ser cota cega e passa a ser cota dispensada com número na mão. Teto humano medido (127 janelas de 2.500 palavras, mesmo corpus e procedimento de docs/engine-v2/09-teto-humano.md, detector contarMetaforaElaborada): Brown máx 11, Hoover máx 12, McFadden máx 5 → teto 12, com 0 das 127 janelas humanas acima. Acervo hoover-mcfadden (522 capítulos): mediana 8, p90 14, máximo 25 — a mediana da engine está DENTRO da faixa humana (mediana humana 4, máximo 12), e 78 capítulos (14,9%) passariam de 12. Se um dia esta cota for adotada, o número é 12 e o efeito é sinal ao revisor, não bloqueio."
   },
   "tipos_gancho": [
     "revelacao_narradora",

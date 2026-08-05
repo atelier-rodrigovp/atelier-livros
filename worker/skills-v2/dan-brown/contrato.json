@@ -1,7 +1,7 @@
 {
   "schema": "skill-contract/v1",
   "id": "dan-brown",
-  "versao": "1.1.0",
+  "versao": "1.2.0",
   "nome": "Dan Brown — thriller de enigma e conspiração",
   "familia_editorial": "thriller_enigma",
   "motor_narrativo": "pergunta → obstáculo → revelação → corte",
@@ -50,8 +50,9 @@
     "piso_percentual": 5
   },
   "politica_metafora": {
-    "descricao": "restritiva: metáfora elaborada ≈≤1 por página, nunca em cadeia; a alternativa default ao clichê não é imagem nova, é frase direta sem imagem",
-    "cota_por_capitulo": 6
+    "descricao": "restritiva: metáfora elaborada nunca em cadeia; a alternativa default ao clichê não é imagem nova, é frase direta sem imagem",
+    "cota_por_capitulo": 12,
+    "procedencia_cota": "TETO HUMANO, medido em 2026-08-05 no mesmo corpus e pelo mesmo procedimento de docs/engine-v2/09-teto-humano.md: 127 janelas de 2.500 palavras de Brown (O Código Da Vinci), Hoover (Talvez Agora) e McFadden (Nunca Minta), detector contarMetaforaElaborada desta versão de worker/src/maneirismo.ts. Máximo por janela: Brown 11, Hoover 12, McFadden 5 → teto 12, e 0 das 127 janelas humanas fica acima. O valor anterior (6) NÃO vinha de medição: saía da frase de ofício '≈1 por página × ~6 páginas' e reprovava 12 das 127 janelas humanas — 7 delas do próprio Dan Brown. Corrigido em 2026-08-05 pela mesma regra que fixou os moldes: o teto vem de prosa humana publicada, nunca do acervo da engine. Acervo dan-brown (153 capítulos): mediana 5, p90 10, máximo 18; fora da cota cai de 12 para 4 capítulos."
   },
   "tipos_gancho": [
     "revelacao_parcial",

@@ -26,26 +26,40 @@ function parecer(over: Partial<Parecer> = {}): Parecer {
 }
 
 describe("cotas preenchidas nos contratos", () => {
-  it("dan-brown: metáfora e piso de diálogo agora existem", () => {
+  it("dan-brown: a cota de metáfora vem do TETO HUMANO medido, não da frase de ofício", () => {
     const c = carregarContrato("dan-brown").contrato;
-    // "metáfora elaborada ≈≤1 por página" · alvo 1700 palavras ≈ 6 páginas.
-    expect(c.politica_metafora.cota_por_capitulo).toBe(6);
+    // 2026-08-05: era 6, derivado de "≈1 por página × ~6 páginas". Esse 6 reprovava
+    // 12 das 127 janelas humanas de 2.500 palavras — 7 delas do PRÓPRIO Dan Brown.
+    // O teto agora é o máximo humano medido (Brown 11, Hoover 12, McFadden 5), com
+    // 0 das 127 janelas acima. Mesma regra dos moldes: o teto vem de prosa humana
+    // publicada, nunca do acervo da engine (docs/engine-v2/09-teto-humano.md).
+    expect(c.politica_metafora.cota_por_capitulo).toBe(12);
+    // A procedência vive no JSON do contrato, como `justificativa_sem_cota` do
+    // hoover — campo de registro, fora do tipo (convenção já existente aqui).
+    expect(JSON.stringify(c.politica_metafora)).toMatch(/0 das 127 janelas humanas/);
     // O contrato registra "3 capítulos com 0% de diálogo aprovados" como defeito.
     expect(c.politica_dialogo.piso_percentual).toBe(5);
   });
 
-  it("hoover: AUSÊNCIA justificada, não cota morta", () => {
+  it("hoover: AUSÊNCIA justificada, não cota morta — e agora INFORMADA pela medição", () => {
     const c = carregarContrato("hoover-mcfadden").contrato;
     expect(c.politica_dialogo.piso_percentual).toBeUndefined();
     expect(c.politica_metafora.cota_por_capitulo).toBeUndefined();
     // A justificativa fica no próprio contrato (lição CR4).
     expect(JSON.stringify(c.politica_dialogo)).toContain("CR4");
+    // 2026-08-05: a ausência deixou de ser cega. O contrato carrega o teto humano
+    // medido (12) e o retrato do acervo, para que manter a ausência seja decisão
+    // com número na mão — e registra que o piso de diálogo NÃO foi medível.
+    expect(JSON.stringify(c.politica_metafora)).toMatch(/teto 12/);
+    expect(JSON.stringify(c.politica_dialogo)).toMatch(/não preserva quebra de parágrafo/);
   });
 
   it("romantasy: piso de diálogo existe; metáfora sem cota por decisão declarada", () => {
     const c = carregarContrato("romantasy").contrato;
     expect(c.politica_dialogo.piso_percentual).toBe(10);
     expect(c.politica_metafora.cota_por_capitulo).toBeUndefined();
+    // A ressalva de proveniência: não há romantasy no corpus humano.
+    expect(JSON.stringify(c.politica_metafora)).toMatch(/não há romantasy no corpus/);
   });
 
   it("o número do piso de densidade tem UMA fonte: faixa_palavras", () => {

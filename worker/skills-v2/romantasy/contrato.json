@@ -1,7 +1,7 @@
 {
   "schema": "skill-contract/v1",
   "id": "romantasy",
-  "versao": "1.1.0",
+  "versao": "1.2.0",
   "nome": "Romantasy — fantasia romântica de página-vira (Lena Agarti)",
   "familia_editorial": "romantasy",
   "motor_narrativo": "dois arcos entrelaçados — romance de alto risco + fantasia épica com custo de magia; desejo → obstáculo → marco → gancho cruel",
@@ -50,7 +50,8 @@
   },
   "politica_metafora": {
     "descricao": "imagem sensorial a serviço do desejo e do mundo; sem cadeia de metáforas; a muleta genérica ('coisa'/'algo') sai — nomeie o objeto, o gesto, a sensação",
-    "justificativa_sem_cota": "o defeito declarado é a CADEIA de metáforas, medida por sanfona/cadência — não uma contagem por capítulo"
+    "justificativa_sem_cota": "o defeito declarado é a CADEIA de metáforas, medida por sanfona/cadência — não uma contagem por capítulo",
+    "medicao_2026_08_05": "AUSÊNCIA MANTIDA POR DECISÃO DO AUTOR, e agora informada. Teto humano medido (127 janelas de 2.500 palavras, mesmo corpus e procedimento de docs/engine-v2/09-teto-humano.md, detector contarMetaforaElaborada): máximo 12, com 0 das 127 janelas humanas acima. Ressalva de proveniência: não há romantasy no corpus — os três romances são thriller e drama contemporâneo, então 12 é o teto do gênero mais próximo disponível, não do gênero desta skill. O acervo romantasy tem só 2 capítulos escritos (4 e 6 metáforas), amostra pequena demais para dizer qualquer coisa sobre a engine. Se esta cota for adotada, o número é 12 e o efeito é sinal ao revisor, não bloqueio."
   },
   "tipos_gancho": [
     "virada_de_trama",
