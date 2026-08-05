@@ -178,6 +178,55 @@ describe("FASE 2 — moldes nomeados como sinal UNIVERSAL (orçamento do maneiri
   });
 });
 
+describe("FASE 2 — n-grama sobre-representado (pega molde que NINGUÉM nomeou)", () => {
+  // A mesma construção de 4 palavras, 5 vezes, em prosa curta e variada.
+  const TEXTO_NGRAMA = [
+    "## Capítulo 6",
+    "",
+    "Ela fechou a agenda do jeito que doía e olhou o relógio da parede.",
+    "O elevador subiu vazio até o quarto andar enquanto ela esperava na escada.",
+    "A recepcionista trocou o vaso de lugar e voltou ao balcão sem pressa.",
+    "Ele dobrou o guardanapo do jeito que doía, com os polegares alinhados.",
+    "Na sala ao lado, alguém arrastou uma cadeira e pediu licença ao entrar.",
+    "Ela assinou o protocolo do jeito que doía e devolveu a caneta emprestada.",
+    "O motorista estacionou junto ao meio-fio e desligou os faróis baixos.",
+    "Ele guardou a aliança do jeito que doía, no bolso pequeno da calça.",
+    "A campainha tocou uma única vez e ninguém se levantou para atender.",
+    "Ela apagou a mensagem do jeito que doía e virou o telefone para baixo.",
+  ].join("\n\n");
+
+  it("5 repetições da mesma construção de 4 palavras produzem sinal com o n-grama e a contagem", () => {
+    const s = medirSinais(TEXTO_NGRAMA, contratoSintetico()).find((x) => x.sinal === "ngrama_sobrerrepresentado")!;
+    expect(s).toBeDefined();
+    expect(s.fora_da_cota).toBe(true);
+    expect(s.exemplos.join(" ")).toContain("do jeito que");
+    expect(s.exemplos.join(" ")).toContain("5×");
+  });
+
+  it("prosa variada não produz o sinal", () => {
+    const texto = TEXTO_NGRAMA.replace(/do jeito que doía/g, "com um cuidado novo a cada vez");
+    // substituição uniforme criaria outro n-grama: varia manualmente
+    const variado = [
+      "## Capítulo 6",
+      "",
+      "Ela fechou a agenda com cuidado e olhou o relógio da parede.",
+      "O elevador subiu vazio até o quarto andar enquanto ela esperava na escada.",
+      "A recepcionista trocou o vaso de lugar e voltou ao balcão sem pressa.",
+      "Ele dobrou o guardanapo devagar, com os polegares alinhados.",
+      "Na sala ao lado, alguém arrastou uma cadeira e pediu licença ao entrar.",
+    ].join("\n\n");
+    void texto;
+    const s = medirSinais(variado, contratoSintetico()).find((x) => x.sinal === "ngrama_sobrerrepresentado");
+    expect(s?.fora_da_cota ?? false).toBe(false);
+  });
+
+  it("o corpus congelado não ganha o sinal (compatibilidadeCorpusV1)", () => {
+    const s = medirSinais(TEXTO_NGRAMA, contratoSintetico(), { compatibilidadeCorpusV1: true })
+      .find((x) => x.sinal === "ngrama_sobrerrepresentado");
+    expect(s).toBeUndefined();
+  });
+});
+
 describe("resumoSinais — medições reais, numeradas, para o revisor", () => {
   it("numera as ocorrências e marca FORA quando há cota estourada", () => {
     const contrato = contratoSintetico({

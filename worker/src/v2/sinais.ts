@@ -12,6 +12,7 @@ import {
   contarPersonificacao,
   contarSanfona,
   diagnosticarCadencia,
+  ngramasSobrerepresentados,
   ORC_CADENCIA,
   percentDeclarativasSimples,
   sinalDialogoInterioridade,
@@ -194,6 +195,20 @@ export function medirSinais(
         cota,
         fora_da_cota: (cota.max != null && p.n > cota.max) || (cota.min != null && p.n < cota.min),
         exemplos: p.exemplos,
+      });
+    }
+
+    // N-grama sobre-representado: o detector genérico que pega o molde que
+    // NINGUÉM nomeou (4–5 palavras repetidas acima do limiar de maneirismo.ts).
+    // A presença de qualquer hit JÁ é sobre-representação — cota máx 0.
+    const ngramas = ngramasSobrerepresentados(texto);
+    if (ngramas.length) {
+      out.push({
+        sinal: "ngrama_sobrerrepresentado",
+        valor: ngramas.length,
+        cota: cotaDeclarada(contrato, "ngrama") ?? { max: 0 },
+        fora_da_cota: true,
+        exemplos: ngramas.map((h) => `"${h.gram}" — ${h.n}× (${h.por10k}/10k)`),
       });
     }
   }
