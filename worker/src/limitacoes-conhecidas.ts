@@ -31,12 +31,36 @@
 // de depender de "amostra rotulada por humano" — esse fluxo está ENCERRADO
 // (`calibracao-humana/README.md`) e não é requisito de nada.
 //
-// Por que ainda não foi corrigida: afrouxar o molde do detector mexe em algo que
-// vira GATE DURO por skill (`ORC_TRANSPARENCIA_POR_SKILL`; dan-brown já tem
-// cotas bloqueantes). Trocar falso negativo por falso positivo reprova capítulo
-// bom, e a régua dos contratos 1.0.0 está CONGELADA. Recalibrar exige processo
-// separado — corpus automático versionado, precisão/recall e holdout — ou
-// decisão explícita do autor. Ajuste ad hoc em gate é regressão.
+// Por que ainda não foi corrigida — CORRIGIDO EM 2026-08-05 contra o código, que
+// desmentia as duas justificativas escritas aqui:
+//
+// (1) "dan-brown já tem cotas bloqueantes" era FALSO, e nunca foi verdade.
+//     `ORC_TRANSPARENCIA_POR_SKILL` (maneirismo.ts) tem UMA entrada —
+//     hoover-mcfadden — e ela é `bloqueia: false`. O default
+//     (`SINAL_TRANSPARENCIA`) também é `bloqueia: false`, e `ofensores` só se
+//     preenche quando `orc.bloqueia` (maneirismo.ts, `diagnosticarTransparencia`):
+//     NENHUMA skill tem gate duro de transparência, dan-brown menos que as outras
+//     — ela nunca esteve no mapa em commit nenhum. O espelho Python diz o mesmo
+//     ("SO SINAL: alimenta o prompt do revisor; nao bloqueia nada",
+//     livro-do-zero-ao-epub/assets/livro_runner.py). A promoção a gate duro é
+//     per-skill e exige skill validada no benchmark com zero falso-positivo nos
+//     capítulos-controle — critério que nenhuma skill cumpriu até hoje.
+//
+// (2) "a régua dos contratos 1.0.0 está CONGELADA" era FALSO no número: os três
+//     contratos estão em 1.2.0. O congelamento existe, mas é de PROCESSO, não de
+//     versão: o laboratório de calibração nunca move uma cota ativa sozinho
+//     ("cota ativa congelada; promoção exige alteração de código, laboratório
+//     cego e canários", v2/calibracao.ts). Isso vale em qualquer versão.
+//
+// A razão REAL de não afrouxar o molde ad hoc, essa sim sustentada pelo código:
+// o detector consultivo não bloqueia, mas também não é inócuo. Sinal FORA DA COTA
+// obriga disposição do revisor — parecer que não dispõe de um sinal fora da cota
+// é REPROVADO (`v2/revisor.ts`), e cota `sem_excecao` fora da cota rebaixa
+// "excecao_valida" a violação. Ou seja: trocar falso negativo por falso positivo
+// não trava a produção deterministicamente, mas custa rodada de reprovação em
+// capítulo bom. Recalibrar exige processo separado — corpus automático
+// versionado, precisão/recall e holdout — ou decisão explícita do autor.
+// Ajuste ad hoc em detector que alimenta cota é regressão.
 
 export interface LimitacaoConhecida {
   id: string;

@@ -3,8 +3,37 @@ import {
   contarGnomico, contarPersonificacao, contarSanfona, contarAdjetivoAvaliativo,
   percentDeclarativasSimples, sinalDialogoInterioridade, contarMetaforaElaborada,
   diagnosticarTransparencia, orcTransparenciaParaSkill, SINAL_TRANSPARENCIA,
+  ORC_TRANSPARENCIA_POR_SKILL,
 } from "./maneirismo.js";
 import { LIMITACOES_RECALL } from "./limitacoes-conhecidas.js";
+
+// ===========================================================================
+// META D — o comentário de limitacoes-conhecidas.ts afirmava que "dan-brown já
+// tem cotas bloqueantes". Era falso e nunca foi verdade. Este teste trava o
+// valor que o comentário passou a citar: um comentário só mente enquanto
+// ninguém o executa.
+// ===========================================================================
+describe("nenhuma skill tem gate DURO de transparência", () => {
+  it("o mapa de promoção está sem nenhuma skill bloqueante", () => {
+    const bloqueantes = Object.entries(ORC_TRANSPARENCIA_POR_SKILL)
+      .filter(([, orc]) => orc.bloqueia)
+      .map(([skill]) => skill);
+    expect(bloqueantes).toEqual([]);
+  });
+
+  it("dan-brown NÃO está no mapa: cai no default, que é sinal", () => {
+    expect(ORC_TRANSPARENCIA_POR_SKILL["dan-brown"]).toBeUndefined();
+    expect(orcTransparenciaParaSkill("dan-brown").bloqueia).toBe(false);
+    expect(SINAL_TRANSPARENCIA.bloqueia).toBe(false);
+  });
+
+  it("sem bloqueio, `ofensores` (a saída da cota dura) nunca se preenche", () => {
+    const t = "A lealdade é uma moeda. Guardar é uma forma de lembrar. A culpa me obrigou a ficar.";
+    for (const skill of [null, "dan-brown", "hoover-mcfadden", "romantasy"]) {
+      expect(diagnosticarTransparencia(t, skill).ofensores).toEqual([]);
+    }
+  });
+});
 
 // ===========================================================================
 // D1 — contarGnomico (máxima/gnômico ampliado)
