@@ -142,3 +142,33 @@ describe("compilarPacote", () => {
     expect(cota?.texto).toContain("máx 2 por capitulo");
   });
 });
+
+describe("ofício da skill no pacote (verbatim, hash-bound)", () => {
+  const comOficio = (texto: string): EntradaCompilacao => {
+    const e = entradaBase();
+    e.oficio = { skillId: "teste", texto, hash: `h-${texto.length}` };
+    return e;
+  };
+
+  it("pacote do escritor contém a seção do ofício com o texto verbatim, antes do PERFIL DO LIVRO", () => {
+    const r = compilarPacote(comOficio("A frase-sanfona é defeito.\nDiga uma vez, a melhor."));
+    expect(r.ok).toBe(true);
+    const secoes = r.pacote!.secoes;
+    const iOficio = secoes.findIndex((s) => s.titulo.includes("OFÍCIO DA SKILL"));
+    const iPerfil = secoes.findIndex((s) => s.titulo === "PERFIL DO LIVRO");
+    expect(iOficio).toBeGreaterThanOrEqual(0);
+    expect(iPerfil).toBeGreaterThanOrEqual(0);
+    expect(iOficio).toBeLessThan(iPerfil); // o ofício é da skill; o perfil é do livro
+    expect(secoes[iOficio].texto).toBe("A frase-sanfona é defeito.\nDiga uma vez, a melhor.");
+    const render = renderizarPacote(r.pacote!);
+    expect(render.indexOf("OFÍCIO DA SKILL")).toBeLessThan(render.indexOf("PERFIL DO LIVRO"));
+  });
+
+  it("hash do pacote MUDA quando o texto do ofício muda (auditabilidade do bundle)", () => {
+    const a = compilarPacote(comOficio("Versão um do ofício.")).pacote!.hash;
+    const b = compilarPacote(comOficio("Versão dois do ofício.")).pacote!.hash;
+    const semOficio = compilarPacote(entradaBase()).pacote!.hash;
+    expect(a).not.toBe(b);
+    expect(a).not.toBe(semOficio);
+  });
+});

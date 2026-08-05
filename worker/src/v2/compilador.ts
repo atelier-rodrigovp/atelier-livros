@@ -39,6 +39,8 @@ export interface EntradaCompilacao {
   alvo: string;                        // ex.: "capitulo:3"
   contrato: ContratoCompilado;
   perfil: { texto: string; skillId: string; hash: string; validado: boolean };
+  /** Ofício da skill (SKILL.md + references, verbatim) — seção antes do perfil. */
+  oficio?: { skillId: string; texto: string; hash: string };
   ficha?: SceneSpec;
   instrucoesAutor?: Instrucao[];       // camada 3 (decisões explícitas do autor)
   fatos?: SecaoContexto[];             // camada 6 (selecionados pelo contextualizador)
@@ -165,8 +167,12 @@ export function compilarPacote(e: EntradaCompilacao): ResultadoCompilacao {
     contradicoes.push({ chave: i.chave, vencedora: atual, descartada: i, resolucao: "precedencia" });
   }
 
-  // --- Seções verbatim: perfil (camada 4), ficha (5), fatos/trechos (6) ---
+  // --- Seções verbatim: ofício da skill (camada 2), perfil (4), ficha (5), fatos/trechos (6) ---
+  // O ofício vem ANTES do perfil: o ofício é da skill, o perfil é do livro.
   const secoes: SecaoContexto[] = [
+    ...(e.oficio
+      ? [{ titulo: `OFÍCIO DA SKILL (${e.oficio.skillId})`, texto: e.oficio.texto, fonte: "skill:oficio", hash: e.oficio.hash }]
+      : []),
     { titulo: "PERFIL DO LIVRO", texto: e.perfil.texto, fonte: "perfil", hash: e.perfil.hash },
     ...(e.ficha ? [{ titulo: `FICHA DA CENA (${e.alvo})`, texto: JSON.stringify(e.ficha, null, 2), fonte: "ficha" }] : []),
     ...(e.fatos ?? []),
