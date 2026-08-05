@@ -270,6 +270,29 @@ describe("FASE 2 — léxico de muleta como sinal universal (orçamento de MULET
 });
 
 describe("resumoSinais — medições reais, numeradas, para o revisor", () => {
+  it("FASE 5: o molde chega ao revisor pelo NOME, com contagem e ocorrências numeradas", () => {
+    // Antes, o molde chegava disfarçado de 'sanfona'/'personificação' e o revisor
+    // absolvia corretamente a pergunta errada (V8). Agora a linha nomeia o molde.
+    const texto = [
+      "## Capítulo 8",
+      "",
+      "Não era medo. Era método. Ela repassou a lista mais uma vez antes de sair.",
+      "Não era pressa. Era fome de acabar logo. O corredor seguia vazio até a escada.",
+      "Não era frieza. Era manutenção. O elevador desceu sem parar em andar nenhum.",
+    ].join("\n\n");
+    const resumo = resumoSinais(medirSinais(texto, contratoSintetico()));
+    const linha = resumo.split("\n").find((l) => l.includes('molde.antítese "não era X. Era Y."'))!;
+    expect(linha).toBeDefined();
+    expect(linha).toContain(": 3");         // contagem
+    expect(linha).toContain("FORA");        // fora da cota universal (máx 1)
+    // ocorrências numeradas logo abaixo da linha do molde (o revisor só pode
+    // confirmar violação citando cada uma — regra do adendo 2)
+    const bloco = resumo.slice(resumo.indexOf(linha));
+    expect(bloco).toMatch(/ {4}1\. .*[Nn]ão era medo/);
+    expect(bloco).toMatch(/ {4}2\. /);
+    expect(bloco).toMatch(/ {4}3\. /);
+  });
+
   it("numera as ocorrências e marca FORA quando há cota estourada", () => {
     const contrato = contratoSintetico({
       regras: [{ id: "anti-gnomico", texto: "Sem máxima", tipo: "cota", cota: { max: 0, por: "capitulo" }, papeis: ["revisor_literario"] }],
