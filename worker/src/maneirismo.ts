@@ -44,11 +44,12 @@ export interface Molde {
  * SEGUNDA REGRA, DESCOBERTA NESTA RODADA: o teto é do PAR (detector, corpus).
  * Trocou o detector, remede o corpus. Os limiares abaixo foram medidos com o
  * detector desta versão do arquivo — o teto de antítese "7" do plano original
- * era do detector antigo (recall 3/8); o mesmo corpus, com o detector atual
- * (recall 8/8), dá 11. Mudar RE_ANTITESE sem remedir invalida o número.
+ * era do detector antigo (recall 3/8). Este arquivo remediu o corpus duas vezes
+ * — a cada aperto do detector — e o número final é 8. Mudar RE_ANTITESE sem
+ * remedir invalida o teto.
  *
  * Máximos observados (janela de 2.500 palavras / taxa do livro por 10k):
- *   antítese por negação ....... 11  (Hoover)   /  17,1  (Hoover)
+ *   antítese por negação ........  8  (Hoover)   /   9,6  (McFadden)
  *   "do jeito que/de" ...........  3  (McFadden) /   0,7  (McFadden)
  *   "como se / como quando" .....  6  (Hoover)   /  11,7  (Hoover)
  *   clichê recorrente ...........  2             /   0,4  (McFadden)
@@ -79,8 +80,15 @@ export const TETO_HUMANO = {
  *   (a') com VÍRGULA o separador é fraco demais, então exige-se que a própria
  *       negação seja copular ("não era um pedido, era uma ordem") — senão
  *       "Ela não olhou, é claro" viraria marcação;
- *   (b) a coda ECOA uma palavra de conteúdo do trecho negado (≥5 letras) —
- *       cobre "Não limpa de A. Limpa de B.";
+ *   (b) a coda ABRE ecoando uma palavra de conteúdo do trecho negado (≥5
+ *       letras) — cobre "Não limpa de A. Limpa de B.". O eco tem de ser a
+ *       PRIMEIRA palavra da coda: é isso que significa "reafirma o mesmo lugar
+ *       sintático". Eco solto no meio da coda é repetição comum, não antítese —
+ *       marcava "não há campo…, e é verdade que não há campo" e a réplica de
+ *       diálogo "Não bato porque ela se assusta. — Ela se assusta?". Pelo mesmo
+ *       motivo o trecho entre a negação e a palavra ecoada não pode atravessar
+ *       separador: sem isso, a anáfora "não branqueável —, avalio trocanter,
+ *       avalio orelha" entrava só por ter um "não" a menos de 40 caracteres;
  *   (c) negação elíptica com dois-pontos, UMA palavra de cada lado — cobre
  *       "Não emperrada: fechada." (a exigência de uma só palavra é o que
  *       mantém "Não há borrão: trinta e um." fora);
@@ -104,7 +112,7 @@ export const RE_ANTITESE = new RegExp(
   [
     `\\bn[ãa]o\\s+[^.!?:;\\n]{0,70}?${SEP_FORTE}(?:${COPULA}|(?:est[ae]|isto|isso|ess[ae])\\s+${COPULA})${FIM_PALAVRA}`,
     `\\bn[ãa]o\\s+${COPULA}${FIM_PALAVRA}[^.!?:;\\n]{1,60},\\s*${COPULA}${FIM_PALAVRA}`,
-    `\\bn[ãa]o\\s+[^.!?:;\\n]{0,40}?(${L_ACENTO}{5,})${FIM_PALAVRA}[^.!?:;\\n]{0,40}?(?:${SEP_FORTE}|,\\s*)[^.!?\\n]{0,40}?\\1${FIM_PALAVRA}`,
+    `\\bn[ãa]o\\s+[^.!?:;,—–\\n]{0,40}?(${L_ACENTO}{5,})${FIM_PALAVRA}[^.!?:;\\n]{0,80}?(?:${SEP_FORTE}|,\\s*)\\1${FIM_PALAVRA}`,
     `\\bn[ãa]o\\s+${L_ACENTO}{3,}\\s*:\\s*${L_ACENTO}{3,}${FIM_PALAVRA}`,
     `\\bn[ãa]o\\s+[^.!?:;\\n]{1,60}[,;]\\s*(?:mas\\s+sim|e\\s+sim|mas\\s+antes|sen[ãa]o)\\s`,
   ].join("|"),
@@ -114,7 +122,7 @@ export const RE_ANTITESE = new RegExp(
 const MOLDES: Molde[] = [
   // Antítese por negação: UMA regex para as oito formas (ver RE_ANTITESE).
   // Uma ocorrência = uma marcação; alternativas do mesmo `|` não somam.
-  { nome: "antítese por negação", re: RE_ANTITESE, orc10k: 18, limiarCap: 11 },
+  { nome: "antítese por negação", re: RE_ANTITESE, orc10k: 10, limiarCap: 8 },
   // símile-andaime: símile hipotético estendido ("Como quando se entra…", "como se
   // pudesse…"). O limiar 15 anterior vinha do acervo da própria engine; o humano
   // vai a 6 por janela e 11,7/10k — a engine usa MENOS que o humano aqui.

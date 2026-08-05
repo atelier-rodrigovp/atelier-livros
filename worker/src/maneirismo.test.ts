@@ -81,7 +81,9 @@ const ANTITESE_8_FORMAS = [
   "Não é frieza. É que a manutenção eu sei nomear.",
   "Não emperrada: fechada.",
   "Isso não é acordar por vontade: é abertura ocular espontânea.",
-  "Não limpa de quem passou pano depois. Limpa de esta semana.",
+  // Texto REAL do capítulo (o plano trazia uma versão encurtada; a de verdade
+  // tem 63 caracteres entre o eco e o ponto — a janela do detector cobre isso).
+  "Não limpa de quem passou pano depois que o bicho morreu e nunca mais mexeu. Limpa de esta semana.",
   "Ele não está prometendo silêncio: está me concedendo o meu.",
   "O silêncio dele não é ausência. É uma coisa que está acontecendo.",
   "Não é olhar de quem procura. É olhar de quem já achou e está conferindo.",
@@ -134,9 +136,9 @@ describe("antítese por negação — a FORMA, não a superfície", () => {
     expect(contarAntitese(ANTITESE_8_FORMAS.slice(0, 3).join(" "))).toBe(3);
   });
 
-  it("o limiar por capítulo é o máximo humano medido (11), não o máximo do acervo da engine", () => {
+  it("o limiar por capítulo é o máximo humano medido (8), não o máximo do acervo da engine", () => {
     const m = contarManeirismos("Não era A. Era B.").padroes.find((p) => /antítese/.test(p.nome));
-    expect(m?.limiarCap).toBe(11);
+    expect(m?.limiarCap).toBe(8);
   });
 });
 

@@ -142,7 +142,7 @@ describe("FASE 2 — moldes nomeados como sinal UNIVERSAL (orçamento do maneiri
     return blocos.join("\n\n");
   })();
 
-  it("6 antíteses por negação em ~2.500 palavras: sinal medido com exemplos citáveis, informativo (dentro do teto humano, 11)", () => {
+  it("6 antíteses por negação em ~2.500 palavras: sinal medido com exemplos citáveis, informativo (dentro do teto humano, 8)", () => {
     // Contrato SEM regra de molde (V7: nenhum contrato tem) — o limiar de
     // capítulo vem de maneirismo.ts (limiarCap, derivado de PROSA HUMANA
     // PUBLICADA). A taxa absoluta (orc10k) é avaliada na escala de LIVRO
@@ -151,8 +151,8 @@ describe("FASE 2 — moldes nomeados como sinal UNIVERSAL (orçamento do maneiri
     const molde = sinais.find((x) => x.sinal.startsWith("molde.") && x.sinal.includes("antítese por negação"))!;
     expect(molde).toBeDefined();
     expect(Number(molde.valor)).toBe(6);
-    expect(molde.cota?.max).toBe(11);           // limiar de auto-repetição existe SEM contrato declarar
-    expect(molde.fora_da_cota).toBe(false);     // 6 ≤ 11: o romance humano chega aí
+    expect(molde.cota?.max).toBe(8);            // limiar de auto-repetição existe SEM contrato declarar
+    expect(molde.fora_da_cota).toBe(false);     // 6 ≤ 8: o romance humano chega aí
     expect(molde.exemplos.length).toBe(6);       // todas citáveis (adendo 2)
     expect(molde.exemplos[0]).toContain("Não era medo");
   });
@@ -367,22 +367,22 @@ describe("A1 — classe 2 (taxa absoluta) é informativa no capítulo; classe 1 
       (x) => x.sinal.startsWith("molde.") && x.sinal.includes("antítese por negação")
     )!;
 
-  it("13× o MESMO molde de antítese num capítulo sai FORA por auto-repetição (teto humano: 11+1)", () => {
+  it("13× o MESMO molde de antítese num capítulo sai FORA por auto-repetição (teto humano: 8+1)", () => {
     const s = moldeAntitese(capComAntiteses(13));
     expect(Number(s.valor)).toBe(13);
-    expect(s.cota?.max).toBe(11);         // teto humano medido; acima é auto-repetição
+    expect(s.cota?.max).toBe(8);          // teto humano medido; acima é auto-repetição
     expect(s.fora_da_cota).toBe(true);
   });
 
-  it("repetição NO teto humano (11×) ainda NÃO sai fora — o romance humano chega aí", () => {
-    const s = moldeAntitese(capComAntiteses(11));
-    expect(Number(s.valor)).toBe(11);
+  it("repetição NO teto humano (8×) ainda NÃO sai fora — o romance humano chega aí", () => {
+    const s = moldeAntitese(capComAntiteses(8));
+    expect(Number(s.valor)).toBe(8);
     expect(s.fora_da_cota).toBe(false);
   });
 
-  it("12× — o primeiro passo fora da faixa humana — sai fora", () => {
-    const s = moldeAntitese(capComAntiteses(12));
-    expect(Number(s.valor)).toBe(12);
+  it("9× — o primeiro passo fora da faixa humana — sai fora", () => {
+    const s = moldeAntitese(capComAntiteses(9));
+    expect(Number(s.valor)).toBe(9);
     expect(s.fora_da_cota).toBe(true);
   });
 

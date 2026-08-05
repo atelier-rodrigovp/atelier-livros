@@ -2468,7 +2468,7 @@ def gate_maneirismo_capitulo(projeto, n, args):
 # que mais usa cada molde, arredondada para cima. NUNCA recalibrar contra
 # capitulos gerados pela propria engine.
 ORC10K_GLOBAL = {
-    "antitese por negacao": 18.0,                          # humano: 17,1 (Hoover)
+    "antitese por negacao": 10.0,                          # humano: 9,6 (McFadden)
     "'do jeito que/de'": 1.0,                              # humano: 0,7 (McFadden)
     "simile-andaime ('como se / como quando')": 12.0,      # humano: 11,7 (Hoover)
 }
