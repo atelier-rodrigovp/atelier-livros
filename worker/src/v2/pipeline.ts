@@ -22,7 +22,12 @@ import {
 } from "./conformidade.js";
 import { entradasDaFicha, gateRevelacaoRepetida, renderizarLedger, revelacoesDaFicha } from "./ledger.js";
 import { decidirIdioma, medirIdioma, resumoIdioma, validarParecerIdioma, type ParecerIdioma } from "./idioma.js";
-import { derivarMemoriaDaProsa, validarExtracaoProsa, type ExtracaoProsa } from "./memoria-prosa.js";
+import {
+  conflitosFichaContraMemoria,
+  derivarMemoriaDaProsa,
+  validarExtracaoProsa,
+  type ExtracaoProsa,
+} from "./memoria-prosa.js";
 import { executarPapel } from "./papeis.js";
 import type { PersistenciaV2 } from "./persistencia.js";
 import type { ProvedorModelo } from "./provedor.js";
@@ -465,7 +470,29 @@ export async function escreverCapitulo(
   // degradado para janela.
   const ledger = estadoParaSpec.doc.ledger_revelacoes ?? [];
   const memoriaProsa = estadoParaSpec.doc.memoria_prosa ?? [];
-  const ledgerRender = renderizarLedger(ledger, opts?.fichaExistente);
+  // Passado condensado: uma linha por capítulo anterior, das fichas persistidas
+  // (leitura em LOTE). Antes, quem planejava e quem contextualizava recebia ZERO
+  // capítulo anterior e inventava a continuidade — raiz do diagnóstico.
+  const todasAsFichas = await deps.persistencia.lerFichasMaisRecentes(deps.projectId);
+  const fichasAnteriores = todasAsFichas
+    .filter((f) => f.capitulo < capitulo)
+    .sort((a, b) => a.capitulo - b.capitulo);
+
+  // META B.2 — RETOMADA REUTILIZA A FICHA VALIDADA.
+  // A ficha do capítulo já podia estar validada e persistida quando a execução
+  // caiu (queda, cota, encadeamento): o laço de escrita (integracao.ts) chama o
+  // pipeline sem `fichaExistente`, e o arquiteto de cena refazia o plano DO
+  // ZERO. Foi aí que nasceu a troca Beatriz→Otávio do canário 2 — a re-ficha v2
+  // alucinou contra a prosa do capítulo 1 já aprovada
+  // (RELATORIO-COMPLETO-2026-08-05.md §3.1). Reaproveitar é também o que o
+  // estado canônico já supunha: `versaoConhecida` sempre soube que a ficha
+  // existia; só ninguém a lia de volta.
+  const fichaPersistida = todasAsFichas.find((f) => f.capitulo === capitulo)?.ficha;
+  // `reficha` é a estratégia cuja hipótese é que o PLANO é a causa: ela tem de
+  // continuar descartando a ficha, senão vira um degrau que não faz nada.
+  const fichaVigente = opts?.fichaExistente ?? (estrategia === "reficha" ? undefined : fichaPersistida);
+
+  const ledgerRender = renderizarLedger(ledger, fichaVigente);
   const secLedger: SecaoContexto[] = [
     {
       titulo: "LEDGER DE REVELAÇÕES (o que o leitor JÁ SABE — não revele de novo)",
@@ -474,12 +501,6 @@ export async function escreverCapitulo(
     },
   ];
 
-  // Passado condensado: uma linha por capítulo anterior, das fichas persistidas
-  // (leitura em LOTE). Antes, quem planejava e quem contextualizava recebia ZERO
-  // capítulo anterior e inventava a continuidade — raiz do diagnóstico.
-  const fichasAnteriores = (await deps.persistencia.lerFichasMaisRecentes(deps.projectId))
-    .filter((f) => f.capitulo < capitulo)
-    .sort((a, b) => a.capitulo - b.capitulo);
   const secPassado: SecaoContexto[] = fichasAnteriores.length
     ? [{
         titulo: "CAPÍTULOS ANTERIORES (fichas condensadas)",
@@ -493,11 +514,11 @@ export async function escreverCapitulo(
   let ficha: SceneSpec;
   // `reficha`: a hipótese é que o PLANO é a causa. Descartar a ficha existente é
   // exatamente o que distingue esta estratégia de reescrever a prosa outra vez.
-  if (opts?.fichaExistente && estrategia !== "reficha") {
+  if (fichaVigente) {
     // Ficha existente já está persistida (o pipeline não re-insere); o estado
     // referencia a última versão conhecida.
     specVersao = Math.max(versaoConhecida, 1);
-    ficha = opts.fichaExistente;
+    ficha = fichaVigente;
   } else {
     specVersao = versaoConhecida + 1;
     const comp = compilar("arquiteto_cena", `spec:${capitulo}`, {
@@ -550,6 +571,21 @@ export async function escreverCapitulo(
           throw new Error(
             `ficha contradiz a grade de arco: ${gArco.evidencia}. ` +
               `Use a seção ARCO DO CAPÍTULO como fonte: ela diz a que ato o capítulo pertence, qual a tensão-alvo, que promessas ele toca e que marcos caem aqui.`
+          );
+        }
+        // META B.1 — ficha NOVA × memória da PROSA APROVADA. A ficha é plano; a
+        // prosa aprovada é verdade observada. Atribuir a outra pessoa um estado
+        // exclusivo que a página já deu a alguém reprova o PLANO, antes de
+        // gastar escritor: foi assim que o paciente acamado trocou de nome
+        // entre os capítulos 1 e 2 do canário 2 sem nenhum gate ver.
+        const conflitos = conflitosFichaContraMemoria(spec, memoriaProsa);
+        if (conflitos.length) {
+          const c = conflitos[0];
+          throw new Error(
+            `ficha contradiz a prosa já aprovada: no capítulo ${c.capitulo}, quem "${c.enunciado}" é ${c.quemNaProsa}, ` +
+              `mas "${c.campo}" atribui o mesmo estado a ${c.quemNaFicha} ("${c.textoFicha}"). ` +
+              `Prosa aprovada, literal: "${c.trecho}". ` +
+              `Corrija o nome na ficha ou escolha outro estado — o que está na página não se reescreve pelo plano.`
           );
         }
         return spec;

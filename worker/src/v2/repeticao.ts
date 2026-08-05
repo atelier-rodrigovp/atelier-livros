@@ -55,7 +55,7 @@ function shingles(t: string): Set<string> {
   return s;
 }
 
-function jaccard(a: Set<string>, b: Set<string>): number {
+export function jaccard(a: Set<string>, b: Set<string>): number {
   if (!a.size || !b.size) return 0;
   let inter = 0;
   for (const x of a) if (b.has(x)) inter++;
@@ -126,7 +126,7 @@ export function detectarRepeticaoLiteral(
 
 export const LIMIAR_SEMANTICO = 0.5;
 
-function tokensConteudo(t: string): Set<string> {
+export function tokensConteudo(t: string): Set<string> {
   const vazias = new Set([
     "que", "com", "por", "para", "uma", "dos", "das", "nas", "nos", "ele", "ela", "seu", "sua",
     "mas", "como", "quando", "porque", "sobre", "entre", "ainda", "depois", "antes", "the", "and",

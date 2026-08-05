@@ -10,6 +10,7 @@
 // divergem, isso é um EVENTO explícito — nunca uma sobrescrita silenciosa.
 
 import { hashText } from "../quality-state.js";
+import { jaccard, LIMIAR_SEMANTICO, tokensConteudo } from "./repeticao.js";
 import type { SceneSpec } from "./tipos.js";
 
 export type TipoMemoria =
@@ -143,6 +144,137 @@ export function derivarMemoriaDaProsa(entrada: {
   }
 
   return { entradas, conflitos, recusadas };
+}
+
+// ---------------------------------------------------------------------------
+// Gate: FICHA NOVA × MEMÓRIA DA PROSA APROVADA (META B)
+//
+// O buraco que isto fecha (RELATORIO-COMPLETO-2026-08-05.md §3.1): no capítulo 1
+// aprovado do canário 2, Beatriz é a paciente acamada com traqueostomia; na
+// ficha do capítulo 2, gerada de novo pela retomada, quem está na cama é Otávio.
+// Quatro camadas de continuidade existiam — validação de ficha, escritor com a
+// cauda do capítulo anterior, auditor factual, conformidade — e NENHUMA compara
+// a ficha nova com a memória extraída da prosa já aprovada. Este gate compara.
+//
+// A regra é estreita de propósito, porque detector com falso positivo não pode
+// bloquear (lição permanente da auditoria de estilo):
+//
+//  - só ESTADOS EXCLUSIVOS entram: `condicao_fisica` e `localizacao`. São os
+//    tipos cujo predicado pertence a UMA pessoa por vez — estar acamado com
+//    cânula, estar trancado no porão. `revelacao`/`fato` descrevem o mundo e
+//    podem valer para vários; `mudanca_relacao` é recíproca por natureza;
+//  - a comparação usa o tokenizador e o limiar semântico JÁ CALIBRADOS do
+//    repositório (`LIMIAR_SEMANTICO`, o mesmo que hoje bloqueia repetição
+//    semântica). Nenhum limiar novo é inventado aqui;
+//  - o nome das duas pessoas sai dos dois lados antes de comparar: o que se
+//    compara é o PREDICADO, não quem o carrega;
+//  - se a própria prosa já registrou a pessoa nova naquele estado, não é
+//    conflito — o livro mudou, e a memória é a verdade observada;
+//  - o conflito carrega o TRECHO literal da prosa aprovada. Sem trecho não há
+//    bloqueio, como no resto do arquivo.
+// ---------------------------------------------------------------------------
+
+/** Tipos cujo predicado pertence a uma pessoa por vez. */
+const TIPOS_EXCLUSIVOS: TipoMemoria[] = ["condicao_fisica", "localizacao"];
+
+export interface ConflitoFichaMemoria {
+  /** Capítulo da prosa aprovada que sustenta o estado. */
+  capitulo: number;
+  /** De quem é o estado, segundo a PROSA APROVADA. */
+  quemNaProsa: string;
+  /** A quem a FICHA NOVA atribuiu o mesmo estado. */
+  quemNaFicha: string;
+  /** O estado, como a memória o enunciou. */
+  enunciado: string;
+  /** Campo da ficha onde a atribuição aparece. */
+  campo: string;
+  /** O que a ficha diz, literal. */
+  textoFicha: string;
+  /** Trecho literal da prosa aprovada. Sem ele, nada bloqueia. */
+  trecho: string;
+  similaridade: number;
+}
+
+/** Campos de texto livre da ficha onde um estado pode ser atribuído. */
+function camposDaFicha(ficha: SceneSpec): { campo: string; texto: string }[] {
+  const out: { campo: string; texto: string }[] = [
+    { campo: "local", texto: ficha.local },
+    { campo: "objetivo", texto: ficha.objetivo },
+    { campo: "obstaculo", texto: ficha.obstaculo },
+    { campo: "acao_fisica", texto: ficha.acao_fisica },
+    { campo: "informacao_nova", texto: ficha.informacao_nova },
+    { campo: "virada", texto: ficha.virada },
+    { campo: "mudanca_estado", texto: ficha.mudanca_estado },
+    { campo: "gancho", texto: ficha.gancho?.descricao ?? "" },
+  ];
+  (ficha.fatos_obrigatorios ?? []).forEach((t, i) => out.push({ campo: `fatos_obrigatorios[${i}]`, texto: t }));
+  (ficha.revelacoes ?? []).forEach((t, i) => out.push({ campo: `revelacoes[${i}]`, texto: t }));
+  for (const [k, v] of Object.entries(ficha.campos_skill ?? {})) out.push({ campo: `campos_skill.${k}`, texto: v });
+  return out.filter((c) => (c.texto ?? "").trim());
+}
+
+/** Remove um nome próprio do texto, para comparar só o predicado. */
+function semNome(texto: string, nome: string): string {
+  const esc = nome.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return texto.replace(new RegExp(`\\b${esc}\\b`, "gi"), " ");
+}
+
+function mencionaNome(texto: string, nome: string): boolean {
+  const esc = nome.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\b${esc}\\b`, "i").test(texto);
+}
+
+/**
+ * Contradição entre a ficha NOVA e a memória da prosa APROVADA: o mesmo estado
+ * exclusivo atribuído a outra pessoa, sem que a prosa tenha registrado a troca.
+ * Roda ANTES da escrita — é o plano que se corrige, não a prosa.
+ */
+export function conflitosFichaContraMemoria(
+  ficha: SceneSpec,
+  memoria: EntradaMemoria[]
+): ConflitoFichaMemoria[] {
+  const relevantes = memoria.filter(
+    (m) => m.capitulo < ficha.capitulo && m.quem?.trim() && TIPOS_EXCLUSIVOS.includes(m.tipo)
+  );
+  if (!relevantes.length) return [];
+  // Só nomes que a própria memória conhece: o gate nunca inventa personagem.
+  const pessoas = [...new Set(memoria.map((m) => m.quem?.trim()).filter((q): q is string => Boolean(q)))];
+  const campos = camposDaFicha(ficha);
+  const conflitos: ConflitoFichaMemoria[] = [];
+
+  for (const m of relevantes) {
+    const dono = m.quem as string;
+    const predicado = tokensConteudo(semNome(m.enunciado, dono));
+    if (!predicado.size) continue;
+    for (const c of campos) {
+      const outros = pessoas.filter((p) => p !== dono && mencionaNome(c.texto, p));
+      if (!outros.length) continue;
+      if (mencionaNome(c.texto, dono)) continue; // ficha cita os dois: não é troca
+      for (const intruso of outros) {
+        const sim = jaccard(predicado, tokensConteudo(semNome(c.texto, intruso)));
+        if (sim < LIMIAR_SEMANTICO) continue;
+        // A própria prosa já pôs o intruso nesse estado? Então o livro mudou.
+        const registradoNaProsa = memoria.some(
+          (x) =>
+            x.quem?.trim() === intruso &&
+            TIPOS_EXCLUSIVOS.includes(x.tipo) &&
+            jaccard(tokensConteudo(semNome(x.enunciado, intruso)), predicado) >= LIMIAR_SEMANTICO
+        );
+        if (registradoNaProsa) continue;
+        conflitos.push({
+          capitulo: m.capitulo,
+          quemNaProsa: dono,
+          quemNaFicha: intruso,
+          enunciado: m.enunciado,
+          campo: c.campo,
+          textoFicha: c.texto,
+          trecho: m.trecho,
+          similaridade: Number(sim.toFixed(3)),
+        });
+      }
+    }
+  }
+  return conflitos.sort((a, b) => b.similaridade - a.similaridade);
 }
 
 // ---------------------------------------------------------------------------
