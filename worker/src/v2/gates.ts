@@ -8,6 +8,7 @@ import {
   entradasLedgerDoCapitulo,
   LIMIAR_NGRAMA_CAP,
   ngramasSobrerepresentados,
+  TETO_HUMANO,
 } from "../maneirismo.js";
 import { detectarRepeticaoLiteral } from "./repeticao.js";
 import type { ResultadoGate, SceneSpec, SkillContract } from "./tipos.js";
@@ -75,26 +76,72 @@ export function gateRepeticaoQuaseLiteral(
 }
 
 /**
- * AUTO-REPETIÇÃO (classe 1) acima do TETO HUMANO. Determinístico e sem gosto:
- * bloqueia só quando o MESMO molde repete num capítulo MAIS do que qualquer
- * janela de 2.500 palavras de três romances publicados jamais repetiu
- * (Molde.limiarCap — ver TETO_HUMANO em maneirismo.ts, medido em 2026-08-05).
+ * AUTO-REPETIÇÃO acima do TETO HUMANO, em DUAS RÉGUAS — pico e taxa sustentada.
  *
- * A origem do teto é o ponto: até 34fc73b o limiar vinha do máximo do acervo da
- * PRÓPRIA engine — teto tirado do que estava sendo medido, que garante zero
- * marcação por construção. Agora vem de fora. Para n-grama (LIMIAR_NGRAMA_CAP)
- * o teto ainda é do acervo de controle: não foi remedido contra prosa humana.
+ * 1) PICO (classe 1, `Molde.limiarCap`): o mesmo molde num capítulo acima do
+ *    máximo que qualquer janela de 2.500 palavras de três romances publicados
+ *    alcançou (ver TETO_HUMANO em maneirismo.ts, medido em 2026-08-05).
  *
- * A taxa absoluta (classe 2) NÃO bloqueia: segue sinal do revisor e é avaliada
- * na escala do livro (sinais.ts).
+ * 2) TAXA SUSTENTADA (classe 2, `Molde.orc10k`): ocorrências por 10.000 palavras
+ *    somando TODOS os capítulos escritos, o atual incluído, acima da taxa do
+ *    romance humano mais carregado. Existe porque a régua de pico sozinha é
+ *    cega ao hábito: o humano ENCOSTA no pico uma vez em 128 janelas, a engine
+ *    encosta em todo capítulo e nunca sai da cota. Medido no acervo: o capítulo
+ *    1 aprovado do canário 2 tem 7 antíteses em 2.784 palavras — 25,1 por 10 mil
+ *    contra 10 do romance humano mais carregado — e passava pelo pico (7 ≤ 8).
+ *
+ * Duas condições protegem a taxa de virar ruído, e nenhuma delas é número novo:
+ *  - a base acumulada tem de ter ao menos UMA JANELA de medição
+ *    (`TETO_HUMANO.janela_palavras` = 2.500): `orc10k` foi medido sobre livros
+ *    inteiros; aplicá-lo a um trecho menor que a menor unidade medida é erro de
+ *    escala, não rigor;
+ *  - ocorrência ÚNICA nunca conta: o gate é de auto-REPETIÇÃO, e repetir exige
+ *    duas. Sem isso um só "do jeito que" num capítulo (4,2/10k contra teto 1)
+ *    reprovaria prosa limpa.
+ *
+ * Para n-grama (LIMIAR_NGRAMA_CAP) o teto ainda é do acervo de controle: não foi
+ * remedido contra prosa humana, e por isso segue só no pico.
  */
-export function gateAutoRepeticao(texto: string): ResultadoGate {
+export function gateAutoRepeticao(
+  texto: string,
+  anteriores?: { numero: number; trecho: string }[]
+): ResultadoGate {
   const hits: string[] = [];
-  for (const p of contarManeirismos(texto, undefined, { maxExemplos: 3 }).padroes) {
+  const atual = contarManeirismos(texto, undefined, { maxExemplos: 3 });
+  for (const p of atual.padroes) {
     if (p.n > p.limiarCap) {
       hits.push(`molde ${p.nome}: ${p.n}× no capítulo (limiar do acervo: ${p.limiarCap}); ex.: ${p.exemplos.join(" · ")}`);
     }
   }
+
+  // Régua 2: taxa acumulada do livro escrito até aqui.
+  const acumulado = new Map<string, { n: number; orc10k: number; exemplos: string[] }>();
+  let palavras = atual.palavras;
+  for (const p of atual.padroes) acumulado.set(p.nome, { n: p.n, orc10k: p.orc10k, exemplos: p.exemplos });
+  for (const a of anteriores ?? []) {
+    const r = contarManeirismos(a.trecho, undefined, { maxExemplos: 0 });
+    palavras += r.palavras;
+    for (const p of r.padroes) {
+      const acc = acumulado.get(p.nome);
+      if (acc) acc.n += p.n;
+      else acumulado.set(p.nome, { n: p.n, orc10k: p.orc10k, exemplos: [] });
+    }
+  }
+  const capitulos = 1 + (anteriores?.length ?? 0);
+  if (palavras >= TETO_HUMANO.janela_palavras) {
+    for (const [nome, acc] of acumulado) {
+      if (acc.n < 2) continue;
+      const taxa = (acc.n / palavras) * 10_000;
+      if (taxa > acc.orc10k) {
+        const ex = acc.exemplos.length ? `; ex.: ${acc.exemplos.join(" · ")}` : "";
+        hits.push(
+          `molde ${nome}: taxa acumulada ${taxa.toFixed(1)}/10k em ${capitulos} capítulo(s) ` +
+          `(${acc.n}× em ${palavras} palavras; teto humano do livro: ${acc.orc10k}/10k)${ex}`
+        );
+      }
+    }
+  }
+
   for (const h of ngramasSobrerepresentados(texto)) {
     if (h.n > LIMIAR_NGRAMA_CAP) {
       hits.push(`n-grama "${h.gram}": ${h.n}× no capítulo (limiar do acervo: ${LIMIAR_NGRAMA_CAP})`);
@@ -206,7 +253,7 @@ export function rodarGatesCapitulo(entrada: {
   if (!artefato.passou) return resultados;
   const texto = entrada.texto as string;
   resultados.push(gateTruncamento(texto));
-  resultados.push(gateAutoRepeticao(texto));
+  resultados.push(gateAutoRepeticao(texto, entrada.anteriores));
   resultados.push(gatePovImpossivel(texto, entrada.contrato));
   if (entrada.anteriores?.length) resultados.push(gateRepeticaoQuaseLiteral(texto, entrada.anteriores));
   if (entrada.ficha) resultados.push(gateConhecimentoProibido(texto, entrada.ficha));

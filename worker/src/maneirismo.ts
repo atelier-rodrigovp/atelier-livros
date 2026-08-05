@@ -149,6 +149,7 @@ export interface PadraoContagem {
   por10k: number;
   alvo: number;        // contagem-alvo dado o tamanho do texto (orc10k convertido)
   acima: boolean;      // n acima do alvo?
+  orc10k: number;      // teto de TAXA na escala do livro (classe 2; ver Molde.orc10k)
   limiarCap: number;   // limiar de auto-repetição por capítulo (classe 1; ver Molde.limiarCap)
   exemplos: string[];
 }
@@ -183,7 +184,7 @@ export function contarManeirismos(
     const n = ms.length;
     const alvo = Math.max(1, Math.round((orc10k * palavras) / 10_000));
     return {
-      nome, n, por10k: por(n), alvo, acima: n > alvo, limiarCap,
+      nome, n, por10k: por(n), alvo, acima: n > alvo, orc10k, limiarCap,
       exemplos: ms.slice(0, maxExemplos).map((m) => m[0].replace(/\s+/g, " ").trim().slice(0, 70)),
     };
   }).filter((p) => p.n > 0).sort((a, b) => b.n - a.n);

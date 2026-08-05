@@ -1,4 +1,8 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { contarManeirismos } from "../maneirismo.js";
 import {
   gateArtefatoPresente,
   gateAutoRepeticao,
@@ -196,6 +200,59 @@ describe("A3 — auto-repetição (classe 1) BLOQUEIA acima do limiar derivado d
     };
     expect(gateAutoRepeticao(monta(14)).passou).toBe(false);
     expect(gateAutoRepeticao(monta(13)).passou).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // META A — a segunda régua: TAXA SUSTENTADA na escala do livro.
+  // Os três casos de aceite rodam contra ARTEFATOS REAIS do repositório, não
+  // contra prosa sintética: é o acervo que provou que a régua de pico sozinha
+  // absolve o hábito.
+  // -------------------------------------------------------------------------
+  const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+  const lerArtefato = (rel: string) => readFileSync(path.join(RAIZ, rel), "utf8");
+
+  // Capítulo limpo de qualquer molde, só para dar BASE de palavras ao acumulado.
+  function capLimpo(palavras: number): string {
+    const blocos: string[] = [];
+    let n = 0;
+    for (let i = 0; n < palavras; i++) {
+      const frase = NEUTRAS[i % NEUTRAS.length];
+      blocos.push(frase);
+      n += frase.split(/\s+/).length;
+    }
+    return blocos.join("\n\n");
+  }
+
+  it("canário 2, cap 1 (aprovado com exceção): passava no pico e agora BLOQUEIA por taxa", () => {
+    const cap1 = lerArtefato("canario-2-capitulos/capitulo-01-APROVADO-COM-EXCECAO.md");
+    const r = gateAutoRepeticao(cap1);
+    expect(r.passou).toBe(false);
+    expect(r.evidencia).toContain("antítese por negação");
+    expect(r.evidencia).toContain("taxa acumulada");
+    // e a régua ANTIGA (só pico) continuaria absolvendo: 7 antíteses ≤ limiar 8
+    expect(contarManeirismos(cap1).padroes.every((p) => p.n <= p.limiarCap)).toBe(true);
+  });
+
+  it("canário 2: com o cap 1 no histórico, o cap 2 bloqueia pela taxa dos DOIS", () => {
+    const cap1 = lerArtefato("canario-2-capitulos/capitulo-01-APROVADO-COM-EXCECAO.md");
+    const cap2 = lerArtefato("canario-2-capitulos/capitulo-02-BLOQUEADO.md");
+    const r = gateAutoRepeticao(cap2, [{ numero: 1, trecho: cap1 }]);
+    expect(r.passou).toBe(false);
+    expect(r.evidencia).toContain("2 capítulo(s)");
+  });
+
+  it("canário longo, cap 1 (1 antítese): continua PASSANDO, sozinho e com histórico", () => {
+    const cap = lerArtefato("canario-longo-capitulos/capitulo-01-REPROVADO.md");
+    expect(gateAutoRepeticao(cap).passou).toBe(true);
+    // com base acumulada bem acima da janela de medição, segue passando:
+    // ocorrência única não é auto-repetição.
+    expect(gateAutoRepeticao(cap, [{ numero: 1, trecho: capLimpo(6000) }]).passou).toBe(true);
+  });
+
+  it("pico humano isolado (8×) com histórico limpo PASSA — o pico é legítimo uma vez", () => {
+    const anteriores = [1, 2, 3, 4].map((numero) => ({ numero, trecho: capLimpo(2500) }));
+    const r = gateAutoRepeticao(capComAntiteses(8), anteriores);
+    expect(r.passou).toBe(true);
   });
 });
 
