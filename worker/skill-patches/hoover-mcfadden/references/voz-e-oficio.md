@@ -178,9 +178,12 @@ Os trechos intercalados que parecem memórias do Tomás têm voz própria:
   Prefira o agente humano + verbo concreto, ou a reação física em 1ª pessoa ("meu
   peito apertou"). Isto é diferente de uma imagem afetiva isolada da voz — o tique
   é a abstração-agente repetida.
-- **Frase-sanfona** — reformular a MESMA percepção duas ou três vezes na mesma
-  frase, em apostos ou "não era X, era Y, ou talvez Z" encadeados. Diga uma vez, a
-  melhor. (Não confundir com enumeração concreta, onde cada item é novo, nem com
+- **Frase-sanfona** — reformular a MESMA percepção duas ou três vezes, em
+  apostos, em "não era X, era Y, ou talvez Z" encadeados, ou em frases
+  consecutivas: o molde vale TAMBÉM quando a reformulação atravessa o ponto
+  final ("Não é frieza. É que a manutenção eu sei nomear." é o mesmo defeito em
+  duas frases — antítese de negação como muleta). Diga uma vez, a melhor. (Não
+  confundir com enumeração concreta, onde cada item é novo, nem com
   interioridade que avança — essas ficam.)
 - Metáfora médica óbvia demais ("meu coração era um monitor em linha reta").
   Use com extrema parcimônia.
