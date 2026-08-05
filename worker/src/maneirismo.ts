@@ -57,17 +57,22 @@ function contarPalavras(s: string): number {
   return (s.match(/\S+/g) ?? []).length;
 }
 
-export function contarManeirismos(texto: string, _orc = ORCAMENTO_POR_10K): ResultadoManeirismo {
+export function contarManeirismos(
+  texto: string,
+  _orc = ORCAMENTO_POR_10K,
+  opts?: { maxExemplos?: number }
+): ResultadoManeirismo {
   const t = texto ?? "";
   const palavras = contarPalavras(t);
   const por = (n: number) => (palavras > 0 ? Math.round((n / palavras) * 10_000 * 10) / 10 : 0);
+  const maxExemplos = opts?.maxExemplos ?? 3;
   const padroes: PadraoContagem[] = MOLDES.map(({ nome, re, orc10k }) => {
     const ms = [...t.matchAll(re)];
     const n = ms.length;
     const alvo = Math.max(1, Math.round((orc10k * palavras) / 10_000));
     return {
       nome, n, por10k: por(n), alvo, acima: n > alvo,
-      exemplos: ms.slice(0, 3).map((m) => m[0].replace(/\s+/g, " ").trim().slice(0, 70)),
+      exemplos: ms.slice(0, maxExemplos).map((m) => m[0].replace(/\s+/g, " ").trim().slice(0, 70)),
     };
   }).filter((p) => p.n > 0).sort((a, b) => b.n - a.n);
   const total = padroes.reduce((s, p) => s + p.n, 0);

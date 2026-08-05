@@ -110,6 +110,74 @@ describe("medirSinais — cotas vêm SÓ do contrato (comportamento atual)", () 
   });
 });
 
+describe("FASE 2 — moldes nomeados como sinal UNIVERSAL (orçamento do maneirismo.ts, não do contrato)", () => {
+  // 6 antíteses por negação num capítulo de ~2.500 palavras: o caso real do
+  // canário 2 (13 ocorrências absolvidas 20/20) em miniatura.
+  const ANTITESES = [
+    "Não era medo. Era método.",
+    "Não era pressa. Era fome de acabar logo.",
+    "Não era frieza. Era manutenção.",
+    "Não era silêncio. Era espera armada.",
+    "Não era cuidado. Era vigilância.",
+    "Não era descanso. Era rendição adiada.",
+  ];
+  const FRASES_NEUTRAS = [
+    "Ela guardou a chave na gaveta e fechou o escritório antes das seis.",
+    "O ônibus passou cheio e ela decidiu ir a pé pela rua do mercado.",
+    "A vizinha regava as plantas da varanda quando ela cruzou o portão.",
+    "No fim do corredor, a lâmpada piscou duas vezes e se firmou.",
+    "Ela pendurou o casaco no gancho e ligou a chaleira elétrica.",
+    "O telefone vibrou sobre a mesa com um número que ela não salvou.",
+    "A janela da sala batia de leve com o vento que vinha do quintal.",
+    "Ela separou as contas por data e pagou as duas mais antigas.",
+  ];
+  const TEXTO_2500 = (() => {
+    const blocos: string[] = ["## Capítulo 5", ""];
+    let i = 0;
+    while (blocos.join(" ").split(/\s+/).length < 2500) {
+      blocos.push(FRASES_NEUTRAS[i % FRASES_NEUTRAS.length]);
+      if (i < ANTITESES.length) blocos.push(ANTITESES[i]);
+      i++;
+    }
+    return blocos.join("\n\n");
+  })();
+
+  it("6 antíteses por negação em ~2.500 palavras saem FORA da cota, com nome do molde e exemplos citáveis", () => {
+    // Contrato SEM regra de molde (V7: nenhum contrato tem) — o orçamento tem de
+    // vir de maneirismo.ts (orc10k do próprio molde), régua universal.
+    const sinais = medirSinais(TEXTO_2500, contratoSintetico());
+    const molde = sinais.find((x) => x.sinal.startsWith("molde.") && x.sinal.includes("não era X. Era Y."))!;
+    expect(molde).toBeDefined();
+    expect(Number(molde.valor)).toBe(6);
+    expect(molde.cota?.max).toBeDefined();      // orçamento existe SEM contrato declarar
+    expect(molde.fora_da_cota).toBe(true);
+    expect(molde.exemplos.length).toBe(6);       // todas citáveis (adendo 2)
+    expect(molde.exemplos[0]).toContain("Não era medo");
+  });
+
+  it("a régua vale para TODA skill (dan-brown, hoover, romantasy) — não é identidade de skill", () => {
+    for (const id of ["dan-brown", "hoover-mcfadden", "romantasy"]) {
+      const sinais = medirSinais(TEXTO_2500, carregarContrato(id).contrato);
+      const molde = sinais.find((x) => x.sinal.startsWith("molde.") && x.sinal.includes("não era X. Era Y."))!;
+      expect(molde?.fora_da_cota, id).toBe(true);
+    }
+  });
+
+  it("dentro do orçamento não sai da cota (1 antítese em capítulo longo é legítima)", () => {
+    const texto = TEXTO_2500.split("\n\n").filter((p) => !ANTITESES.slice(1).includes(p)).join("\n\n");
+    const molde = medirSinais(texto, contratoSintetico()).find(
+      (x) => x.sinal.startsWith("molde.") && x.sinal.includes("não era X. Era Y.")
+    )!;
+    expect(Number(molde.valor)).toBe(1);
+    expect(molde.fora_da_cota).toBe(false);
+  });
+
+  it("compatibilidadeCorpusV1: o corpus congelado NÃO ganha sinais novos (calibração intocada)", () => {
+    const sinais = medirSinais(TEXTO_2500, contratoSintetico(), { compatibilidadeCorpusV1: true });
+    expect(sinais.find((x) => x.sinal.startsWith("molde."))).toBeUndefined();
+  });
+});
+
 describe("resumoSinais — medições reais, numeradas, para o revisor", () => {
   it("numera as ocorrências e marca FORA quando há cota estourada", () => {
     const contrato = contratoSintetico({

@@ -402,6 +402,17 @@ describe("escreverCapitulo — violação difusa entra em modo reescrita (caso d
       ...ocorrencias,
     };
   };
+  // A régua universal de molde (FASE 2) também exige disposição quando estoura;
+  // aqui o alvo do teste é o fluxo da sanfona, então o resto sai como FP.
+  const disporForaDaCotaComoFP = (exceto: string[]) =>
+    sinaisSanfona
+      .filter((s) => s.fora_da_cota && !exceto.includes(s.sinal))
+      .map((s) => ({
+        sinal: s.sinal,
+        valor: s.valor,
+        disposicao: "falso_positivo" as const,
+        evidencia: "medição não configura defeito neste texto de teste",
+      }));
 
   it("violacao_confirmada de sinal medido → instrução global com trechos flagrados + modo reescrita; platô de 1 rodada é tolerado", async () => {
     deps.maxCorrecoes = 3;
@@ -411,7 +422,7 @@ describe("escreverCapitulo — violação difusa entra em modo reescrita (caso d
       JSON.stringify(
         parecer({
           verdict: "reprovado",
-          sinais: [disposicaoMedida("sanfona")],
+          sinais: [disposicaoMedida("sanfona"), ...disporForaDaCotaComoFP(["sanfona"])],
           correcoes: [], // revisor não listou correção cirúrgica — só a violação difusa
         })
       );
@@ -446,16 +457,16 @@ describe("escreverCapitulo — violação difusa entra em modo reescrita (caso d
     deps.maxCorrecoes = 3;
     provedor.enfileirar("contextualizador", CTX_OK);
     provedor.enfileirar("escritor", PROSA_SANFONA);
-    const parecerViol = (n: number) =>
-      JSON.stringify(
+    const parecerViol = (n: number) => {
+      const confirmados = ["sanfona", "declarativas_pct", "dialogo_pct"].slice(0, n);
+      return JSON.stringify(
         parecer({
           verdict: "reprovado",
-          sinais: ["sanfona", "declarativas_pct", "dialogo_pct"]
-            .slice(0, n)
-            .map(disposicaoMedida),
+          sinais: [...confirmados.map(disposicaoMedida), ...disporForaDaCotaComoFP(confirmados)],
           correcoes: [{ local: "L:1", problema: "reformulação", instrucao: "corte a reformulação" }],
         })
       );
+    };
     // saldos 3 → 3 (platô 1) → 2 (melhora, platô zera) → aprovação na 4ª rodada
     provedor.enfileirar("revisor_literario", parecerViol(3));
     provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);

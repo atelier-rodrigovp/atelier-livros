@@ -7,6 +7,7 @@
 import {
   classificarGanchoFinal,
   contarGnomico,
+  contarManeirismos,
   contarMetaforaElaborada,
   contarPersonificacao,
   contarSanfona,
@@ -166,6 +167,35 @@ export function medirSinais(
       ? []
       : t.todosExemplos ?? t.exemplos;
     out.push({ sinal: `cadencia.${t.nome}`, valor: t.n, cota: declarou ? { max: t.alvo } : undefined, fora_da_cota: declarou && t.acima, exemplos });
+  }
+
+  // ------------------------------------------------------------------------
+  // RÉGUA UNIVERSAL DE MOLDE (FASE 2 do plano ofício-inteiro, 2026-08-05).
+  // Frequência de molde de IA NÃO é identidade de skill (os três ofícios listam
+  // esses padrões como defeito) — o orçamento vem de maneirismo.ts (orc10k por
+  // molde), não do contrato; exceção só se o contrato declarar cota própria
+  // (regra tipo "cota" com id contendo "molde"). CR4 segue intacta: cadência,
+  // interioridade e pisos continuam POR SKILL, acima.
+  // Sinal, nunca gate: alimenta o revisor; promoção a bloqueio é decisão do
+  // autor com os números da FASE 4 na mesa.
+  // O corpus de calibração foi congelado ANTES desta régua: sob
+  // compatibilidadeCorpusV1 os sinais universais não são emitidos (mesmo
+  // precedente do fragColados acima) — a calibração certifica cotas de
+  // CONTRATO; a régua universal é provada contra o acervo, não contra rótulos.
+  // ------------------------------------------------------------------------
+  if (!opts?.compatibilidadeCorpusV1) {
+    const cotaContratoMolde = cotaDeclarada(contrato, "molde");
+    const man = contarManeirismos(texto, undefined, { maxExemplos: 20 });
+    for (const p of man.padroes) {
+      const cota = cotaContratoMolde ?? { max: p.alvo };
+      out.push({
+        sinal: `molde.${p.nome}`,
+        valor: p.n,
+        cota,
+        fora_da_cota: (cota.max != null && p.n > cota.max) || (cota.min != null && p.n < cota.min),
+        exemplos: p.exemplos,
+      });
+    }
   }
 
   // Muleta genérica: a regra `muleta-coisa` do romantasy declarava cota e NÃO
