@@ -46,7 +46,7 @@ import {
 import { fundirFichas, PersistenciaEstadoIsolado } from "./estrutural-staging.js";
 import { executarMeta9 } from "./meta9.js";
 import { resolverTotalCapitulos } from "./total-capitulos.js";
-import { medirSinais, resumoSinais } from "./sinais.js";
+import { medirSinais, medirSinaisLivro, resumoSinais } from "./sinais.js";
 import { exigirReleaseAtual, lerAutorizacaoProjeto, type OperacaoV2 } from "./release.js";
 import { conferirParecer, exigirDisposicaoCompleta, validarParecer } from "./revisor.js";
 import {
@@ -833,6 +833,34 @@ export async function executarEscritaV2(job: Job): Promise<ResultadoRoteado | vo
   }
   if (fechamento.naoAplicavel) {
     await atualizarProgresso(job.id, { aviso_arco: fechamento.naoAplicavel });
+  }
+
+  // ---------------------------------------------------------------------------
+  // SINAIS DE CLASSE 2 NA ESCALA DO LIVRO (A1 do plano escala-retenção).
+  // A taxa absoluta de molde/muleta, informativa por capítulo, é avaliada aqui
+  // contra o orçamento orc10k na escala para a qual ele foi feito. SINAL, nunca
+  // gate: vai para o progresso (o autor lê); classe 2 não bloqueia (A3).
+  // ---------------------------------------------------------------------------
+  try {
+    const capitulosDoLivro: { numero: number; texto: string }[] = [];
+    for (let n = 1; n <= total; n++) {
+      try {
+        const t = await fs.readFile(path.join(deps.dirManuscrito, `capitulo-${String(n).padStart(2, "0")}.md`), "utf8");
+        capitulosDoLivro.push({ numero: n, texto: t });
+      } catch {
+        /* capítulo ausente no disco: fica fora da medição */
+      }
+    }
+    const foraLivro = medirSinaisLivro(capitulosDoLivro).filter((s) => s.fora_da_cota);
+    if (foraLivro.length) {
+      await atualizarProgresso(job.id, {
+        aviso_sinais_livro: foraLivro
+          .map((s) => `${s.sinal}: ${s.valor} (orçamento do livro: máx ${s.cota?.max})`)
+          .join(" · "),
+      });
+    }
+  } catch {
+    /* medição informativa nunca derruba o fluxo */
   }
 
   // Retomabilidade: um job re-executado com a meta-nota já em curso NUNCA pode

@@ -142,23 +142,31 @@ describe("FASE 2 — moldes nomeados como sinal UNIVERSAL (orçamento do maneiri
     return blocos.join("\n\n");
   })();
 
-  it("6 antíteses por negação em ~2.500 palavras saem FORA da cota, com nome do molde e exemplos citáveis", () => {
-    // Contrato SEM regra de molde (V7: nenhum contrato tem) — o orçamento tem de
-    // vir de maneirismo.ts (orc10k do próprio molde), régua universal.
+  it("6 antíteses por negação em ~2.500 palavras: sinal medido com exemplos citáveis, informativo (A1: dentro do teto do acervo, 7)", () => {
+    // Contrato SEM regra de molde (V7: nenhum contrato tem) — o limiar de
+    // capítulo vem de maneirismo.ts (limiarCap, derivado do acervo). A taxa
+    // absoluta (orc10k) é avaliada na escala de LIVRO (medirSinaisLivro).
     const sinais = medirSinais(TEXTO_2500, contratoSintetico());
     const molde = sinais.find((x) => x.sinal.startsWith("molde.") && x.sinal.includes("não era X. Era Y."))!;
     expect(molde).toBeDefined();
     expect(Number(molde.valor)).toBe(6);
-    expect(molde.cota?.max).toBeDefined();      // orçamento existe SEM contrato declarar
-    expect(molde.fora_da_cota).toBe(true);
+    expect(molde.cota?.max).toBe(7);            // limiar de auto-repetição existe SEM contrato declarar
+    expect(molde.fora_da_cota).toBe(false);     // 6 ≤ 7: o acervo aprovado chega aí
     expect(molde.exemplos.length).toBe(6);       // todas citáveis (adendo 2)
     expect(molde.exemplos[0]).toContain("Não era medo");
   });
 
-  it("a régua vale para TODA skill (dan-brown, hoover, romantasy) — não é identidade de skill", () => {
+  it("a régua de auto-repetição vale para TODA skill (dan-brown, hoover, romantasy) — não é identidade de skill", () => {
+    const TREZE = (() => {
+      const extras = Array.from({ length: 7 }, (_, i) =>
+        `Não era ${["rotina", "cansaço", "raiva", "pena", "culpa", "sono", "fome"][i]}. Era outra coisa por dentro.`
+      );
+      return TEXTO_2500 + "\n\n" + extras.join("\n\n");
+    })();
     for (const id of ["dan-brown", "hoover-mcfadden", "romantasy"]) {
-      const sinais = medirSinais(TEXTO_2500, carregarContrato(id).contrato);
+      const sinais = medirSinais(TREZE, carregarContrato(id).contrato);
       const molde = sinais.find((x) => x.sinal.startsWith("molde.") && x.sinal.includes("não era X. Era Y."))!;
+      expect(Number(molde.valor), id).toBe(13);
       expect(molde?.fora_da_cota, id).toBe(true);
     }
   });
@@ -195,10 +203,10 @@ describe("FASE 2 — n-grama sobre-representado (pega molde que NINGUÉM nomeou)
     "Ela apagou a mensagem do jeito que doía e virou o telefone para baixo.",
   ].join("\n\n");
 
-  it("5 repetições da mesma construção de 4 palavras produzem sinal com o n-grama e a contagem", () => {
+  it("5 repetições da mesma construção de 4 palavras produzem sinal com o n-grama e a contagem (informativo: 5 ≤ 13)", () => {
     const s = medirSinais(TEXTO_NGRAMA, contratoSintetico()).find((x) => x.sinal === "ngrama_sobrerrepresentado")!;
     expect(s).toBeDefined();
-    expect(s.fora_da_cota).toBe(true);
+    expect(s.fora_da_cota).toBe(false); // A1: fora só além do máximo do acervo de controle (13)
     expect(s.exemplos.join(" ")).toContain("do jeito que");
     expect(s.exemplos.join(" ")).toContain("5×");
   });
@@ -236,11 +244,11 @@ describe("FASE 2 — léxico de muleta como sinal universal (orçamento de MULET
     "O porteiro entregou as chaves e anotou a placa do carro no caderno.",
   ].join("\n\n");
 
-  it("'coisa' acima do orçamento de MULETAS sai fora da cota, com contexto citável", () => {
+  it("'coisa' repetida é medida com contexto citável; informativa no capítulo (A1: taxa absoluta é escala de livro)", () => {
     const s = medirSinais(TEXTO_COISA, contratoSintetico()).find((x) => x.sinal === "muleta.coisa/coisas")!;
     expect(s).toBeDefined();
     expect(Number(s.valor)).toBe(3);
-    expect(s.fora_da_cota).toBe(true);
+    expect(s.fora_da_cota).toBe(false);
     expect(s.exemplos.length).toBe(3);
     expect(s.exemplos[0]).toContain("coisa");
   });
@@ -254,7 +262,7 @@ describe("FASE 2 — léxico de muleta como sinal universal (orçamento de MULET
     }
   });
 
-  it("uso dentro do orçamento não sai da cota", () => {
+  it("uso raro também é informativo, nunca fora da cota no capítulo", () => {
     const texto = TEXTO_COISA.replace(/coisa que ela não sabia nomear ainda/, "dobra que ela não sabia nomear ainda")
       .replace(/uma coisa errada/, "uma sombra errada");
     const s = medirSinais(texto, contratoSintetico()).find((x) => x.sinal === "muleta.coisa/coisas")!;
@@ -284,7 +292,7 @@ describe("resumoSinais — medições reais, numeradas, para o revisor", () => {
     const linha = resumo.split("\n").find((l) => l.includes('molde.antítese "não era X. Era Y."'))!;
     expect(linha).toBeDefined();
     expect(linha).toContain(": 3");         // contagem
-    expect(linha).toContain("FORA");        // fora da cota universal (máx 1)
+    expect(linha).not.toContain("FORA");    // A1: 3 ≤ limiar 7 — informativo, o revisor julga
     // ocorrências numeradas logo abaixo da linha do molde (o revisor só pode
     // confirmar violação citando cada uma — regra do adendo 2)
     const bloco = resumo.slice(resumo.indexOf(linha));
@@ -301,5 +309,163 @@ describe("resumoSinais — medições reais, numeradas, para o revisor", () => {
     expect(resumo).toContain("- gnomico:");
     expect(resumo).toContain("FORA");
     expect(resumo).toMatch(/\n {4}1\. /); // ocorrência numerada e citável
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A1 (plano escala-retenção, 2026-08-05): duas CLASSES de sinal, cada uma na
+// sua escala. Classe 2 (taxa absoluta, orçamento orc10k feito para LIVRO) não
+// é mais avaliada contra cota na escala de capítulo — o piso max(1,…) dava a
+// um capítulo inteiro direito a UM "como se" (10/11 canários e 8/8 controles
+// estouravam pela régua, não pela prosa). Classe 1 (auto-repetição do MESMO
+// molde dentro do capítulo) mantém avaliação por capítulo, com limiar derivado
+// do acervo (máximo observado em 539 capítulos de controle + 1).
+// ---------------------------------------------------------------------------
+describe("A1 — classe 2 (taxa absoluta) é informativa no capítulo; classe 1 (auto-repetição) sai fora", () => {
+  const FRASES_NEUTRAS = [
+    "Ela guardou a chave na gaveta e fechou o escritório antes das seis.",
+    "O ônibus passou cheio e ela decidiu ir a pé pela rua do mercado.",
+    "A vizinha regava as plantas da varanda quando ela cruzou o portão.",
+    "No fim do corredor, a lâmpada piscou duas vezes e se firmou.",
+    "Ela pendurou o casaco no gancho e ligou a chaleira elétrica.",
+    "O telefone vibrou sobre a mesa com um número que ela não salvou.",
+    "A janela da sala batia de leve com o vento que vinha do quintal.",
+    "Ela separou as contas por data e pagou as duas mais antigas.",
+  ];
+  function capitulo(palavrasAlvo: number, inserir: string[]): string {
+    const blocos: string[] = ["## Capítulo 9", ""];
+    let i = 0;
+    while (blocos.join(" ").split(/\s+/).length < palavrasAlvo) {
+      blocos.push(FRASES_NEUTRAS[i % FRASES_NEUTRAS.length]);
+      if (i < inserir.length) blocos.push(inserir[i]);
+      i++;
+    }
+    return blocos.join("\n\n");
+  }
+
+  it("3 'como se' em ~2.800 palavras é português normal: sinal presente, informativo, NUNCA fora da cota", () => {
+    const texto = capitulo(2800, [
+      "Ela fechou a porta como se o corredor pudesse ouvir.",
+      "Ele dobrou o jornal como se o gesto encerrasse a conversa.",
+      "A casa rangeu como se acomodasse o próprio peso.",
+    ]);
+    const s = medirSinais(texto, contratoSintetico()).find(
+      (x) => x.sinal.startsWith("molde.") && x.sinal.includes("como se")
+    )!;
+    expect(s).toBeDefined();
+    expect(Number(s.valor)).toBe(3);
+    expect(s.fora_da_cota).toBe(false);   // classe 2: sem cota na escala de capítulo
+    expect(s.exemplos.length).toBe(3);    // o revisor continua vendo tudo
+  });
+
+  it("13× o MESMO molde de antítese num capítulo sai FORA por auto-repetição (limiar derivado do acervo: 7+1)", () => {
+    const antiteses = Array.from({ length: 13 }, (_, i) =>
+      `Não era ${["medo", "pressa", "frieza", "cuidado", "descanso", "rotina", "cansaço", "raiva", "pena", "culpa", "sono", "fome", "frio"][i]}. Era outra coisa por dentro.`
+    );
+    const texto = capitulo(2800, antiteses);
+    const s = medirSinais(texto, contratoSintetico()).find(
+      (x) => x.sinal.startsWith("molde.") && x.sinal.includes("não era X. Era Y.")
+    )!;
+    expect(Number(s.valor)).toBe(13);
+    expect(s.cota?.max).toBe(7);          // limiar derivado: máx do controle (7); acima é auto-repetição
+    expect(s.fora_da_cota).toBe(true);
+  });
+
+  it("repetição de molde no teto do acervo (7×) ainda NÃO sai fora — o acervo aprovado chega aí", () => {
+    const antiteses = Array.from({ length: 7 }, (_, i) =>
+      `Não era ${["medo", "pressa", "frieza", "cuidado", "descanso", "rotina", "cansaço"][i]}. Era outra coisa por dentro.`
+    );
+    const s = medirSinais(capitulo(2800, antiteses), contratoSintetico()).find(
+      (x) => x.sinal.startsWith("molde.") && x.sinal.includes("não era X. Era Y.")
+    )!;
+    expect(Number(s.valor)).toBe(7);
+    expect(s.fora_da_cota).toBe(false);
+  });
+
+  it("muleta lexical (classe 2) vira informativa no capítulo; tolerância zero (typo/PT-PT) continua fora", () => {
+    const texto = capitulo(1200, [
+      "Ela pegou aquela coisa da mesa e guardou na bolsa.",
+      "Havia uma coisa errada na sala, uma coisa que ela não sabia nomear.",
+      "Pero ele não respondeu quando ela chamou do corredor.",
+    ]);
+    const sinais = medirSinais(texto, contratoSintetico());
+    const coisa = sinais.find((x) => x.sinal === "muleta.coisa/coisas")!;
+    expect(Number(coisa.valor)).toBe(3);
+    expect(coisa.fora_da_cota).toBe(false); // classe 2: taxa absoluta pede escala de livro
+    const typo = sinais.find((x) => x.sinal === "muleta.léxico estrangeiro (typo de geração)")!;
+    expect(typo.fora_da_cota).toBe(true);   // alvo 0 independe de escala: defeito em qualquer tamanho
+  });
+
+  it("n-grama (classe 1): repetido além do máximo do acervo (13) sai fora; abaixo é informativo", () => {
+    // Preenchimento lexicalmente VARIADO (módulos coprimos): sem 4-gramas
+    // espúrios — só a frase inserida repete.
+    // Itens de ≤3 palavras: nenhum 4-grama cabe DENTRO de um item; combinações
+    // entre módulos coprimos (7·5·11·13) não repetem no tamanho do capítulo.
+    const S = ["A porteira", "A costureira", "O padeiro", "A florista", "O relojoeiro", "A bibliotecária", "O jardineiro"];
+    const V = ["ajeitou", "guardou", "verificou", "dobrou", "carregou"];
+    const O = ["as cartas", "o caixote", "as luvas", "o abajur", "as xícaras", "o rádio", "as sementes", "o mapa", "as moedas", "o banquinho", "as fitas"];
+    const L = ["perto da escada", "atrás do balcão", "sob a lona", "no quintal", "junto ao portão", "diante do espelho", "na bancada", "perto do fogão", "na prateleira", "sob a mesa", "entre os vasos", "no corredor", "além da cerca"];
+    const T = ["ontem", "cedo", "devagar", "depois", "enfim", "logo", "antes", "agora", "sempre", "ainda", "primeiro", "calmamente", "rapidamente", "outra vez", "em silêncio", "sem pressa", "com cuidado"];
+    function capVariado(inserir: string[]): string {
+      const blocos: string[] = ["## Capítulo 9", ""];
+      let i = 0;
+      while (blocos.join(" ").split(/\s+/).length < 2800) {
+        blocos.push(`${S[i % 7]} ${V[i % 5]} ${O[i % 11]} ${L[i % 13]} ${T[i % 17]}.`);
+        if (i < inserir.length) blocos.push(inserir[i]);
+        i++;
+      }
+      return blocos.join("\n\n");
+    }
+    const frase = "Ela anotou o recado na borda vermelha do caderno.";
+    const quinze = capVariado(Array.from({ length: 15 }, () => frase));
+    const sFora = medirSinais(quinze, contratoSintetico()).find((x) => x.sinal === "ngrama_sobrerrepresentado")!;
+    expect(sFora).toBeDefined();
+    expect(sFora.fora_da_cota).toBe(true);
+
+    const cinco = capVariado(Array.from({ length: 5 }, () => frase));
+    const sInfo = medirSinais(cinco, contratoSintetico()).find((x) => x.sinal === "ngrama_sobrerrepresentado")!;
+    expect(sInfo).toBeDefined();            // o revisor ainda vê a repetição
+    expect(sInfo.fora_da_cota).toBe(false); // relógio/epíteto legítimo chega a 13 no acervo
+  });
+});
+
+describe("A1 — classe 2 acumula e é avaliada na ESCALA DO LIVRO (medirSinaisLivro)", () => {
+  it("o mesmo uso que é normal num capítulo estoura quando o livro inteiro repete", async () => {
+    const { medirSinaisLivro } = await import("./sinais.js");
+    // 10 capítulos de ~1.000 palavras, cada um com 4 "como se": 40 no livro de
+    // ~10k palavras = 40/10k, contra orçamento 2,5/10k → fora na escala certa.
+    const FRASES = [
+      "Ela guardou a chave na gaveta e fechou o escritório antes das seis.",
+      "O ônibus passou cheio e ela decidiu ir a pé pela rua do mercado.",
+      "A vizinha regava as plantas da varanda quando ela cruzou o portão.",
+    ];
+    function cap(n: number): string {
+      const blocos = [`## Capítulo ${n}`, ""];
+      let i = 0;
+      while (blocos.join(" ").split(/\s+/).length < 1000) {
+        blocos.push(FRASES[i % FRASES.length]);
+        if (i < 4) blocos.push(`Ela olhou para trás como se alguém tivesse falado o nome dela.`);
+        i++;
+      }
+      return blocos.join("\n\n");
+    }
+    const capitulos = Array.from({ length: 10 }, (_, i) => ({ numero: i + 1, texto: cap(i + 1) }));
+    const sinais = medirSinaisLivro(capitulos);
+    const comoSe = sinais.find((s) => s.sinal.startsWith("molde.") && s.sinal.includes("como se"))!;
+    expect(comoSe).toBeDefined();
+    expect(Number(comoSe.valor)).toBe(40);
+    expect(comoSe.fora_da_cota).toBe(true);  // 40 ≫ orçamento 2,5/10k × ~10k palavras
+
+    // e o uso raro no livro inteiro fica dentro (2 no livro de ~10k ≤ alvo ~3)
+    let mantidas = 0;
+    const capitulosLimpos = capitulos.map((c) => ({
+      numero: c.numero,
+      texto: c.texto.replace(/como se alguém tivesse falado o nome dela/g, () =>
+        mantidas++ < 2 ? "como se alguém tivesse falado o nome dela" : "porque achou ter ouvido o nome dela"
+      ),
+    }));
+    const limpo = medirSinaisLivro(capitulosLimpos).find((s) => s.sinal.startsWith("molde.") && s.sinal.includes("como se"));
+    expect(Number(limpo?.valor)).toBe(2);
+    expect(limpo?.fora_da_cota ?? false).toBe(false);
   });
 });

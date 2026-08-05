@@ -6,31 +6,52 @@
 // ---------------------------------------------------------------------------
 // 1) Moldes NOMEADOS (com orçamento por 10k palavras) — os tiques conhecidos.
 // ---------------------------------------------------------------------------
-export interface Molde { nome: string; re: RegExp; orc10k: number }
+export interface Molde {
+  nome: string;
+  re: RegExp;
+  orc10k: number;
+  /**
+   * Limiar de AUTO-REPETIÇÃO (classe 1) na escala de CAPÍTULO: máximo observado
+   * do molde em 539 capítulos de CONTROLE do acervo (livros importados, aprovados
+   * pelo autor) em 2026-08-05 — repetir MAIS que isso num capítulo é mais do que
+   * qualquer capítulo aprovado jamais repetiu. Derivado, não inventado (plano
+   * escala-retenção A1); orc10k segue sendo a taxa absoluta (classe 2), cuja
+   * escala natural é o LIVRO.
+   */
+  limiarCap: number;
+}
 
 const MOLDES: Molde[] = [
   // antítese por negação, em todas as formas
-  { nome: 'antítese "não era X. Era Y."', re: /\bn[ãa]o\s+(?:era|foi|fora|é|seria)\b[^.!?\n]{0,60}[.!?]\s+(?:era|foi|fora|é|seria)\b/gi, orc10k: 1.5 },
-  { nome: 'aposto antitético ("não era pergunta; era…")', re: /\bn[ãa]o\s+(?:era|foi|é)\s+[^.,;:!?\n]{1,30}[;:,]\s*(?:era|foi|é|mas|e\s+sim)\b/gi, orc10k: 1.0 },
-  { nome: 'antítese "não X, mas/e sim Y"', re: /\bn[ãa]o\s+\w[^.,;!?\n]{0,50}[,;]\s*(?:mas|e\s+sim|sen[ãa]o)\s+/gi, orc10k: 1.5 },
+  { nome: 'antítese "não era X. Era Y."', re: /\bn[ãa]o\s+(?:era|foi|fora|é|seria)\b[^.!?\n]{0,60}[.!?]\s+(?:era|foi|fora|é|seria)\b/gi, orc10k: 1.5, limiarCap: 7 },
+  { nome: 'aposto antitético ("não era pergunta; era…")', re: /\bn[ãa]o\s+(?:era|foi|é)\s+[^.,;:!?\n]{1,30}[;:,]\s*(?:era|foi|é|mas|e\s+sim)\b/gi, orc10k: 1.0, limiarCap: 5 },
+  { nome: 'antítese "não X, mas/e sim Y"', re: /\bn[ãa]o\s+\w[^.,;!?\n]{0,50}[,;]\s*(?:mas|e\s+sim|sen[ãa]o)\s+/gi, orc10k: 1.5, limiarCap: 9 },
   // AUDITORIA-CONVERGENCIA 2026-07-13: a versão antiga casava QUALQUER frase
   // curta iniciada por "Não" (4/5 marcações reais eram falso positivo — réplicas
   // e confissões de narradora 1ª pessoa, sem antítese). Agora exige o 2º termo
   // antitético na frase seguinte (Era/É/Este/Havia/Mas/…).
-  { nome: 'fragmento antitético curto ("Não X. Era/Este Y.")', re: /(?:^|[.!?]\s)N[ãa]o\s+[^.!?\n]{1,45}[.!?]\s+(?:Era|É|Foi|Fora|Seria|Este|Esta|Isto|Isso|Havia|Há|Mas|Agora|Hoje)(?=[\s,;:.!?—…]|$)/g, orc10k: 1.5 },
+  { nome: 'fragmento antitético curto ("Não X. Era/Este Y.")', re: /(?:^|[.!?]\s)N[ãa]o\s+[^.!?\n]{1,45}[.!?]\s+(?:Era|É|Foi|Fora|Seria|Este|Esta|Isto|Isso|Havia|Há|Mas|Agora|Hoje)(?=[\s,;:.!?—…]|$)/g, orc10k: 1.5, limiarCap: 5 },
   // antítese com "haver" — escapava (o molde acima só casa não era/foi/é/seria):
   // "Não havia nada… Havia só o branco." / "não havia X, havia Y".
-  { nome: 'antítese com "haver" ("Não havia X… Havia Y")', re: /\bn[ãa]o\s+h(?:avia|á|ouve)\b[^.!?\n]{0,80}[.!?…]+\s+(?:[^.!?\n]{0,30}\s)?h(?:avia|á)\b/gi, orc10k: 1.5 },
-  { nome: 'antítese com "haver" (mesma frase: "não havia X, havia Y")', re: /\bn[ãa]o\s+h(?:avia|á|ouve)\b[^.,;:!?\n]{1,50}[,;]\s*(?:mas\s+|e\s+sim\s+)?h(?:avia|á)\b/gi, orc10k: 1.0 },
+  { nome: 'antítese com "haver" ("Não havia X… Havia Y")', re: /\bn[ãa]o\s+h(?:avia|á|ouve)\b[^.!?\n]{0,80}[.!?…]+\s+(?:[^.!?\n]{0,30}\s)?h(?:avia|á)\b/gi, orc10k: 1.5, limiarCap: 3 },
+  { nome: 'antítese com "haver" (mesma frase: "não havia X, havia Y")', re: /\bn[ãa]o\s+h(?:avia|á|ouve)\b[^.,;:!?\n]{1,50}[,;]\s*(?:mas\s+|e\s+sim\s+)?h(?:avia|á)\b/gi, orc10k: 1.0, limiarCap: 2 },
   // símile-andaime: símile hipotético estendido ("Como quando se entra…", "como se
   // pudesse…") — um dos piores tiques de IA. Orçamento apertado (1 legítimo ok; o
   // alvo é o EXCESSO e o molde repetido).
-  { nome: 'símile-andaime ("como se / como quando")', re: /\bcomo\s+(?:se|quando)\b/gi, orc10k: 2.5 },
+  { nome: 'símile-andaime ("como se / como quando")', re: /\bcomo\s+(?:se|quando)\b/gi, orc10k: 2.5, limiarCap: 15 },
   // "do jeito que / do jeito de / do jeito como"
-  { nome: '"do jeito que/de"', re: /\bdo\s+jeito\s+(?:que|de|como)\b/gi, orc10k: 2.5 },
+  { nome: '"do jeito que/de"', re: /\bdo\s+jeito\s+(?:que|de|como)\b/gi, orc10k: 2.5, limiarCap: 12 },
   // clichês recorrentes
-  { nome: "clichê recorrente", re: /\b(mar de chumbo|clareza fria|sil[êe]ncio ensurdecedor|frio na espinha|cora[çc][ãa]o disparad[oa]|sangue gelad[oa]|n[óo] na garganta)\b/gi, orc10k: 1.0 },
+  { nome: "clichê recorrente", re: /\b(mar de chumbo|clareza fria|sil[êe]ncio ensurdecedor|frio na espinha|cora[çc][ãa]o disparad[oa]|sangue gelad[oa]|n[óo] na garganta)\b/gi, orc10k: 1.0, limiarCap: 1 },
 ];
+
+/**
+ * Limiar de auto-repetição de N-GRAMA (classe 1) por capítulo: o máximo que o
+ * mesmo n-grama de 4–5 palavras repete num capítulo de CONTROLE do acervo é 13
+ * ("vinte e dois dias" — relógio de prazo, repetição PROPOSITAL; epítetos como
+ * "a mão de cima" chegam a 12). Acima disso não existe caso defensável no acervo.
+ */
+export const LIMIAR_NGRAMA_CAP = 13;
 
 export interface PadraoContagem {
   nome: string;
@@ -38,6 +59,7 @@ export interface PadraoContagem {
   por10k: number;
   alvo: number;        // contagem-alvo dado o tamanho do texto (orc10k convertido)
   acima: boolean;      // n acima do alvo?
+  limiarCap: number;   // limiar de auto-repetição por capítulo (classe 1; ver Molde.limiarCap)
   exemplos: string[];
 }
 
@@ -66,12 +88,12 @@ export function contarManeirismos(
   const palavras = contarPalavras(t);
   const por = (n: number) => (palavras > 0 ? Math.round((n / palavras) * 10_000 * 10) / 10 : 0);
   const maxExemplos = opts?.maxExemplos ?? 3;
-  const padroes: PadraoContagem[] = MOLDES.map(({ nome, re, orc10k }) => {
+  const padroes: PadraoContagem[] = MOLDES.map(({ nome, re, orc10k, limiarCap }) => {
     const ms = [...t.matchAll(re)];
     const n = ms.length;
     const alvo = Math.max(1, Math.round((orc10k * palavras) / 10_000));
     return {
-      nome, n, por10k: por(n), alvo, acima: n > alvo,
+      nome, n, por10k: por(n), alvo, acima: n > alvo, limiarCap,
       exemplos: ms.slice(0, maxExemplos).map((m) => m[0].replace(/\s+/g, " ").trim().slice(0, 70)),
     };
   }).filter((p) => p.n > 0).sort((a, b) => b.n - a.n);

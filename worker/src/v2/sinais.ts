@@ -13,6 +13,7 @@ import {
   contarPersonificacao,
   contarSanfona,
   diagnosticarCadencia,
+  LIMIAR_NGRAMA_CAP,
   MULETAS,
   ngramasSobrerepresentados,
   ORC_CADENCIA,
@@ -178,14 +179,24 @@ export function medirSinais(
   }
 
   // ------------------------------------------------------------------------
-  // RÉGUA UNIVERSAL DE MOLDE (FASE 2 do plano ofício-inteiro, 2026-08-05).
-  // Frequência de molde de IA NÃO é identidade de skill (os três ofícios listam
-  // esses padrões como defeito) — o orçamento vem de maneirismo.ts (orc10k por
-  // molde), não do contrato; exceção só se o contrato declarar cota própria
-  // (regra tipo "cota" com id contendo "molde"). CR4 segue intacta: cadência,
-  // interioridade e pisos continuam POR SKILL, acima.
-  // Sinal, nunca gate: alimenta o revisor; promoção a bloqueio é decisão do
-  // autor com os números da FASE 4 na mesa.
+  // RÉGUA UNIVERSAL DE MOLDE — duas CLASSES, cada uma na sua escala (A1 do
+  // plano escala-retenção, 2026-08-05).
+  //
+  //   CLASSE 1 — AUTO-REPETIÇÃO: o mesmo molde/n-grama repetido N vezes DENTRO
+  //   do capítulo. Não precisa de baseline externo; limiar derivado do acervo
+  //   (Molde.limiarCap / LIMIAR_NGRAMA_CAP). Avaliada AQUI, por capítulo.
+  //
+  //   CLASSE 2 — TAXA ABSOLUTA: orçamento orc10k, feito para a escala do LIVRO.
+  //   Na escala de capítulo o piso max(1,…) dominava tudo (um capítulo inteiro
+  //   tinha direito a UM "como se" — 10/11 canários e 8/8 controles estouravam
+  //   pela régua, não pela prosa). Aqui vira medição INFORMATIVA
+  //   (fora_da_cota=false) e a avaliação contra orçamento acontece na escala
+  //   certa, em `medirSinaisLivro`.
+  //
+  // Exceção que preserva a precedência: cota declarada pelo CONTRATO (regra
+  // "molde") continua valendo por capítulo — cota de contrato é declaração da
+  // skill, não orçamento de livro. CR4 intacta: cadência/interioridade/pisos
+  // continuam POR SKILL, acima.
   // O corpus de calibração foi congelado ANTES desta régua: sob
   // compatibilidadeCorpusV1 os sinais universais não são emitidos (mesmo
   // precedente do fragColados acima) — a calibração certifica cotas de
@@ -195,7 +206,8 @@ export function medirSinais(
     const cotaContratoMolde = cotaDeclarada(contrato, "molde");
     const man = contarManeirismos(texto, undefined, { maxExemplos: 20 });
     for (const p of man.padroes) {
-      const cota = cotaContratoMolde ?? { max: p.alvo };
+      // Classe 1 (auto-repetição, por capítulo) — salvo cota explícita do contrato.
+      const cota = cotaContratoMolde ?? { max: p.limiarCap };
       out.push({
         sinal: `molde.${p.nome}`,
         valor: p.n,
@@ -205,31 +217,38 @@ export function medirSinais(
       });
     }
 
-    // N-grama sobre-representado: o detector genérico que pega o molde que
-    // NINGUÉM nomeou (4–5 palavras repetidas acima do limiar de maneirismo.ts).
-    // A presença de qualquer hit JÁ é sobre-representação — cota máx 0.
+    // N-grama sobre-representado (classe 1 — auto-repetição, por capítulo).
+    // Hits acima do limiar interno continuam LISTADOS para o revisor; fora da
+    // cota só quando algum n-grama repete além do máximo do acervo de controle
+    // (relógios de prazo e epítetos legítimos chegam a 13 — LIMIAR_NGRAMA_CAP).
     const ngramas = ngramasSobrerepresentados(texto);
     if (ngramas.length) {
+      const cotaNg = cotaDeclarada(contrato, "ngrama") ?? { max: LIMIAR_NGRAMA_CAP };
+      const pior = Math.max(...ngramas.map((h) => h.n));
       out.push({
         sinal: "ngrama_sobrerrepresentado",
         valor: ngramas.length,
-        cota: cotaDeclarada(contrato, "ngrama") ?? { max: 0 },
-        fora_da_cota: true,
+        cota: cotaNg,
+        fora_da_cota: cotaNg.max != null && pior > cotaNg.max,
         exemplos: ngramas.map((h) => `"${h.gram}" — ${h.n}× (${h.por10k}/10k)`),
       });
     }
 
-    // Léxico de muleta ("coisa", "algo", "de repente"…): orçamento por termo de
-    // MULETAS (maneirismo.ts). NÃO substitui nem descomenta `muleta_coisa` (cota
-    // de CONTRATO do romantasy, emissão retida por decisão do autor 2026-07-28 —
+    // Léxico de muleta ("coisa", "algo", "de repente"…): classe 2 (taxa
+    // absoluta) — informativa no capítulo; avaliada em `medirSinaisLivro`.
+    // Exceção: itens de tolerância zero (alvo 0 — typo de geração, PT-PT) são
+    // defeito em QUALQUER escala e continuam fora da cota aqui.
+    // NÃO substitui nem descomenta `muleta_coisa` (cota de CONTRATO do
+    // romantasy, emissão retida por decisão do autor 2026-07-28 —
     // docs/engine-v2/03-cotas-regra-sinal.md): aquela segue o caminho de
     // calibração com rótulo humano; esta é régua universal com contexto citável.
     for (const m of contarMuletas(texto)) {
+      const toleranciaZero = m.alvo === 0;
       out.push({
         sinal: `muleta.${m.termo}`,
         valor: m.n,
-        cota: { max: m.alvo },
-        fora_da_cota: m.acima,
+        cota: toleranciaZero ? { max: 0 } : undefined,
+        fora_da_cota: toleranciaZero && m.n > 0,
         exemplos: ocorrenciasComContexto(texto, MULETAS.find((x) => x.termo === m.termo)!.re),
       });
     }
@@ -280,6 +299,39 @@ export function medirSinais(
   // Tipo de gancho final (informativo; o revisor confere contra a ficha).
   out.push({ sinal: "gancho_final", valor: classificarGanchoFinal(texto), fora_da_cota: false, exemplos: [] });
 
+  return out;
+}
+
+/**
+ * CLASSE 2 na escala certa: taxa absoluta de molde e muleta avaliada contra o
+ * orçamento orc10k sobre o LIVRO INTEIRO (A1 do plano escala-retenção). É para
+ * esta escala que os orçamentos de maneirismo.ts foram feitos — a mesma régua
+ * que jobs.ts (V1) já aplica ao manuscrito consolidado. Sinal de livro, nunca
+ * gate: classe 2 não bloqueia (não há baseline que autorize; A3 só liga
+ * bloqueio para classe 1).
+ */
+export function medirSinaisLivro(capitulos: { numero: number; texto: string }[]): SinalMedido[] {
+  const manuscrito = capitulos.map((c) => c.texto).join("\n\n");
+  const out: SinalMedido[] = [];
+  const man = contarManeirismos(manuscrito, undefined, { maxExemplos: 20 });
+  for (const p of man.padroes) {
+    out.push({
+      sinal: `molde.${p.nome}`,
+      valor: p.n,
+      cota: { max: p.alvo }, // orc10k × palavras do LIVRO — a escala para a qual foi feito
+      fora_da_cota: p.acima,
+      exemplos: p.exemplos,
+    });
+  }
+  for (const m of contarMuletas(manuscrito)) {
+    out.push({
+      sinal: `muleta.${m.termo}`,
+      valor: m.n,
+      cota: { max: m.alvo },
+      fora_da_cota: m.acima,
+      exemplos: [],
+    });
+  }
   return out;
 }
 
