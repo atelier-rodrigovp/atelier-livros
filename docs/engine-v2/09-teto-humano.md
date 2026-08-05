@@ -162,3 +162,67 @@ antítese. O tique daquele capítulo é real, mas é menor do que a contagem ant
 Paridade TS/Python garantida por `worker/fixtures/quality-parity.json`
 (`worker/src/quality-parity.test.ts` + `tools/test_quality_parity.py`); o espelho Python
 vive em `worker/skill-patches/livro-do-zero-ao-epub/assets/livro_runner.py`.
+
+---
+
+## Adendo 2026-08-05 — a taxa sustentada, e três moldes que a medição recusou
+
+### 1. A segunda régua: taxa sustentada
+
+`limiarCap` sozinho é cego ao hábito. O romance humano **encosta** no pico uma vez em
+128 janelas; a engine encosta em todo capítulo e nunca sai da cota. O caso que provou:
+o capítulo 1 aprovado do canário 2 tem **7 antíteses em 2.784 palavras** — 25,1 por 10
+mil, contra 10 do romance humano mais carregado — e passava, porque 7 ≤ 8.
+
+`gateAutoRepeticao` (`worker/src/v2/gates.ts`) passou a bloquear **também** por taxa
+acumulada sobre todos os capítulos escritos, comparada a `Molde.orc10k`. Duas condições
+impedem a taxa de virar ruído, e nenhuma é número novo: a base acumulada precisa de ao
+menos UMA janela de medição (`TETO_HUMANO.janela_palavras` = 2.500), e ocorrência única
+nunca conta — o gate é de auto-**repetição**, e repetir exige duas.
+
+### 2. Três moldes candidatos, e por que NENHUM foi versionado
+
+A avaliação da skill humanizer apontou três tiques de IA que sobreviveriam à tradução
+para ficção em português: **gerúndio apositivo de análise** (", revelando que…"),
+**tricolon forçado** (tudo agrupado em três) e **hedge empilhado** ("talvez pudesse, de
+certa forma, sugerir"). Detector escrito para cada um e medido pelo procedimento deste
+documento — 127 janelas de 2.500 palavras do corpus humano — e também contra os **787
+capítulos (2.029.585 palavras)** do acervo da engine em `C:/Users/Rodrigo Paiva/atelier-work/`.
+
+| molde candidato | humano (318k palavras) | acervo da engine (2,03M palavras) |
+|---|---|---|
+| gerúndio de análise (`, <inferência> que`) | **0** — 0,00/10k | **0** — 0,00/10k |
+| tricolon de cópula (`era A, B e C.`) | 2 — 0,06/10k | **1** — 0,00/10k |
+| hedge empilhado (2+ atenuadores distintos na frase) | **0** — 0,00/10k | 3 — 0,01/10k |
+
+**Nenhum dos três é um tique desta engine.** O tricolon a engine usa MENOS que o humano
+(1 ocorrência contra 2, em seis vezes mais texto). O hedge empilhado aparece 3 vezes em
+787 capítulos — ruído, não hábito. E o gerúndio de análise não aparece nem uma vez.
+
+O detector não é estreito demais: prova de vida com 3 positivos construídos (todos
+acendem) e 3 gerúndios narrativos ("saiu, batendo a porta"; "ficou no corredor,
+apontando para a escada") — nenhum acende. E afrouxá-lo não revela hábito escondido:
+
+| variante do gerúndio | acervo | humano |
+|---|---|---|
+| `, <inferência> que` (estrito) | 0,00/10k | 0,00/10k |
+| `<inferência> que` (sem vírgula) | 0,07/10k | 0,03/10k |
+| `, <inferência>` (sem exigir "que") | 0,14/10k | **0,57/10k** |
+| `, <qualquer gerúndio>` (apositivo puro) | 19,49/10k | **44,69/10k** |
+
+Nas duas variantes largas a engine usa o gerúndio apositivo em **menos da metade** da
+taxa do romance publicado. A leitura das marcações do acervo confirma: são gerúndios
+narrativos legítimos ("indicando uma pasta sobre a mesa", "traduzindo o latim").
+
+**Por que nada foi versionado.** A regra deste documento é que o teto vem de medição, e
+não existe teto mensurável a partir de zero observação. Um molde com `limiarCap: 0`
+bloquearia na primeira ocorrência de uma construção cuja taxa de falso positivo não pode
+ser limitada com 0 casos — e "detector com falso positivo não pode bloquear" é a lição
+permanente da auditoria de estilo. Versionar os três seria adicionar gate que nunca
+dispara, com teto que não foi medido: o oposto do que este documento existe para impedir.
+
+**Decisão em aberto para o autor:** o gerúndio de análise é a única das três construções
+ausente dos DOIS corpora (0 em 2,35 milhões de palavras) e contraria explicitamente a
+regra `narrador-invisivel` do contrato dan-brown. Se um dia se quiser um arame de
+tropeço de tolerância zero para ele, o precedente existe (`MULETAS` já usa `orc10k: 0`
+para léxico estrangeiro). Hoje ele não pegaria nada.
