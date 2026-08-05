@@ -9,9 +9,11 @@ import {
   contarGnomico,
   contarManeirismos,
   contarMetaforaElaborada,
+  contarMuletas,
   contarPersonificacao,
   contarSanfona,
   diagnosticarCadencia,
+  MULETAS,
   ngramasSobrerepresentados,
   ORC_CADENCIA,
   percentDeclarativasSimples,
@@ -99,8 +101,13 @@ export function fracaoItalico(texto: string): number {
  * extração local com janela de contexto.
  */
 export function ocorrenciasMuletaGenerica(texto: string): string[] {
+  return ocorrenciasComContexto(texto, /\b(coisas?|algo)\b/gi);
+}
+
+/** Ocorrências de um padrão com janela de contexto citável (±40 caracteres). */
+function ocorrenciasComContexto(texto: string, padrao: RegExp): string[] {
   const out: string[] = [];
-  const re = /\b(coisas?|algo)\b/gi;
+  const re = new RegExp(padrao.source, padrao.flags); // cópia: nunca compartilha lastIndex
   let m: RegExpExecArray | null;
   while ((m = re.exec(texto)) !== null) {
     const ini = Math.max(0, m.index - 40);
@@ -209,6 +216,21 @@ export function medirSinais(
         cota: cotaDeclarada(contrato, "ngrama") ?? { max: 0 },
         fora_da_cota: true,
         exemplos: ngramas.map((h) => `"${h.gram}" — ${h.n}× (${h.por10k}/10k)`),
+      });
+    }
+
+    // Léxico de muleta ("coisa", "algo", "de repente"…): orçamento por termo de
+    // MULETAS (maneirismo.ts). NÃO substitui nem descomenta `muleta_coisa` (cota
+    // de CONTRATO do romantasy, emissão retida por decisão do autor 2026-07-28 —
+    // docs/engine-v2/03-cotas-regra-sinal.md): aquela segue o caminho de
+    // calibração com rótulo humano; esta é régua universal com contexto citável.
+    for (const m of contarMuletas(texto)) {
+      out.push({
+        sinal: `muleta.${m.termo}`,
+        valor: m.n,
+        cota: { max: m.alvo },
+        fora_da_cota: m.acima,
+        exemplos: ocorrenciasComContexto(texto, MULETAS.find((x) => x.termo === m.termo)!.re),
       });
     }
   }

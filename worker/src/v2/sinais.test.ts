@@ -227,6 +227,48 @@ describe("FASE 2 — n-grama sobre-representado (pega molde que NINGUÉM nomeou)
   });
 });
 
+describe("FASE 2 — léxico de muleta como sinal universal (orçamento de MULETAS)", () => {
+  const TEXTO_COISA = [
+    "## Capítulo 7",
+    "",
+    "Ela pegou aquela coisa da mesa e guardou na bolsa antes que ele voltasse.",
+    "Havia uma coisa errada na sala, uma coisa que ela não sabia nomear ainda.",
+    "O porteiro entregou as chaves e anotou a placa do carro no caderno.",
+  ].join("\n\n");
+
+  it("'coisa' acima do orçamento de MULETAS sai fora da cota, com contexto citável", () => {
+    const s = medirSinais(TEXTO_COISA, contratoSintetico()).find((x) => x.sinal === "muleta.coisa/coisas")!;
+    expect(s).toBeDefined();
+    expect(Number(s.valor)).toBe(3);
+    expect(s.fora_da_cota).toBe(true);
+    expect(s.exemplos.length).toBe(3);
+    expect(s.exemplos[0]).toContain("coisa");
+  });
+
+  it("a RETENÇÃO do sinal de contrato muleta_coisa (decisão 2026-07-28) segue intacta", () => {
+    // A régua universal não descomenta nem substitui o bloco retido: o sinal de
+    // cota do contrato continua não-emitido para todos os contratos.
+    for (const id of ["dan-brown", "hoover-mcfadden", "romantasy"]) {
+      const sinais = medirSinais(TEXTO_COISA, carregarContrato(id).contrato);
+      expect(sinais.find((x) => x.sinal === "muleta_coisa"), id).toBeUndefined();
+    }
+  });
+
+  it("uso dentro do orçamento não sai da cota", () => {
+    const texto = TEXTO_COISA.replace(/coisa que ela não sabia nomear ainda/, "dobra que ela não sabia nomear ainda")
+      .replace(/uma coisa errada/, "uma sombra errada");
+    const s = medirSinais(texto, contratoSintetico()).find((x) => x.sinal === "muleta.coisa/coisas")!;
+    expect(Number(s.valor)).toBe(1);
+    expect(s.fora_da_cota).toBe(false);
+  });
+
+  it("o corpus congelado não ganha o sinal (compatibilidadeCorpusV1)", () => {
+    const s = medirSinais(TEXTO_COISA, contratoSintetico(), { compatibilidadeCorpusV1: true })
+      .find((x) => x.sinal.startsWith("muleta."));
+    expect(s).toBeUndefined();
+  });
+});
+
 describe("resumoSinais — medições reais, numeradas, para o revisor", () => {
   it("numera as ocorrências e marca FORA quando há cota estourada", () => {
     const contrato = contratoSintetico({
