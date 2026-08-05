@@ -56,6 +56,24 @@
       "text": "Ela desce a colina em paz. Não há borrão: trinta e um. Cinco anos depois, nada mudou.",
       "moldeContains": "antitese por negacao",
       "expectedCount": 0
+    },
+    {
+      "name": "fp-anafora-apos-negacao (e9e44c5)",
+      "text": "Sangue não branqueável —, avalio trocanter, avalio orelha.",
+      "moldeContains": "antitese por negacao",
+      "expectedCount": 0
+    },
+    {
+      "name": "fp-eco-no-meio-da-coda (e9e44c5)",
+      "text": "Não há campo para isso, e é verdade que não há campo.",
+      "moldeContains": "antitese por negacao",
+      "expectedCount": 0
+    },
+    {
+      "name": "real-antitese-eco-abre-coda",
+      "text": "Não limpa de quem passou pano. Limpa de esta semana.",
+      "moldeContains": "antitese por negacao",
+      "expectedCount": 1
     }
   ],
   "cadencia": [

@@ -37,19 +37,23 @@ const PY = pythonBin();
 const PISO = 25;
 const PID = "proj-e2e";
 
-// Texto reprovável pelo gate REAL: molde "antítese por negação" 2x (orçamento 1).
-// Antes as duas frases usavam "não X, mas Y" com "mas" pelado; o detector do
-// teto humano (2026-08-05) só conta os conectivos inequívocos, porque o "mas"
-// pelado é concessiva comum, não antítese. As frases viraram a forma canônica.
+// Texto reprovável pelo gate REAL: molde "antítese por negação" 9x.
+// O gatilho eram 2 ocorrências, de quando o runner reprovava qualquer molde
+// acima de 1 por capítulo. Esse 1 era do tempo das seis regex de superfície;
+// com o detector único e o teto humano (limiar 8 em maneirismo.ts) ele passou a
+// reprovar prosa dentro da faixa humana, e o Python foi alinhado ao TS. O que
+// este e2e prova é a ESCADA (bloqueia → worker corrige sozinho → recontagem
+// aprova → avança), não o número: o gatilho subiu para 9, um acima do teto.
 const TEXTO_RUIM = `# Capítulo 1 — O Arquivo
 
-Helena desceu a escada do arquivo municipal com a lanterna apagada. O som que vinha do porão não era coisa de cano, mas sim de voz. Ele não queria abrir a porta de ferro, e sim adiar tudo mais uma noite. O registro de 1974 esperava sobre a mesa, aberto na página errada, e alguém escrevera uma data nova na margem com tinta ainda fresca.
+Helena desceu a escada do arquivo municipal com a lanterna apagada. O som que vinha do porão não era coisa de cano, mas sim de voz. Ele não queria abrir a porta de ferro, e sim adiar tudo mais uma noite. A data na margem não foi escrita ontem. Foi escrita agora. O registro de 1974 não estava aberto por acaso: estava aberto na página errada de propósito. Não era descuido do arquivista, e sim recado. A tinta não secou. Está fresca. O corredor não tinha eco, mas sim um silêncio que empurrava. Ela não subiu a escada, e sim desceu mais um lance. O porão não guardava papel velho; guardava o que sobrou de 1975.
 `;
 
-// Correção MÍNIMA: as duas frases-molde reescritas; o resto do capítulo preservado.
+// Correção MÍNIMA: as frases-molde reescritas; o resto do capítulo preservado.
+// Verificado contra o gate real: 0 molde, 0 muleta, 0 cadência acima da cota.
 const TEXTO_LIMPO = `# Capítulo 1 — O Arquivo
 
-Helena desceu a escada do arquivo municipal com a lanterna apagada. O som que vinha do porão tinha um timbre antigo demais para os canos. A porta de ferro pesou na mão dela, e os passos atrás dela empurraram a decisão. O registro de 1974 esperava sobre a mesa, aberto na página errada, e alguém escrevera uma data nova na margem com tinta ainda fresca.
+Helena desceu a escada do arquivo municipal com a lanterna apagada. O som que vinha do porão tinha um timbre antigo demais para os canos. A porta de ferro pesou na mão dela, e os passos atrás dela empurraram a decisão. Alguém escrevera a data na margem havia poucos minutos, com tinta ainda molhada. O registro de 1974 esperava sobre a mesa, aberto na página errada. O arquivista deixara aquilo ali como recado. O corredor devolveu o silêncio em vez do eco. Ela desceu mais um lance. O porão guardava o que sobrou de 1975.
 `;
 
 const TEXTO_CAP2 = `# Capítulo 2 — A Margem

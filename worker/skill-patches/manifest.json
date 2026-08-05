@@ -1,6 +1,6 @@
 {
-  "manifestVersion": "1.0.11",
-  "generatedAt": "2026-08-05T17:41:07.472Z",
+  "manifestVersion": "1.0.14",
+  "generatedAt": "2026-08-05T22:04:06.178Z",
   "compatibility": "Atelier worker 0.1.x",
   "requiredTests": [
     "python tools/test_gate_spec.py",
@@ -26,7 +26,7 @@
     },
     {
       "path": "livro-do-zero-ao-epub/assets/livro_runner.py",
-      "sha256": "31356b9a80bf5e61011f1f5f17c36bb21fe0ca30e3904d528b9f3819a8f0c79b"
+      "sha256": "d575524e0d2a78e4db3dbd708e749283216687188ab56f82ef1fdd9b8032f609"
     }
   ]
 }

@@ -1030,13 +1030,18 @@ def hora_reset(texto):
 # ----------------------------------------------------------------------------
 # Tiques mecanicos cross-capitulo: o modelo os repete porque cada capitulo e
 # contexto fresco. So contagem + reescrita resolve (instrucao de "evitar" nao).
-# Espelha worker/src/maneirismo.ts. Orcamento: <= 1 de cada molde por capitulo.
+# Espelha worker/src/maneirismo.ts. Orcamento por molde: _LIMIAR_CAP (teto humano),
+# com PER_CAP_BUDGET=1 so como piso para molde sem limiar medido.
 # ANTITESE POR NEGACAO — molde unico (espelha RE_ANTITESE de maneirismo.ts).
 # Nega-se um termo e o segmento seguinte reafirma o mesmo lugar sintatico em
 # contraste, separados por . : ; — ou virgula. Tres caminhos: (a) coda copular
 # apos separador forte; (a') virgula so quando a propria negacao e copular;
-# (b) a coda ecoa uma palavra de conteudo do trecho negado (>=5 letras);
-# (c) negacao eliptica com dois-pontos, uma palavra de cada lado.
+# (b) a coda ABRE ecoando uma palavra de conteudo do trecho negado (>=5 letras)
+#     — o eco tem de ser a PRIMEIRA palavra da coda, e o trecho entre a negacao e
+#     a palavra ecoada nao pode atravessar separador; sem essas duas restricoes
+#     entravam anafora, replica de dialogo e eco solto no meio da coda (e9e44c5);
+# (c) negacao eliptica com dois-pontos, uma palavra de cada lado;
+# (d) "nao X, mas sim / e sim / senao Y" — antitese com conectivo inequivoco.
 # Substitui as seis regex de superficie: elas viam 3 das 8 formas reais do
 # acervo e contavam a MESMA ocorrencia em mais de uma regex.
 _L_ACENTO = u"[a-zà-öø-ÿ]"
@@ -1047,7 +1052,7 @@ _SEP_FORTE = u"(?:[.!?…]+\\s+|[:;—–]\\s*)"
 _RE_ANTITESE = re.compile(u"|".join([
     u"\\bn[ãa]o\\s+[^.!?:;\\n]{0,70}?" + _SEP_FORTE + u"(?:" + _COPULA + u"|(?:est[ae]|isto|isso|ess[ae])\\s+" + _COPULA + u")" + _FIM_PALAVRA,
     u"\\bn[ãa]o\\s+" + _COPULA + _FIM_PALAVRA + u"[^.!?:;\\n]{1,60},\\s*" + _COPULA + _FIM_PALAVRA,
-    u"\\bn[ãa]o\\s+[^.!?:;\\n]{0,40}?(" + _L_ACENTO + u"{5,})" + _FIM_PALAVRA + u"[^.!?:;\\n]{0,40}?(?:" + _SEP_FORTE + u"|,\\s*)[^.!?\\n]{0,40}?\\1" + _FIM_PALAVRA,
+    u"\\bn[ãa]o\\s+[^.!?:;,—–\\n]{0,40}?(" + _L_ACENTO + u"{5,})" + _FIM_PALAVRA + u"[^.!?:;\\n]{0,80}?(?:" + _SEP_FORTE + u"|,\\s*)\\1" + _FIM_PALAVRA,
     u"\\bn[ãa]o\\s+" + _L_ACENTO + u"{3,}\\s*:\\s*" + _L_ACENTO + u"{3,}" + _FIM_PALAVRA,
     u"\\bn[ãa]o\\s+[^.!?:;\\n]{1,60}[,;]\\s*(?:mas\\s+sim|e\\s+sim|mas\\s+antes|sen[ãa]o)\\s",
 ]), re.I | re.U)
@@ -1056,16 +1061,39 @@ _MOLDES_CAP = [
     ("antitese por negacao", _RE_ANTITESE),
     ("'do jeito que/de'", re.compile(u"\\bdo\\s+jeito\\s+(?:que|de|como)\\b", re.I | re.U)),
     ("simile-andaime ('como se / como quando')", re.compile(u"\\bcomo\\s+(?:se|quando)\\b", re.I | re.U)),
+    ("cliche recorrente", re.compile(
+        u"\\b(mar de chumbo|clareza fria|sil[êe]ncio ensurdecedor|frio na espinha|"
+        u"cora[çc][ãa]o disparad[oa]|sangue gelad[oa]|n[óo] na garganta)\\b", re.I | re.U)),
 ]
 PER_CAP_BUDGET = 1
 
+# LIMIAR POR CAPITULO, molde a molde — espelha Molde.limiarCap de
+# worker/src/maneirismo.ts (TETO HUMANO 2026-08-05: maximo observado numa janela
+# de 2.500 palavras de romance publicado).
+# Por que existe: PER_CAP_BUDGET=1 valia para as SEIS regex de superficie, que
+# viam 3 das 8 formas. Com o detector unico (recall 8/8) o mesmo 1 passou a
+# reprovar prosa dentro da faixa humana — 2 antiteses num capitulo ja disparavam
+# reescrita dirigida, sendo que romance humano chega a 8. E o mesmo alarme falso
+# que a medicao derrubou para "coisa", sobrevivendo nos moldes.
+# PER_CAP_BUDGET segue como piso para molde sem limiar medido.
+_LIMIAR_CAP = {
+    "antitese por negacao": 8,                           # humano: 8 (remedido em e9e44c5)
+    "'do jeito que/de'": 3,                              # humano: 3 (McFadden)
+    "simile-andaime ('como se / como quando')": 6,       # humano: 6 (Hoover)
+    "cliche recorrente": 2,                              # humano: 2
+}
+
+
+def _limiar_cap(nome):
+    return _LIMIAR_CAP.get(nome, PER_CAP_BUDGET)
+
 
 def maneirismos_acima(texto):
-    """Lista (nome, n) dos moldes que passam do orcamento por capitulo."""
+    """Lista (nome, n) dos moldes que passam do limiar por capitulo."""
     out = []
     for nome, rx in _MOLDES_CAP:
         n = len(rx.findall(texto or ""))
-        if n > PER_CAP_BUDGET:
+        if n > _limiar_cap(nome):
             out.append((nome, n))
     return out
 
@@ -2345,7 +2373,7 @@ def _recontagem_cap(projeto, n, txt=None):
 def _excesso_total(offs, muls, cads, reps):
     """Excesso agregado acima do orcamento — o criterio de convergencia (H1)
     exige que este numero seja ESTRITAMENTE decrescente por iteracao."""
-    return (sum(c - PER_CAP_BUDGET for _n, c in offs) +
+    return (sum(c - _limiar_cap(_n) for _n, c in offs) +
             sum(c - b for _n, c, b in muls) +
             sum(c - a for _n, c, a in cads) +
             len(reps))
@@ -2471,6 +2499,7 @@ ORC10K_GLOBAL = {
     "antitese por negacao": 10.0,                          # humano: 9,6 (McFadden)
     "'do jeito que/de'": 1.0,                              # humano: 0,7 (McFadden)
     "simile-andaime ('como se / como quando')": 12.0,      # humano: 11,7 (Hoover)
+    "cliche recorrente": 1.0,                              # humano: 0,4 (McFadden)
 }
 FECHO_MAX_FRACAO = 0.25       # fecho epigramatico isolado em no maximo 1/4 dos capitulos
 NGRAM_MIN = 8                 # n-grama generico: >= 8 ocorrencias no livro
