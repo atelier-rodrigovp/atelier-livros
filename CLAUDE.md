@@ -8,6 +8,8 @@ Núcleo novo em `worker/src/v2/` — estado canônico único (`engine_state`/`en
 
 Documentação: `docs/engine-v2/00-decisao-arquitetural.md` (por quê), `01-operacao.md` (como operar/recuperar), `02-como-criar-skill.md` (skill nova sem tocar o núcleo). Projetos sem `engine_mode='v2'` seguem na V1 descrita abaixo — o desvio é um único ponto (`worker/src/v2/integracao.ts`).
 
+**O funcionamento real, com arquivo:linha, está em "Chapter Pipeline — V2" abaixo.** As seções "Normalization Pipeline" e "Quality Gates per Chapter" descrevem a **V1** e não valem para projetos em V2.
+
 ## Quick Start Commands
 
 ```bash
@@ -56,9 +58,79 @@ WEB (GitHub Pages) ──HTTPS──► SUPABASE (Postgres/Auth/Storage/Realtime
 | `avaliar` | `{project_id}` | `book-bestseller-review` → commercial diagnostic report in job logs |
 | (others) | — | `gerar_pacote`, `importar_vendas`, `ping` |
 
-## Normalization Pipeline (Worker Fixtures)
+## Chapter Pipeline — V2 (the path new projects take)
 
-Before executing `escrever_livro`, the worker applies deterministic normalizers. Idempotence is a required contract and must be demonstrated per normalizer; comments alone are not proof.
+> **Read this before the V1 section below.** V2 does **not** call any of the five V1
+> normalizers and does **not** run `livro_runner.py` — verified: grep for those names
+> across `worker/src/v2/` returns only two prose comments (`v2/contrato.ts:263`,
+> `v2/pipeline.ts:256`), zero calls. Everything under "Normalization Pipeline (V1)"
+> applies **only** to projects without `engine_mode='v2'`.
+
+**Roles are separated by capability class, and only one writes prose.** The eleven roles
+are listed in `v2/tipos.ts:11-23`; `escritor` is the sole author of prose (`tipos.ts:15`).
+The state recorder is deliberately **not** a role — it is deterministic code
+(`tipos.ts:26`, `v2/gravador.ts`). Each role maps to a capability class
+(raciocínio/fatos/prosa/julgamento) in `CLASSE_POR_PAPEL` (`tipos.ts:31`); the concrete
+model comes from configuration, never from the core.
+
+**Context compiler, 7 layers with precedence.** `CAMADAS` (`v2/compilador.ts:11-18`):
+segurança(1) → contrato(2) → decisão do autor(3) → perfil(4) → ficha(5) → contexto
+factual(6) → preferência(7). A lower layer never overrides a higher one; a contradiction
+**inside the same layer** has no automatic resolution and blocks with
+`CONTRADICAO_MESMA_CAMADA` (`compilador.ts:156-165`). `compilarPacote`
+(`compilador.ts:94`) returns the package plus its hash.
+
+**Skills are versioned contracts in data.** `worker/skills-v2/<id>/contrato.json`,
+validated by `v2/contrato.ts`. Quotas come **only** from the contract (lesson CR4) —
+there is zero per-skill conditional in the core.
+
+**Per-chapter sequence** (`v2/pipeline.ts`): ficha (`:457`) → contexto (`:610`) →
+escrita (`:660`) → gates universais (`:701`). The pipeline writes the file; the model
+never does (`:660`).
+
+**Universal gates** — deterministic, blocking, valid for any skill, and they never
+measure taste (`v2/gates.ts`, assembled by `rodarGatesCapitulo` at `gates.ts:244`):
+`artefato_ausente`, `texto_truncado`, `auto_repeticao`, `pov_impossivel`,
+`repeticao_quase_literal`, `violacao_conhecimento`, plus `repeticao_semantica` added by
+the pipeline (`pipeline.ts:723`). Editorial **signals** are separate (`v2/sinais.ts:132`)
+and bind only through the reviewer's mandatory disposition.
+
+**`auto_repeticao` has two rulers** (`gates.ts:105`): peak per chapter
+(`Molde.limiarCap`) and **sustained rate** across every chapter written so far
+(`Molde.orc10k`). The second exists because the peak alone is blind to habit — a human
+novel touches the ceiling once in 128 windows; the engine touched it every chapter. Both
+ceilings come from published human prose, never from the engine's own output
+(`docs/engine-v2/09-teto-humano.md`).
+
+**Ficha × approved prose.** Before writing, a new ficha is checked against the memory
+extracted from already-approved prose (`v2/memoria-prosa.ts:232`); assigning to another
+character an exclusive state the page already gave someone reproves the **plan**, with
+the literal prose excerpt as evidence. On resume, the pipeline reuses the already-validated
+ficha instead of regenerating it (`pipeline.ts:493`) — regeneration was where a canary
+swapped the bedridden patient between chapters.
+
+**Judgment cascade.** A triage parecer escalates to a second pass when it discards
+signals that weigh (`DESCARTE_QUE_PESA = 3`, `v2/cascata.ts:27`; four triggers in
+`precisaEscalar`, `cascata.ts:51`). The threshold is not a detector limit — it decides
+*when a second pair of eyes is called*, chosen over 47 recorded pareceres.
+
+**Canonical state** is single and on the database: `engine_runs`, `engine_reviews`,
+`engine_scene_specs`, `engine_state` (`supabase/engine_v2.sql:32,66,81,97`). The
+reviewer's parecer is persisted and hash-bound — approval requires positive evidence.
+
+**One divergence point** between engines: `v2/integracao.ts:2-4`; `engine_mode` is read
+at `integracao.ts:163-172`, and absent/unknown falls back to V1 (fail-safe, never a
+silent fallback the other way).
+
+Docs: `docs/engine-v2/00-decisao-arquitetural.md` (why), `01-operacao.md` (operate and
+recover), `02-como-criar-skill.md` (new skill without touching the core),
+`09-teto-humano.md` (where every mold ceiling comes from).
+
+## Normalization Pipeline — V1 only (Worker Fixtures)
+
+**Applies only to projects without `engine_mode='v2'`.** Before executing
+`escrever_livro`, the worker applies deterministic normalizers. Idempotence is a required
+contract and must be demonstrated per normalizer; comments alone are not proof.
 
 ### Entry Points
 
@@ -121,15 +193,21 @@ Detectors: `contarGnomico` (aphorism/máxima), `contarPersonificacao` (abstracti
 
 - **Mode = SIGNAL for every skill.** They feed the reviewer prompt (`SINAIS DE TRANSPARENCIA`
   block) and the `ADENDO_TRANSPARENCIA` verdict; they do **not** deterministically block.
-- **Promotion to a hard gate is per-skill** via `ORC_TRANSPARENCIA_POR_SKILL` (empty = all
-  signal). Only a skill validated in the A/B benchmark with zero false-positives on control
-  chapters gets `bloqueia:true` cotas. **Dan-brown cotas stay dan-brown-only** — other skills
-  never get the hard block from this change.
+- **No skill has a hard gate today.** `ORC_TRANSPARENCIA_POR_SKILL` (`maneirismo.ts`)
+  holds exactly one entry — `hoover-mcfadden`, with `bloqueia: false` — and the default
+  `SINAL_TRANSPARENCIA` is also `bloqueia: false`, so `ofensores` never fills. **dan-brown
+  is not in that map and never has been** in any commit; the earlier claim that it "already
+  has blocking quotas" was false (corrected 2026-08-05, locked by tests in
+  `src/transparencia.test.ts`). Promotion is per-skill and requires a skill validated in the
+  A/B benchmark with zero false-positives on control chapters — a bar no skill has met.
 - **Retention (`_reter_pre_edicao`)**: before any agent rewrite (revcap/gate/desman/correcao),
   the runner copies `capitulo-NN.md` to `capitulos-em-revisao/capitulo-NN.pre-<stage>-<seq>.md`
   (last 3 per chapter+stage). Closes the audit's H3 gap (pre-correction versions were destroyed).
 
-## Quality Gates per Chapter
+## Quality Gates per Chapter — V1 only
+
+**Applies only to projects without `engine_mode='v2'`.** V2's gates are the universal
+gates described in the V2 section above; it never runs `livro_runner.py`.
 
 Inside `livro_runner.py` (executed by the worker), after each chapter is written:
 
