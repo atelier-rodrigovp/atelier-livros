@@ -3,6 +3,7 @@
 // por contrato (lição CR4: a régua que salva o dan-brown mata o hoover — nada
 // aqui normaliza cadência/interioridade entre skills).
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CLASSE_POR_PAPEL, type ContratoCompilado, type Papel, type SkillContract } from "./tipos.js";
@@ -243,6 +244,78 @@ export function carregarContrato(id: string, baseDir?: string): ContratoCompilad
 /** sha256 do JSON canônico do contrato (chaves ordenadas; estável entre execuções). */
 export function hashContrato(c: SkillContract): string {
   return hashJsonCanonico(c);
+}
+
+// ---------------------------------------------------------------------------
+// Ofício da skill: o texto de craft que o autor escreveu (SKILL.md + references)
+// chega VERBATIM ao escritor e ao revisor literário. Ausência é erro de
+// configuração — a política da V2 é falhar alto, nunca degradar (o contrato
+// resume; o ofício é a especificação inteira).
+// ---------------------------------------------------------------------------
+
+/** contrato V2 → diretório da skill instalada (inverso de MAPA_SKILL_V1_V2). */
+export function dirSkillDoContrato(contratoId: string): string {
+  for (const [v1, v2] of Object.entries(MAPA_SKILL_V1_V2)) if (v2 === contratoId) return v1;
+  return contratoId;
+}
+
+// Base default das skills instaladas, na mesma robustez de baseDirPadrao():
+// RUNNER_PATH (…/skills/livro-do-zero-ao-epub/assets/livro_runner.py → …/skills,
+// derivação idêntica à de jobs.ts) e ~/.claude/skills.
+function baseDirSkillsPadrao(): string {
+  const candidatos: string[] = [];
+  const runner = process.env.RUNNER_PATH ?? "";
+  if (runner) candidatos.push(path.dirname(path.dirname(path.dirname(runner))));
+  candidatos.push(path.join(homedir(), ".claude", "skills"));
+  for (const c of candidatos) if (existsSync(c)) return c;
+  return candidatos[candidatos.length - 1];
+}
+
+export interface OficioSkill {
+  skillId: string;       // id do contrato V2
+  dirSkill: string;      // diretório resolvido no disco
+  texto: string;         // conteúdo verbatim, com cabeçalho por arquivo
+  hash: string;          // sha256 do conteúdo canônico (muda quando o ofício muda)
+  palavras: number;
+  arquivos: string[];    // relativos ao diretório da skill, em ordem determinística
+}
+
+/**
+ * Lê o ofício da skill no disco: SKILL.md + references/*.md, verbatim.
+ * Ausente (diretório ou todos os arquivos) → ErroContrato OFICIO_AUSENTE.
+ */
+export function lerOficioSkill(contratoId: string, baseDirSkills?: string): OficioSkill {
+  const base = baseDirSkills ?? baseDirSkillsPadrao();
+  const nomeDir = dirSkillDoContrato(contratoId);
+  const dirSkill = path.join(base, nomeDir);
+  const candidatos: string[] = [];
+  if (existsSync(path.join(dirSkill, "SKILL.md"))) candidatos.push("SKILL.md");
+  const dirRefs = path.join(dirSkill, "references");
+  if (existsSync(dirRefs)) {
+    for (const f of readdirSync(dirRefs).filter((f) => f.endsWith(".md")).sort()) {
+      candidatos.push(path.posix.join("references", f));
+    }
+  }
+  if (!candidatos.length) {
+    throw new ErroContrato(
+      "OFICIO_AUSENTE",
+      `Ofício da skill "${contratoId}" não encontrado em ${dirSkill} (esperado SKILL.md e/ou references/*.md). ` +
+        `Instale a skill "${nomeDir}" no diretório de skills — a V2 não degrada sem o ofício.`
+    );
+  }
+  const partes = candidatos.map((rel) => {
+    const conteudo = readFileSync(path.join(dirSkill, ...rel.split("/")), "utf8").replace(/\r\n/g, "\n").trim();
+    return `<!-- oficio:${rel} -->\n${conteudo}`;
+  });
+  const texto = partes.join("\n\n");
+  return {
+    skillId: contratoId,
+    dirSkill,
+    texto,
+    hash: hashJsonCanonico({ skillId: contratoId, arquivos: candidatos, texto }),
+    palavras: (texto.match(/\S+/g) ?? []).length,
+    arquivos: candidatos,
+  };
 }
 
 // ---------------------------------------------------------------------------

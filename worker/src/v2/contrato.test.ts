@@ -1,6 +1,8 @@
 // F2 — contratos de skill como dados: carga, validação, hash e IDENTIDADE
 // preservada (anti-CR4: a régua que salva o dan-brown mata o hoover).
 import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -8,6 +10,7 @@ import {
   MAPA_SKILL_V1_V2,
   carregarContrato,
   hashContrato,
+  lerOficioSkill,
   skillsDisponiveis,
   validarContrato,
   verificarGhostwritingRegras,
@@ -255,5 +258,60 @@ describe("verificarGhostwritingRegras", () => {
     const suspeitas = verificarGhostwritingRegras(c);
     expect(suspeitas).toHaveLength(1);
     expect(suspeitas[0]).toContain("regra-contaminada");
+  });
+});
+
+describe("lerOficioSkill — o ofício da skill chega inteiro, ou falha alto", () => {
+  const fixture = (): string => {
+    const base = mkdtempSync(path.join(tmpdir(), "oficio-skill-"));
+    // contratoId "hoover-mcfadden" → diretório V1 "hoover-mcfadden"
+    const dir = path.join(base, "hoover-mcfadden");
+    mkdirSync(path.join(dir, "references"), { recursive: true });
+    writeFileSync(path.join(dir, "SKILL.md"), "# Skill\nA voz é curta e cheia.");
+    writeFileSync(path.join(dir, "references", "voz-e-oficio.md"), "## Ofício\nFrase-sanfona é defeito.");
+    writeFileSync(path.join(dir, "references", "arquitetura.md"), "## Arquitetura\nTrês relógios.");
+    return base;
+  };
+
+  it("ofício presente devolve o texto verbatim dos arquivos e um hash estável", () => {
+    const base = fixture();
+    const oficio = lerOficioSkill("hoover-mcfadden", base);
+    expect(oficio.texto).toContain("A voz é curta e cheia.");
+    expect(oficio.texto).toContain("Frase-sanfona é defeito.");
+    expect(oficio.texto).toContain("Três relógios.");
+    expect(oficio.hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(oficio.palavras).toBeGreaterThan(0);
+    expect(oficio.arquivos).toEqual(["SKILL.md", "references/arquitetura.md", "references/voz-e-oficio.md"]);
+    // determinístico entre leituras
+    expect(lerOficioSkill("hoover-mcfadden", base).hash).toBe(oficio.hash);
+  });
+
+  it("contratoId é traduzido para o diretório V1 da skill (dan-brown → skill-dan-brown)", () => {
+    const base = mkdtempSync(path.join(tmpdir(), "oficio-skill-"));
+    const dir = path.join(base, "skill-dan-brown");
+    mkdirSync(path.join(dir, "references"), { recursive: true });
+    writeFileSync(path.join(dir, "SKILL.md"), "# Thriller\nCapítulos curtos.");
+    const oficio = lerOficioSkill("dan-brown", base);
+    expect(oficio.texto).toContain("Capítulos curtos.");
+  });
+
+  it("ofício ausente lança ErroContrato de configuração — nunca string vazia nem default", () => {
+    const base = mkdtempSync(path.join(tmpdir(), "oficio-skill-"));
+    try {
+      lerOficioSkill("hoover-mcfadden", base);
+      expect.unreachable("deveria ter lançado");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ErroContrato);
+      const erro = e as ErroContrato;
+      expect(erro.codigo).toBe("OFICIO_AUSENTE");
+      expect(erro.classe).toBe("configuracao");
+      expect(erro.message).toContain("hoover-mcfadden");
+    }
+  });
+
+  it("diretório da skill sem nenhum arquivo de ofício também falha alto", () => {
+    const base = mkdtempSync(path.join(tmpdir(), "oficio-skill-"));
+    mkdirSync(path.join(base, "hoover-mcfadden", "references"), { recursive: true });
+    expect(() => lerOficioSkill("hoover-mcfadden", base)).toThrowError(ErroContrato);
   });
 });
