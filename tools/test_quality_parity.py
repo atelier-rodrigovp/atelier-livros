@@ -17,10 +17,14 @@ with open(FIXTURES, encoding="utf-8") as fh:
     fixtures = json.load(fh)
 
 failures = []
+# Contagem CRUA por regex de _MULETAS — o mesmo que o lado TS mede
+# (contarMuletas().n). Ler muletas_acima_cap aqui misturava CONTAGEM com
+# ORCAMENTO: quando o teto humano de 2026-08-05 afrouxou o budget de "coisa"
+# (1 -> 20, prosa humana vai a 20 por capitulo), a fixture de contagem quebrou
+# sem que a contagem tivesse mudado. A fixture e contrato de contagem.
 for case in fixtures["muletas"]:
-    hits = m.muletas_acima_cap(case["text"])
-    match = next((h for h in hits if case["termContains"].lower() in h[0].lower()), None)
-    actual = match[1] if match else 0
+    rx = next((r for nome, r, _b, _o in m._MULETAS if case["termContains"].lower() in nome.lower()), None)
+    actual = len(rx.findall(case["text"])) if rx else -1
     if actual != case["expectedCount"]:
         failures.append("{}: esperado {}, obtido {}".format(case["name"], case["expectedCount"], actual))
     print("[{}] {} -> {}".format("ok" if actual == case["expectedCount"] else "FALHA", case["name"], actual))

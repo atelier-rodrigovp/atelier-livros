@@ -75,13 +75,18 @@ export function gateRepeticaoQuaseLiteral(
 }
 
 /**
- * AUTO-REPETIÇÃO (classe 1) acima do limiar derivado do acervo — A3 do plano
- * escala-retenção (2026-08-05). Determinístico e sem gosto: bloqueia só quando
- * o MESMO molde/n-grama repete num capítulo MAIS do que qualquer um dos 539
- * capítulos de controle do acervo jamais repetiu (Molde.limiarCap /
- * LIMIAR_NGRAMA_CAP) — zero marcação no controle por construção. A taxa
- * absoluta (classe 2) NÃO bloqueia: segue sinal do revisor e é avaliada na
- * escala do livro (sinais.ts).
+ * AUTO-REPETIÇÃO (classe 1) acima do TETO HUMANO. Determinístico e sem gosto:
+ * bloqueia só quando o MESMO molde repete num capítulo MAIS do que qualquer
+ * janela de 2.500 palavras de três romances publicados jamais repetiu
+ * (Molde.limiarCap — ver TETO_HUMANO em maneirismo.ts, medido em 2026-08-05).
+ *
+ * A origem do teto é o ponto: até 34fc73b o limiar vinha do máximo do acervo da
+ * PRÓPRIA engine — teto tirado do que estava sendo medido, que garante zero
+ * marcação por construção. Agora vem de fora. Para n-grama (LIMIAR_NGRAMA_CAP)
+ * o teto ainda é do acervo de controle: não foi remedido contra prosa humana.
+ *
+ * A taxa absoluta (classe 2) NÃO bloqueia: segue sinal do revisor e é avaliada
+ * na escala do livro (sinais.ts).
  */
 export function gateAutoRepeticao(texto: string): ResultadoGate {
   const hits: string[] = [];

@@ -162,12 +162,20 @@ describe("A3 — auto-repetição (classe 1) BLOQUEIA acima do limiar derivado d
     const r = gateAutoRepeticao(capComAntiteses(13));
     expect(r.gate).toBe("auto_repeticao");
     expect(r.passou).toBe(false);
-    expect(r.evidencia).toContain("não era X. Era Y.");
+    expect(r.evidencia).toContain("antítese por negação");
     expect(r.evidencia).toContain("13");
   });
 
-  it("logo abaixo do limiar (7×, o teto do acervo aprovado) PASSA", () => {
-    expect(gateAutoRepeticao(capComAntiteses(7)).passou).toBe(true);
+  // A fronteira do teto humano: 11 é o máximo que uma janela de 2.500 palavras
+  // de romance publicado alcançou (Hoover); 12 é o primeiro passo fora dela.
+  it("NO teto humano (11×) PASSA", () => {
+    expect(gateAutoRepeticao(capComAntiteses(11)).passou).toBe(true);
+  });
+
+  it("um acima do teto humano (12×) BLOQUEIA", () => {
+    const r = gateAutoRepeticao(capComAntiteses(12));
+    expect(r.passou).toBe(false);
+    expect(r.evidencia).toContain("12");
   });
 
   it("o gate roda nos gates universais do capítulo", () => {

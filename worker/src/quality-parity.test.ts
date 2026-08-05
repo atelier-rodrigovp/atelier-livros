@@ -10,20 +10,21 @@ describe("contrato compartilhado TS/Python", () => {
     });
   }
 
+  // Nomes de molde/tique diferem por acento entre TS/Python — comparação normalizada.
+  const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
   // Moldes (autópsia de convergência 2026-07-13): falso-positivos da regra
   // antiga não contam; antíteses verdadeiras contam. Espelhado no Python
   // por tools/test_quality_parity.py.
   for (const f of fixtures.moldes) {
     it(`TS molde fixture ${f.name}`, () => {
-      const hit = contarManeirismos(f.text).padroes.find((p) => p.nome.includes(f.moldeContains));
+      const hit = contarManeirismos(f.text).padroes.find((p) => norm(p.nome).includes(norm(f.moldeContains)));
       expect(hit?.n ?? 0).toBe(f.expectedCount);
     });
   }
 
   // Cadência (autópsia 53adade cap-37): anáfora por artigo funcional e frase
   // curta de ação não estouram; anáfora real e beats de ênfase estouram.
-  // Nomes de tique diferem por acento entre TS/Python — comparação normalizada.
-  const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   for (const f of fixtures.cadencia) {
     it(`TS cadência fixture ${f.name}`, () => {
       const acima = cadenciaAcima(f.text, orcCadenciaParaSkill("skill-dan-brown"));

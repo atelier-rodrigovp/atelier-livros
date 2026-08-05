@@ -1031,17 +1031,30 @@ def hora_reset(texto):
 # Tiques mecanicos cross-capitulo: o modelo os repete porque cada capitulo e
 # contexto fresco. So contagem + reescrita resolve (instrucao de "evitar" nao).
 # Espelha worker/src/maneirismo.ts. Orcamento: <= 1 de cada molde por capitulo.
+# ANTITESE POR NEGACAO — molde unico (espelha RE_ANTITESE de maneirismo.ts).
+# Nega-se um termo e o segmento seguinte reafirma o mesmo lugar sintatico em
+# contraste, separados por . : ; — ou virgula. Tres caminhos: (a) coda copular
+# apos separador forte; (a') virgula so quando a propria negacao e copular;
+# (b) a coda ecoa uma palavra de conteudo do trecho negado (>=5 letras);
+# (c) negacao eliptica com dois-pontos, uma palavra de cada lado.
+# Substitui as seis regex de superficie: elas viam 3 das 8 formas reais do
+# acervo e contavam a MESMA ocorrencia em mais de uma regex.
+_L_ACENTO = u"[a-zà-öø-ÿ]"
+_FIM_PALAVRA = u"(?!" + _L_ACENTO + u")"
+_COPULA = (u"(?:é|era|eram|foi|foram|fora|ser[áa]|ser[ãa]o|seria|seriam|est[áa]|estava|estavam|est[ãa]o|"
+           u"havia|h[áa]|houve|tem|t[êe]m|tinha|tinham|fica|ficava|ficou|ficaram|sou|somos|s[ãa]o|estou|estamos)")
+_SEP_FORTE = u"(?:[.!?…]+\\s+|[:;—–]\\s*)"
+_RE_ANTITESE = re.compile(u"|".join([
+    u"\\bn[ãa]o\\s+[^.!?:;\\n]{0,70}?" + _SEP_FORTE + u"(?:" + _COPULA + u"|(?:est[ae]|isto|isso|ess[ae])\\s+" + _COPULA + u")" + _FIM_PALAVRA,
+    u"\\bn[ãa]o\\s+" + _COPULA + _FIM_PALAVRA + u"[^.!?:;\\n]{1,60},\\s*" + _COPULA + _FIM_PALAVRA,
+    u"\\bn[ãa]o\\s+[^.!?:;\\n]{0,40}?(" + _L_ACENTO + u"{5,})" + _FIM_PALAVRA + u"[^.!?:;\\n]{0,40}?(?:" + _SEP_FORTE + u"|,\\s*)[^.!?\\n]{0,40}?\\1" + _FIM_PALAVRA,
+    u"\\bn[ãa]o\\s+" + _L_ACENTO + u"{3,}\\s*:\\s*" + _L_ACENTO + u"{3,}" + _FIM_PALAVRA,
+    u"\\bn[ãa]o\\s+[^.!?:;\\n]{1,60}[,;]\\s*(?:mas\\s+sim|e\\s+sim|mas\\s+antes|sen[ãa]o)\\s",
+]), re.I | re.U)
+
 _MOLDES_CAP = [
-    ("antitese 'nao era X. Era Y.'", re.compile(u"\\bn[ãa]o\\s+(?:era|foi|fora|é|seria)\\b[^.!?\\n]{0,60}[.!?]\\s+(?:era|foi|fora|é|seria)\\b", re.I | re.U)),
-    ("aposto antitetico", re.compile(u"\\bn[ãa]o\\s+(?:era|foi|é)\\s+[^.,;:!?\\n]{1,30}[;:,]\\s*(?:era|foi|é|mas|e\\s+sim)\\b", re.I | re.U)),
-    ("antitese 'nao X, mas Y'", re.compile(u"\\bn[ãa]o\\s+\\w[^.,;!?\\n]{0,50}[,;]\\s*(?:mas|e\\s+sim|sen[ãa]o)\\s+", re.I | re.U)),
-    # AUDITORIA-CONVERGENCIA 2026-07-13: exige o 2o termo antitetico na frase
-    # seguinte (a versao antiga casava qualquer frase curta iniciada por "Nao" —
-    # 4/5 marcacoes reais eram falso positivo de voz 1a pessoa). Espelha o TS.
-    ("fragmento antitetico", re.compile(u"(?:^|[.!?]\\s)N[ãa]o\\s+[^.!?\\n]{1,45}[.!?]\\s+(?:Era|É|Foi|Fora|Seria|Este|Esta|Isto|Isso|Havia|Há|Mas|Agora|Hoje)(?=[\\s,;:.!?—…]|$)", re.U)),
+    ("antitese por negacao", _RE_ANTITESE),
     ("'do jeito que/de'", re.compile(u"\\bdo\\s+jeito\\s+(?:que|de|como)\\b", re.I | re.U)),
-    ("antitese com 'haver' (Nao havia X... Havia Y)", re.compile(u"\\bn[ãa]o\\s+h(?:avia|á|ouve)\\b[^.!?\\n]{0,80}[.!?…]+\\s+(?:[^.!?\\n]{0,30}\\s)?h(?:avia|á)\\b", re.I | re.U)),
-    ("antitese com 'haver' (mesma frase)", re.compile(u"\\bn[ãa]o\\s+h(?:avia|á|ouve)\\b[^.,;:!?\\n]{1,50}[,;]\\s*(?:mas\\s+|e\\s+sim\\s+)?h(?:avia|á)\\b", re.I | re.U)),
     ("simile-andaime ('como se / como quando')", re.compile(u"\\bcomo\\s+(?:se|quando)\\b", re.I | re.U)),
 ]
 PER_CAP_BUDGET = 1
@@ -1061,8 +1074,12 @@ def maneirismos_acima(texto):
 # "coisa" e a pior (~1 a cada ~200 palavras): orcamento APERTADO. Tupla:
 # (nome, regex, budget_por_capitulo, orcamento_por_10k_global).
 _MULETAS = [
-    (u"coisa/coisas", re.compile(u"\\bcoisas?\\b", re.I | re.U), 1, 4.0),
-    (u"algo", re.compile(u"\\balgo\\b", re.I | re.U), 3, 8.0),
+    # TETO HUMANO 2026-08-05: "coisa" NAO e tique de IA. Os tres romances humanos
+    # vao a 20 por janela de 2.500 palavras (Hoover) e 29,3/10k no livro
+    # (McFadden); a engine fica DENTRO disso. O orcamento antigo (1 por capitulo,
+    # 4/10k) reprovava prosa humana normal.
+    (u"coisa/coisas", re.compile(u"\\bcoisas?\\b", re.I | re.U), 20, 30.0),
+    (u"algo", re.compile(u"\\balgo\\b", re.I | re.U), 6, 10.0),
     (u"'meio que'", re.compile(u"\\bmeio que\\b", re.I | re.U), 1, 3.0),
     (u"simplesmente", re.compile(u"\\bsimplesmente\\b", re.I | re.U), 1, 3.0),
     (u"'de repente'", re.compile(u"\\bde repente\\b", re.I | re.U), 1, 4.0),
@@ -1082,7 +1099,7 @@ _MULETAS = [
 
 
 def muletas_acima_cap(texto):
-    """Muletas acima do orcamento POR CAPITULO. 'coisa' estoura facil (budget 1)."""
+    """Muletas acima do orcamento POR CAPITULO (budget do teto humano 2026-08-05)."""
     out = []
     for nome, rx, budget, _ in _MULETAS:
         n = len(rx.findall(texto or ""))
@@ -2446,15 +2463,14 @@ def gate_maneirismo_capitulo(projeto, n, args):
 # nenhum molde acumula acima do alvo no livro inteiro.
 # ----------------------------------------------------------------------------
 # Orcamento por molde em ocorrencias por 10 mil palavras (mesmos alvos do TS).
+# TETO HUMANO 2026-08-05 (ver TETO_HUMANO em worker/src/maneirismo.ts e
+# docs/engine-v2/09-teto-humano.md): taxa por 10k do romance humano publicado
+# que mais usa cada molde, arredondada para cima. NUNCA recalibrar contra
+# capitulos gerados pela propria engine.
 ORC10K_GLOBAL = {
-    "antitese 'nao era X. Era Y.'": 1.5,
-    "aposto antitetico": 1.0,
-    "antitese 'nao X, mas Y'": 1.5,
-    "fragmento antitetico": 1.5,
-    "'do jeito que/de'": 2.5,
-    "antitese com 'haver' (Nao havia X... Havia Y)": 1.5,
-    "antitese com 'haver' (mesma frase)": 1.0,
-    "simile-andaime ('como se / como quando')": 2.5,
+    "antitese por negacao": 18.0,                          # humano: 17,1 (Hoover)
+    "'do jeito que/de'": 1.0,                              # humano: 0,7 (McFadden)
+    "simile-andaime ('como se / como quando')": 12.0,      # humano: 11,7 (Hoover)
 }
 FECHO_MAX_FRACAO = 0.25       # fecho epigramatico isolado em no maximo 1/4 dos capitulos
 NGRAM_MIN = 8                 # n-grama generico: >= 8 ocorrencias no livro

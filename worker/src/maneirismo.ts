@@ -9,40 +9,122 @@
 export interface Molde {
   nome: string;
   re: RegExp;
+  /**
+   * Taxa absoluta (classe 2) na escala do LIVRO, por 10.000 palavras. Derivada
+   * do CORPUS HUMANO (ver TETO_HUMANO abaixo): taxa do livro inteiro no romance
+   * humano que mais usa o molde, arredondada para cima.
+   */
   orc10k: number;
   /**
    * Limiar de AUTO-REPETIÇÃO (classe 1) na escala de CAPÍTULO: máximo observado
-   * do molde em 539 capítulos de CONTROLE do acervo (livros importados, aprovados
-   * pelo autor) em 2026-08-05 — repetir MAIS que isso num capítulo é mais do que
-   * qualquer capítulo aprovado jamais repetiu. Derivado, não inventado (plano
-   * escala-retenção A1); orc10k segue sendo a taxa absoluta (classe 2), cuja
-   * escala natural é o LIVRO.
+   * do molde em UMA janela de 2.500 palavras de PROSA HUMANA PUBLICADA (ver
+   * TETO_HUMANO abaixo). Repetir ESTRITAMENTE MAIS que isso num capítulo é sair
+   * da faixa que três romances comerciais inteiros jamais alcançaram.
    */
   limiarCap: number;
 }
 
+/**
+ * TETO HUMANO — procedência dos limiares (medição de 2026-08-05).
+ *
+ * Fonte: três romances publicados em português, um por autor de referência das
+ * skills — Dan Brown, "O Código Da Vinci" (149.754 palavras); Colleen Hoover,
+ * "Talvez Agora" (99.601); Freida McFadden, "Nunca Minta" (68.583). Total
+ * 317.938 palavras extraídas com `pdftotext -enc UTF-8`, medidas em 128 janelas
+ * de 2.500 palavras (o tamanho de capítulo da engine).
+ *
+ * REGRA DO LIMIAR: `limiarCap` = MÁXIMO observado numa janela humana; fora da
+ * cota é ESTRITAMENTE ACIMA dele. `orc10k` = taxa do livro humano mais carregado.
+ *
+ * FRASE QUE IMPEDE A REPETIÇÃO DO ERRO: limiar derivado de prosa humana
+ * publicada, independente do acervo da engine; NUNCA recalibrar contra capítulos
+ * gerados pela própria engine — teto tirado do que se está medindo garante zero
+ * marcação por construção (foi o defeito da rodada 529cdc8..34fc73b).
+ *
+ * SEGUNDA REGRA, DESCOBERTA NESTA RODADA: o teto é do PAR (detector, corpus).
+ * Trocou o detector, remede o corpus. Os limiares abaixo foram medidos com o
+ * detector desta versão do arquivo — o teto de antítese "7" do plano original
+ * era do detector antigo (recall 3/8); o mesmo corpus, com o detector atual
+ * (recall 8/8), dá 11. Mudar RE_ANTITESE sem remedir invalida o número.
+ *
+ * Máximos observados (janela de 2.500 palavras / taxa do livro por 10k):
+ *   antítese por negação ....... 11  (Hoover)   /  17,1  (Hoover)
+ *   "do jeito que/de" ...........  3  (McFadden) /   0,7  (McFadden)
+ *   "como se / como quando" .....  6  (Hoover)   /  11,7  (Hoover)
+ *   clichê recorrente ...........  2             /   0,4  (McFadden)
+ *   "coisa(s)" (léxico, MULETAS)  20  (Hoover)   /  29,3  (McFadden)
+ *
+ * O corpus NÃO é versionado (arquivos pessoais do autor, protegidos por direito
+ * autoral). Versionam-se os números e a procedência; nunca trecho.
+ * Registro completo: docs/engine-v2/09-teto-humano.md
+ */
+export const TETO_HUMANO = {
+  medido_em: "2026-08-05",
+  palavras: 317_938,
+  janelas: 128,
+  janela_palavras: 2_500,
+  obras: ["Dan Brown — O Código Da Vinci", "Colleen Hoover — Talvez Agora", "Freida McFadden — Nunca Minta"],
+} as const;
+
+/**
+ * ANTÍTESE POR NEGAÇÃO — molde ÚNICO (substitui as seis regex de superfície que
+ * existiam até 34fc73b e que, além de verem 3 das 8 formas reais do acervo,
+ * contavam a MESMA ocorrência em mais de uma regex).
+ *
+ * A forma: NEGA-SE um termo e o segmento seguinte REAFIRMA o mesmo lugar
+ * sintático em contraste, separados por ponto, dois-pontos, ponto-e-vírgula,
+ * travessão ou vírgula. Três caminhos de reconhecimento:
+ *   (a) a coda começa por cópula/auxiliar (é/era/foi/está/havia/tem/fica…),
+ *       depois de separador FORTE (. ! ? : ; — –);
+ *   (a') com VÍRGULA o separador é fraco demais, então exige-se que a própria
+ *       negação seja copular ("não era um pedido, era uma ordem") — senão
+ *       "Ela não olhou, é claro" viraria marcação;
+ *   (b) a coda ECOA uma palavra de conteúdo do trecho negado (≥5 letras) —
+ *       cobre "Não limpa de A. Limpa de B.";
+ *   (c) negação elíptica com dois-pontos, UMA palavra de cada lado — cobre
+ *       "Não emperrada: fechada." (a exigência de uma só palavra é o que
+ *       mantém "Não há borrão: trinta e um." fora);
+ *   (d) "não X, mas sim / e sim / senão Y" — a antítese com conectivo explícito.
+ *       Só os conectivos INEQUÍVOCOS: o "mas" pelado é concessiva comum
+ *       ("Ela não sabia nomear o som, mas o timbre parecia antigo") e a regex
+ *       antiga o contava como molde — falso positivo herdado.
+ *
+ * ARMADILHA DO `\b`: em JavaScript `\b` é definido sobre [A-Za-z0-9_] — depois
+ * de letra acentuada NÃO há fronteira de palavra, então `/é\b/` nunca casa. Os
+ * fins de palavra aqui usam lookahead negativo, nunca `\b`.
+ */
+const L_ACENTO = "[a-zà-öø-ÿ]";            // letra (flag i cobre maiúsculas e acentuadas)
+const FIM_PALAVRA = `(?!${L_ACENTO})`;      // substitui \b após letra acentuada
+const COPULA =
+  "(?:é|era|eram|foi|foram|fora|ser[áa]|ser[ãa]o|seria|seriam|est[áa]|estava|estavam|est[ãa]o|" +
+  "havia|h[áa]|houve|tem|t[êe]m|tinha|tinham|fica|ficava|ficou|ficaram|sou|somos|s[ãa]o|estou|estamos)";
+const SEP_FORTE = "(?:[.!?…]+\\s+|[:;—–]\\s*)";
+
+export const RE_ANTITESE = new RegExp(
+  [
+    `\\bn[ãa]o\\s+[^.!?:;\\n]{0,70}?${SEP_FORTE}(?:${COPULA}|(?:est[ae]|isto|isso|ess[ae])\\s+${COPULA})${FIM_PALAVRA}`,
+    `\\bn[ãa]o\\s+${COPULA}${FIM_PALAVRA}[^.!?:;\\n]{1,60},\\s*${COPULA}${FIM_PALAVRA}`,
+    `\\bn[ãa]o\\s+[^.!?:;\\n]{0,40}?(${L_ACENTO}{5,})${FIM_PALAVRA}[^.!?:;\\n]{0,40}?(?:${SEP_FORTE}|,\\s*)[^.!?\\n]{0,40}?\\1${FIM_PALAVRA}`,
+    `\\bn[ãa]o\\s+${L_ACENTO}{3,}\\s*:\\s*${L_ACENTO}{3,}${FIM_PALAVRA}`,
+    `\\bn[ãa]o\\s+[^.!?:;\\n]{1,60}[,;]\\s*(?:mas\\s+sim|e\\s+sim|mas\\s+antes|sen[ãa]o)\\s`,
+  ].join("|"),
+  "gi"
+);
+
 const MOLDES: Molde[] = [
-  // antítese por negação, em todas as formas
-  { nome: 'antítese "não era X. Era Y."', re: /\bn[ãa]o\s+(?:era|foi|fora|é|seria)\b[^.!?\n]{0,60}[.!?]\s+(?:era|foi|fora|é|seria)\b/gi, orc10k: 1.5, limiarCap: 7 },
-  { nome: 'aposto antitético ("não era pergunta; era…")', re: /\bn[ãa]o\s+(?:era|foi|é)\s+[^.,;:!?\n]{1,30}[;:,]\s*(?:era|foi|é|mas|e\s+sim)\b/gi, orc10k: 1.0, limiarCap: 5 },
-  { nome: 'antítese "não X, mas/e sim Y"', re: /\bn[ãa]o\s+\w[^.,;!?\n]{0,50}[,;]\s*(?:mas|e\s+sim|sen[ãa]o)\s+/gi, orc10k: 1.5, limiarCap: 9 },
-  // AUDITORIA-CONVERGENCIA 2026-07-13: a versão antiga casava QUALQUER frase
-  // curta iniciada por "Não" (4/5 marcações reais eram falso positivo — réplicas
-  // e confissões de narradora 1ª pessoa, sem antítese). Agora exige o 2º termo
-  // antitético na frase seguinte (Era/É/Este/Havia/Mas/…).
-  { nome: 'fragmento antitético curto ("Não X. Era/Este Y.")', re: /(?:^|[.!?]\s)N[ãa]o\s+[^.!?\n]{1,45}[.!?]\s+(?:Era|É|Foi|Fora|Seria|Este|Esta|Isto|Isso|Havia|Há|Mas|Agora|Hoje)(?=[\s,;:.!?—…]|$)/g, orc10k: 1.5, limiarCap: 5 },
-  // antítese com "haver" — escapava (o molde acima só casa não era/foi/é/seria):
-  // "Não havia nada… Havia só o branco." / "não havia X, havia Y".
-  { nome: 'antítese com "haver" ("Não havia X… Havia Y")', re: /\bn[ãa]o\s+h(?:avia|á|ouve)\b[^.!?\n]{0,80}[.!?…]+\s+(?:[^.!?\n]{0,30}\s)?h(?:avia|á)\b/gi, orc10k: 1.5, limiarCap: 3 },
-  { nome: 'antítese com "haver" (mesma frase: "não havia X, havia Y")', re: /\bn[ãa]o\s+h(?:avia|á|ouve)\b[^.,;:!?\n]{1,50}[,;]\s*(?:mas\s+|e\s+sim\s+)?h(?:avia|á)\b/gi, orc10k: 1.0, limiarCap: 2 },
+  // Antítese por negação: UMA regex para as oito formas (ver RE_ANTITESE).
+  // Uma ocorrência = uma marcação; alternativas do mesmo `|` não somam.
+  { nome: "antítese por negação", re: RE_ANTITESE, orc10k: 18, limiarCap: 11 },
   // símile-andaime: símile hipotético estendido ("Como quando se entra…", "como se
-  // pudesse…") — um dos piores tiques de IA. Orçamento apertado (1 legítimo ok; o
-  // alvo é o EXCESSO e o molde repetido).
-  { nome: 'símile-andaime ("como se / como quando")', re: /\bcomo\s+(?:se|quando)\b/gi, orc10k: 2.5, limiarCap: 15 },
-  // "do jeito que / do jeito de / do jeito como"
-  { nome: '"do jeito que/de"', re: /\bdo\s+jeito\s+(?:que|de|como)\b/gi, orc10k: 2.5, limiarCap: 12 },
+  // pudesse…"). O limiar 15 anterior vinha do acervo da própria engine; o humano
+  // vai a 6 por janela e 11,7/10k — a engine usa MENOS que o humano aqui.
+  { nome: 'símile-andaime ("como se / como quando")', re: /\bcomo\s+(?:se|quando)\b/gi, orc10k: 12, limiarCap: 6 },
+  // "do jeito que / do jeito de / do jeito como": Brown e Hoover têm ZERO em
+  // 249 mil palavras; McFadden vai a 3 numa janela. É o molde mais marcado do
+  // acervo da engine (mediana 1, máximo 6) e o de teto humano mais baixo.
+  { nome: '"do jeito que/de"', re: /\bdo\s+jeito\s+(?:que|de|como)\b/gi, orc10k: 1, limiarCap: 3 },
   // clichês recorrentes
-  { nome: "clichê recorrente", re: /\b(mar de chumbo|clareza fria|sil[êe]ncio ensurdecedor|frio na espinha|cora[çc][ãa]o disparad[oa]|sangue gelad[oa]|n[óo] na garganta)\b/gi, orc10k: 1.0, limiarCap: 1 },
+  { nome: "clichê recorrente", re: /\b(mar de chumbo|clareza fria|sil[êe]ncio ensurdecedor|frio na espinha|cora[çc][ãa]o disparad[oa]|sangue gelad[oa]|n[óo] na garganta)\b/gi, orc10k: 1.0, limiarCap: 2 },
 ];
 
 /**
@@ -166,8 +248,12 @@ export function ngramasSobrerepresentados(
 export interface Muleta { termo: string; re: RegExp; orc10k: number }
 
 export const MULETAS: Muleta[] = [
-  { termo: "coisa/coisas", re: /\bcoisas?\b/gi, orc10k: 4 },   // ~1 a cada 2500 palavras
-  { termo: "algo", re: /\balgo\b/gi, orc10k: 8 },
+  // TETO HUMANO 2026-08-05: "coisa" NÃO é tique de IA. Os três romances humanos
+  // vão a 20 por janela de 2.500 palavras (Hoover) e 29,3/10k no livro (McFadden);
+  // a engine fica DENTRO disso (mediana 5, máximo 19). O orçamento antigo (4/10k)
+  // reprovava prosa humana normal — alarme falso derrubado pela medição.
+  { termo: "coisa/coisas", re: /\bcoisas?\b/gi, orc10k: 30 },
+  { termo: "algo", re: /\balgo\b/gi, orc10k: 10 },   // humano: máx 9,8/10k (Hoover)
   { termo: '"meio que"', re: /\bmeio que\b/gi, orc10k: 3 },
   { termo: "simplesmente", re: /\bsimplesmente\b/gi, orc10k: 3 },
   { termo: '"de repente"', re: /\bde repente\b/gi, orc10k: 4 },

@@ -142,16 +142,17 @@ describe("FASE 2 — moldes nomeados como sinal UNIVERSAL (orçamento do maneiri
     return blocos.join("\n\n");
   })();
 
-  it("6 antíteses por negação em ~2.500 palavras: sinal medido com exemplos citáveis, informativo (A1: dentro do teto do acervo, 7)", () => {
+  it("6 antíteses por negação em ~2.500 palavras: sinal medido com exemplos citáveis, informativo (dentro do teto humano, 11)", () => {
     // Contrato SEM regra de molde (V7: nenhum contrato tem) — o limiar de
-    // capítulo vem de maneirismo.ts (limiarCap, derivado do acervo). A taxa
-    // absoluta (orc10k) é avaliada na escala de LIVRO (medirSinaisLivro).
+    // capítulo vem de maneirismo.ts (limiarCap, derivado de PROSA HUMANA
+    // PUBLICADA). A taxa absoluta (orc10k) é avaliada na escala de LIVRO
+    // (medirSinaisLivro).
     const sinais = medirSinais(TEXTO_2500, contratoSintetico());
-    const molde = sinais.find((x) => x.sinal.startsWith("molde.") && x.sinal.includes("não era X. Era Y."))!;
+    const molde = sinais.find((x) => x.sinal.startsWith("molde.") && x.sinal.includes("antítese por negação"))!;
     expect(molde).toBeDefined();
     expect(Number(molde.valor)).toBe(6);
-    expect(molde.cota?.max).toBe(7);            // limiar de auto-repetição existe SEM contrato declarar
-    expect(molde.fora_da_cota).toBe(false);     // 6 ≤ 7: o acervo aprovado chega aí
+    expect(molde.cota?.max).toBe(11);           // limiar de auto-repetição existe SEM contrato declarar
+    expect(molde.fora_da_cota).toBe(false);     // 6 ≤ 11: o romance humano chega aí
     expect(molde.exemplos.length).toBe(6);       // todas citáveis (adendo 2)
     expect(molde.exemplos[0]).toContain("Não era medo");
   });
@@ -165,7 +166,7 @@ describe("FASE 2 — moldes nomeados como sinal UNIVERSAL (orçamento do maneiri
     })();
     for (const id of ["dan-brown", "hoover-mcfadden", "romantasy"]) {
       const sinais = medirSinais(TREZE, carregarContrato(id).contrato);
-      const molde = sinais.find((x) => x.sinal.startsWith("molde.") && x.sinal.includes("não era X. Era Y."))!;
+      const molde = sinais.find((x) => x.sinal.startsWith("molde.") && x.sinal.includes("antítese por negação"))!;
       expect(Number(molde.valor), id).toBe(13);
       expect(molde?.fora_da_cota, id).toBe(true);
     }
@@ -174,7 +175,7 @@ describe("FASE 2 — moldes nomeados como sinal UNIVERSAL (orçamento do maneiri
   it("dentro do orçamento não sai da cota (1 antítese em capítulo longo é legítima)", () => {
     const texto = TEXTO_2500.split("\n\n").filter((p) => !ANTITESES.slice(1).includes(p)).join("\n\n");
     const molde = medirSinais(texto, contratoSintetico()).find(
-      (x) => x.sinal.startsWith("molde.") && x.sinal.includes("não era X. Era Y.")
+      (x) => x.sinal.startsWith("molde.") && x.sinal.includes("antítese por negação")
     )!;
     expect(Number(molde.valor)).toBe(1);
     expect(molde.fora_da_cota).toBe(false);
@@ -289,7 +290,7 @@ describe("resumoSinais — medições reais, numeradas, para o revisor", () => {
       "Não era frieza. Era manutenção. O elevador desceu sem parar em andar nenhum.",
     ].join("\n\n");
     const resumo = resumoSinais(medirSinais(texto, contratoSintetico()));
-    const linha = resumo.split("\n").find((l) => l.includes('molde.antítese "não era X. Era Y."'))!;
+    const linha = resumo.split("\n").find((l) => l.includes("molde.antítese por negação"))!;
     expect(linha).toBeDefined();
     expect(linha).toContain(": 3");         // contagem
     expect(linha).not.toContain("FORA");    // A1: 3 ≤ limiar 7 — informativo, o revisor julga
@@ -358,28 +359,31 @@ describe("A1 — classe 2 (taxa absoluta) é informativa no capítulo; classe 1 
     expect(s.exemplos.length).toBe(3);    // o revisor continua vendo tudo
   });
 
-  it("13× o MESMO molde de antítese num capítulo sai FORA por auto-repetição (limiar derivado do acervo: 7+1)", () => {
-    const antiteses = Array.from({ length: 13 }, (_, i) =>
-      `Não era ${["medo", "pressa", "frieza", "cuidado", "descanso", "rotina", "cansaço", "raiva", "pena", "culpa", "sono", "fome", "frio"][i]}. Era outra coisa por dentro.`
-    );
-    const texto = capitulo(2800, antiteses);
-    const s = medirSinais(texto, contratoSintetico()).find(
-      (x) => x.sinal.startsWith("molde.") && x.sinal.includes("não era X. Era Y.")
+  const TERMOS_13 = ["medo", "pressa", "frieza", "cuidado", "descanso", "rotina", "cansaço", "raiva", "pena", "culpa", "sono", "fome", "frio"];
+  const capComAntiteses = (quantas: number) =>
+    capitulo(2800, Array.from({ length: quantas }, (_, i) => `Não era ${TERMOS_13[i]}. Era outra coisa por dentro.`));
+  const moldeAntitese = (texto: string) =>
+    medirSinais(texto, contratoSintetico()).find(
+      (x) => x.sinal.startsWith("molde.") && x.sinal.includes("antítese por negação")
     )!;
+
+  it("13× o MESMO molde de antítese num capítulo sai FORA por auto-repetição (teto humano: 11+1)", () => {
+    const s = moldeAntitese(capComAntiteses(13));
     expect(Number(s.valor)).toBe(13);
-    expect(s.cota?.max).toBe(7);          // limiar derivado: máx do controle (7); acima é auto-repetição
+    expect(s.cota?.max).toBe(11);         // teto humano medido; acima é auto-repetição
     expect(s.fora_da_cota).toBe(true);
   });
 
-  it("repetição de molde no teto do acervo (7×) ainda NÃO sai fora — o acervo aprovado chega aí", () => {
-    const antiteses = Array.from({ length: 7 }, (_, i) =>
-      `Não era ${["medo", "pressa", "frieza", "cuidado", "descanso", "rotina", "cansaço"][i]}. Era outra coisa por dentro.`
-    );
-    const s = medirSinais(capitulo(2800, antiteses), contratoSintetico()).find(
-      (x) => x.sinal.startsWith("molde.") && x.sinal.includes("não era X. Era Y.")
-    )!;
-    expect(Number(s.valor)).toBe(7);
+  it("repetição NO teto humano (11×) ainda NÃO sai fora — o romance humano chega aí", () => {
+    const s = moldeAntitese(capComAntiteses(11));
+    expect(Number(s.valor)).toBe(11);
     expect(s.fora_da_cota).toBe(false);
+  });
+
+  it("12× — o primeiro passo fora da faixa humana — sai fora", () => {
+    const s = moldeAntitese(capComAntiteses(12));
+    expect(Number(s.valor)).toBe(12);
+    expect(s.fora_da_cota).toBe(true);
   });
 
   it("muleta lexical (classe 2) vira informativa no capítulo; tolerância zero (typo/PT-PT) continua fora", () => {

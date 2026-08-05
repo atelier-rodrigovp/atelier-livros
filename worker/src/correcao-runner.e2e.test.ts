@@ -37,10 +37,13 @@ const PY = pythonBin();
 const PISO = 25;
 const PID = "proj-e2e";
 
-// Texto reprovável pelo gate REAL: molde "antitese 'nao X, mas Y'" 2x (orçamento 1).
+// Texto reprovável pelo gate REAL: molde "antítese por negação" 2x (orçamento 1).
+// Antes as duas frases usavam "não X, mas Y" com "mas" pelado; o detector do
+// teto humano (2026-08-05) só conta os conectivos inequívocos, porque o "mas"
+// pelado é concessiva comum, não antítese. As frases viraram a forma canônica.
 const TEXTO_RUIM = `# Capítulo 1 — O Arquivo
 
-Helena desceu a escada do arquivo municipal com a lanterna apagada. Ela não sabia nomear o som que vinha do porão, mas o timbre parecia antigo demais para os canos. Ele não queria abrir a porta de ferro, mas os passos atrás dela empurraram a decisão. O registro de 1974 esperava sobre a mesa, aberto na página errada, e alguém escrevera uma data nova na margem com tinta ainda fresca.
+Helena desceu a escada do arquivo municipal com a lanterna apagada. O som que vinha do porão não era coisa de cano, mas sim de voz. Ele não queria abrir a porta de ferro, e sim adiar tudo mais uma noite. O registro de 1974 esperava sobre a mesa, aberto na página errada, e alguém escrevera uma data nova na margem com tinta ainda fresca.
 `;
 
 // Correção MÍNIMA: as duas frases-molde reescritas; o resto do capítulo preservado.
@@ -120,7 +123,7 @@ describe.skipIf(!temPython)("e2e correção sem clique (runner real, LLM stubado
     expect(st.quality_status).toBe("blocked_quality");
     expect(st.quality_stage).toBe("REVISAO_CAPITULO");
     expect(st.quality_cap).toBe(1);
-    expect(String(st.quality_blockers)).toContain("antitese 'nao X, mas Y'");
+    expect(String(st.quality_blockers)).toContain("antitese por negacao");
   }, 120_000);
 
   it("cenário 3/19: o worker decide a correção SOZINHO (mesmo código do handler; zero clique)", async () => {
@@ -160,7 +163,7 @@ describe.skipIf(!temPython)("e2e correção sem clique (runner real, LLM stubado
     const prompts = await readFile(path.join(dir, "_stub-prompts.log"), "utf8");
     expect(prompts).toContain("INSTRUCAO DE CORRECAO AUTOMATICA");
     expect(prompts).toContain("CORRECAO DIRIGIDA (degrau 2)");
-    expect(prompts).toContain("antitese 'nao X, mas Y'");
+    expect(prompts).toContain("antitese por negacao");
     // Gate aceitou: marcador .done + quality json hash-bound ao texto aprovado.
     expect(existsSync(path.join(dir, "review", "_revcap-01.done"))).toBe(true);
     const q = JSON.parse(await readFile(path.join(dir, "quality", "capitulo-01.json"), "utf8"));

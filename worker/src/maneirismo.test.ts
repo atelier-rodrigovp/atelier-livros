@@ -14,8 +14,10 @@ const TRECHO_EVANGELHO =
 
 describe("detector — tiques que ESCAPAVAM (haver-antítese, símile-andaime)", () => {
   it('pega antítese com "haver" ("Não havia X… Havia Y") — antes escapava', () => {
+    // Tinha molde próprio até 34fc73b; agora é uma das formas do molde único
+    // "antítese por negação" (a coda "Havia" é cópula/auxiliar — caminho (a)).
     const r = contarManeirismos(TRECHO_EVANGELHO);
-    expect(r.padroes.some((p) => /haver/.test(p.nome) && p.n >= 1)).toBe(true);
+    expect(r.padroes.some((p) => /antítese/.test(p.nome) && p.n >= 1)).toBe(true);
   });
   it('pega símile-andaime ("como se / como quando")', () => {
     const r = contarManeirismos(TRECHO_EVANGELHO);
@@ -68,6 +70,76 @@ describe("contarMuletas — palavra-muleta ('coisa')", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// O detector de antítese tem que enxergar a FORMA, não seis superfícies.
+// As 8 formas abaixo são reais do acervo do autor (canário hoover 97dd7390,
+// capitulo-01/02; a nº 8 é do projeto 40b5ebbd, capitulo-30). Até 34fc73b o
+// detector via 3 delas. Os negativos são negação LEGÍTIMA do mesmo capítulo —
+// detector com falso positivo não pode bloquear.
+// ---------------------------------------------------------------------------
+const ANTITESE_8_FORMAS = [
+  "Não é frieza. É que a manutenção eu sei nomear.",
+  "Não emperrada: fechada.",
+  "Isso não é acordar por vontade: é abertura ocular espontânea.",
+  "Não limpa de quem passou pano depois. Limpa de esta semana.",
+  "Ele não está prometendo silêncio: está me concedendo o meu.",
+  "O silêncio dele não é ausência. É uma coisa que está acontecendo.",
+  "Não é olhar de quem procura. É olhar de quem já achou e está conferindo.",
+  "Não era um pedido, era uma ordem.",
+];
+
+const NEGACAO_LEGITIMA = [
+  "Ela não pergunta mais nada. Vira a tela para mim e começa a troca.",
+  "O crachá não passa na catraca da primeira vez. Passo de novo, mais devagar.",
+  "A farmácia não subiu a bolsa do 517. Já liguei duas vezes.",
+  "O filho dorme na poltrona e não quer sair. Anoto tudo na ordem.",
+  "Ninguém corrige, e todo mundo já aprendeu a somar de cabeça.",
+  "Não sei quanto devo. Desço a escada sem acender a luz.",
+  "Reclamou do arroz. Faço um sinal com a cabeça e a Cida continua.",
+  "Não aceitou a dieta inteira, só metade do prato de hoje.",
+];
+
+const contarAntitese = (t: string) =>
+  contarManeirismos(t).padroes.filter((p) => /antítese/.test(p.nome)).reduce((s, p) => s + p.n, 0);
+
+describe("antítese por negação — a FORMA, não a superfície", () => {
+  for (const [i, forma] of ANTITESE_8_FORMAS.entries()) {
+    it(`forma ${i + 1} do acervo é marcada: ${JSON.stringify(forma.slice(0, 40))}`, () => {
+      expect(contarAntitese(forma)).toBeGreaterThanOrEqual(1);
+    });
+  }
+
+  for (const [i, frase] of NEGACAO_LEGITIMA.entries()) {
+    it(`negação legítima ${i + 1} NÃO é marcada: ${JSON.stringify(frase.slice(0, 40))}`, () => {
+      expect(contarAntitese(frase)).toBe(0);
+    });
+  }
+
+  it("recall 8/8 e ZERO falso positivo no conjunto inteiro", () => {
+    expect(ANTITESE_8_FORMAS.filter((f) => contarAntitese(f) > 0)).toHaveLength(8);
+    expect(NEGACAO_LEGITIMA.filter((f) => contarAntitese(f) > 0)).toHaveLength(0);
+  });
+
+  // A decisão do merge: UMA regex no lugar de seis. Se convivessem, a mesma
+  // ocorrência entraria em mais de um molde e toda contagem downstream inflaria.
+  it("SEM DUPLA CONTAGEM: existe um único molde de antítese e cada forma conta 1", () => {
+    for (const forma of ANTITESE_8_FORMAS) {
+      const antiteticos = contarManeirismos(forma).padroes.filter((p) => /antítese/.test(p.nome));
+      expect(antiteticos).toHaveLength(1);        // um molde só, nunca dois somando
+      expect(antiteticos[0].n).toBe(1);           // uma ocorrência = uma marcação
+    }
+  });
+
+  it("SEM DUPLA CONTAGEM: 3 antíteses coladas contam exatamente 3", () => {
+    expect(contarAntitese(ANTITESE_8_FORMAS.slice(0, 3).join(" "))).toBe(3);
+  });
+
+  it("o limiar por capítulo é o máximo humano medido (11), não o máximo do acervo da engine", () => {
+    const m = contarManeirismos("Não era A. Era B.").padroes.find((p) => /antítese/.test(p.nome));
+    expect(m?.limiarCap).toBe(11);
+  });
+});
+
 describe("contarManeirismos — moldes nomeados", () => {
   it("conta antíteses 'não era X. Era Y.' (várias formas)", () => {
     const t = "Não era medo. Era algo pior. Não foi sorte. Foi cálculo. Não era pergunta; era ordem.";
@@ -85,7 +157,7 @@ describe("contarManeirismos — moldes nomeados", () => {
   it("marca 'acima' quando passa do alvo proporcional ao tamanho", () => {
     // texto curto → alvo=1; 3 ocorrências do mesmo molde → acima
     const r = contarManeirismos("Não era A. Era B. Não era C. Era D. Não era E. Era F.");
-    const m = r.padroes.find((p) => /antítese "não era/.test(p.nome));
+    const m = r.padroes.find((p) => /antítese/.test(p.nome));
     expect(m?.n).toBeGreaterThanOrEqual(3);
     expect(m?.acima).toBe(true);
     expect(r.acimaDoOrcamento).toBe(true);
