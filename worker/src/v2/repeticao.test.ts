@@ -161,47 +161,28 @@ describe("camada 3 — MANEIRISMO é sinal acumulativo", () => {
 
   it("[DOD:I-03] padrão em CINCO capítulos gera sinal acumulativo", () => {
     const s = medirManeirismosDoLivro(comPadrao(CAPITULOS_PARA_SINAL))[0];
-    const d = decidirManeirismo(s, { calibrados: {}, excecoesDoAutor: [] });
+    const d = decidirManeirismo(s, { excecoesDoAutor: [] });
     expect(d.acao).toBe("sinalizar");
     expect(d).toMatchObject({ motivo: expect.stringContaining("sinal acumulativo") });
   });
 
   it("padrão em POUCOS capítulos é ignorado (voz não é maneirismo)", () => {
     const s = medirManeirismosDoLivro(comPadrao(2))[0];
-    expect(decidirManeirismo(s, { calibrados: {}, excecoesDoAutor: [] }).acao).toBe("ignorar");
+    expect(decidirManeirismo(s, { excecoesDoAutor: [] }).acao).toBe("ignorar");
   });
 
-  it("[DOD:I-04] MANEIRISMO NÃO CALIBRADO NUNCA BLOQUEIA — nem com vinte capítulos", () => {
+  it("[DOD:I-04] a camada 3 é SINAL PURO — nunca bloqueia, nem com vinte capítulos", () => {
+    // FASE 3 do plano ofício-inteiro: o ramo "bloquear" era código morto em
+    // produção (pipeline sempre passou política vazia) e saiu; o bloqueio por
+    // frequência DENTRO do capítulo é da régua universal da FASE 2.
     const s = medirManeirismosDoLivro(comPadrao(20))[0];
-    const d = decidirManeirismo(s, { calibrados: {}, excecoesDoAutor: [] });
+    const d = decidirManeirismo(s, { excecoesDoAutor: [] });
     expect(d.acao).toBe("sinalizar");
-    expect(d.acao).not.toBe("bloquear");
-  });
-
-  it("com limiar CALIBRADO por humano, bloqueia — citando o corpus", () => {
-    const s = medirManeirismosDoLivro(comPadrao(8))[0];
-    const politica: PoliticaManeirismo = {
-      calibrados: { nao_era_a_era_b: { limiarCapitulos: 6, corpus_hash: "14c194fd4c49aaaa" } },
-      excecoesDoAutor: [],
-    };
-    const d = decidirManeirismo(s, politica);
-    expect(d.acao).toBe("bloquear");
-    expect(d).toMatchObject({ motivo: expect.stringContaining("limiar calibrado") });
-  });
-
-  it("abaixo do limiar calibrado, continua só sinalizando", () => {
-    const s = medirManeirismosDoLivro(comPadrao(5))[0];
-    const politica: PoliticaManeirismo = {
-      calibrados: { nao_era_a_era_b: { limiarCapitulos: 9, corpus_hash: "h" } },
-      excecoesDoAutor: [],
-    };
-    expect(decidirManeirismo(s, politica).acao).toBe("sinalizar");
   });
 
   it("exceção de VOZ AUTORAL desliga o padrão sem desligar o detector", () => {
     const sinais = medirManeirismosDoLivro(comPadrao(20));
     const politica: PoliticaManeirismo = {
-      calibrados: { nao_era_a_era_b: { limiarCapitulos: 6, corpus_hash: "h" } },
       excecoesDoAutor: [{ padrao: "nao_era_a_era_b", justificativa: "é a voz da narradora", em: "2026-07-28" }],
     };
     expect(decidirManeirismo(sinais[0], politica).acao).toBe("ignorar");

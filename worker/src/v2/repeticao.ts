@@ -319,20 +319,21 @@ export function medirManeirismosDoLivro(
 export const CAPITULOS_PARA_SINAL = 5;
 
 export interface PoliticaManeirismo {
-  /** Padrões com limiar congelado no contrato versionado e auditado pelo laboratório. */
-  calibrados: Record<string, { limiarCapitulos: number; corpus_hash: string }>;
   /** Exceções de voz autoral: o autor aceitou este padrão nesta obra. */
   excecoesDoAutor: { padrao: string; justificativa: string; em: string }[];
 }
 
 export type DecisaoManeirismo =
   | { acao: "ignorar" }
-  | { acao: "sinalizar"; motivo: string }
-  | { acao: "bloquear"; motivo: string };
+  | { acao: "sinalizar"; motivo: string };
 
 /**
- * Política da camada 3. O default é SINALIZAR — bloquear exige limiar calibrado
- * por humano. Um detector de estilo sem calibração reprova a voz do autor.
+ * Política da camada 3: SINAL PURO. O ramo "bloquear por limiar calibrado" era
+ * código morto em produção (o pipeline sempre passou política vazia) e saiu na
+ * FASE 3 do plano ofício-inteiro (2026-08-05): alimentá-lo exigiria uma fonte
+ * de calibração que hoje não certifica nada, e o bloqueio por frequência
+ * DENTRO do capítulo passou a ser coberto pela régua universal de moldes
+ * (sinais.ts). Cross-capítulo, o detector sinaliza; quem decide é o revisor.
  */
 export function decidirManeirismo(
   sinal: SinalManeirismoLivro,
@@ -343,16 +344,9 @@ export function decidirManeirismo(
     return { acao: "ignorar" };
   }
   if (sinal.capitulos < CAPITULOS_PARA_SINAL) return { acao: "ignorar" };
-  const calibrado = politica.calibrados[sinal.padrao];
-  if (calibrado && sinal.capitulos >= calibrado.limiarCapitulos) {
-    return {
-      acao: "bloquear",
-      motivo: `"${sinal.descricao}" em ${sinal.capitulos} capítulos (limiar calibrado: ${calibrado.limiarCapitulos}, corpus ${calibrado.corpus_hash.slice(0, 12)})`,
-    };
-  }
   return {
     acao: "sinalizar",
-    motivo: `"${sinal.descricao}" em ${sinal.capitulos} capítulos (${sinal.total} ocorrências) — sinal acumulativo, sem limiar calibrado`,
+    motivo: `"${sinal.descricao}" em ${sinal.capitulos} capítulos (${sinal.total} ocorrências) — sinal acumulativo`,
   };
 }
 

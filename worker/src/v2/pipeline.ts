@@ -574,7 +574,7 @@ export async function escreverCapitulo(
     (opts?.anteriores ?? []).map((a) => ({ numero: a.numero, texto: a.trecho }))
   )
     .map((sinal) => {
-      const decisao = decidirManeirismo(sinal, { calibrados: {}, excecoesDoAutor: [] });
+      const decisao = decidirManeirismo(sinal, { excecoesDoAutor: [] });
       return decisao.acao === "sinalizar"
         ? `MANEIRISMO ACUMULADO [${sinal.padrao}]: ${decisao.motivo}; exemplos: ` +
             sinal.ocorrencias.slice(0, 2).map((o) => `cap ${o.capitulo}: "${o.trecho}"`).join(" · ")
@@ -730,7 +730,7 @@ export async function escreverCapitulo(
       { numero: capitulo, texto },
     ])
       .map((sinal) => {
-        const decisao = decidirManeirismo(sinal, { calibrados: {}, excecoesDoAutor: [] });
+        const decisao = decidirManeirismo(sinal, { excecoesDoAutor: [] });
         return decisao.acao === "sinalizar"
           ? `MANEIRISMO ACUMULADO [${sinal.padrao}]: ${decisao.motivo}; exemplos: ` +
               sinal.ocorrencias.slice(0, 3).map((o) => `cap ${o.capitulo}: "${o.trecho}"`).join(" · ")
