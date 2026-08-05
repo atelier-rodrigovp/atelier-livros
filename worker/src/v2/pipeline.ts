@@ -5,7 +5,7 @@
 // Nenhum nome de skill ou de modelo aqui: tudo chega pelo contrato e pelo MapaModelos.
 // hashText (../quality-state.js) é puro — import direto não arrasta .env.
 
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { hashText } from "../quality-state.js";
 import { compilarPacote, type Instrucao, type SecaoContexto } from "./compilador.js";
@@ -242,6 +242,43 @@ function gravarAtomico(caminho: string, conteudo: string): void {
   const tmp = `${caminho}.tmp`;
   writeFileSync(tmp, conteudo, "utf8");
   renameSync(tmp, caminho);
+}
+
+/**
+ * RETENÇÃO (A2 do plano escala-retenção, 2026-08-05): antes de sobrescrever o
+ * capítulo, a versão que está no disco sobrevive em
+ * capitulos-em-revisao/capitulo-NN.pre-<etapa>-<seq>.md — a MESMA convenção da
+ * V1 (livro_runner.py::_reter_pre_edicao), últimas 3 por capítulo+etapa. Sem
+ * isto era impossível saber se o escritor melhorou: só existia o texto depois
+ * de corrigido (0 de 138 updates do canário 2 carregavam texto).
+ * Falha ao reter é AVISO, nunca erro — retenção jamais derruba o fluxo.
+ */
+export function reterVersaoAnterior(caminho: string, capitulo: number, etapa: string, novoConteudo: string): void {
+  try {
+    let atual: string;
+    try {
+      atual = readFileSync(caminho, "utf8");
+    } catch {
+      return; // primeira gravação: nada a reter
+    }
+    if (atual === novoConteudo) return; // regravação idempotente do mesmo texto
+    const dirRevisao = path.join(path.dirname(caminho), "capitulos-em-revisao");
+    mkdirSync(dirRevisao, { recursive: true });
+    const nn = String(capitulo).padStart(2, "0");
+    const prefixo = `capitulo-${nn}.pre-${etapa}-`;
+    const existentes = readdirSync(dirRevisao)
+      .filter((f) => f.startsWith(prefixo) && f.endsWith(".md"))
+      .map((f) => ({ f, seq: Number(f.slice(prefixo.length, -3)) }))
+      .filter((x) => Number.isFinite(x.seq))
+      .sort((a, b) => a.seq - b.seq);
+    const seq = (existentes[existentes.length - 1]?.seq ?? 0) + 1;
+    writeFileSync(path.join(dirRevisao, `${prefixo}${seq}.md`), atual, "utf8");
+    for (const velho of existentes.slice(0, Math.max(0, existentes.length - 2))) {
+      rmSync(path.join(dirRevisao, velho.f), { force: true });
+    }
+  } catch (e) {
+    console.warn(`[v2] retenção falhou (cap ${capitulo}, etapa ${etapa}): ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -614,7 +651,8 @@ export async function escreverCapitulo(
     texto = rEsc.valor;
   }
 
-  const gravarERegistrar = async (t: string): Promise<void> => {
+  const gravarERegistrar = async (t: string, etapa: string = "escrita"): Promise<void> => {
+    reterVersaoAnterior(caminho, capitulo, etapa, t); // A2: a versão anterior sobrevive
     gravarAtomico(caminho, t);
     await deps.gravador.registrarCapituloEscrito(capitulo, caminho, {
       palavras: contarPalavras(t),
@@ -673,7 +711,7 @@ export async function escreverCapitulo(
     });
     runs.push(r.runId);
     texto = r.valor;
-    await gravarERegistrar(texto);
+    await gravarERegistrar(texto, modo); // etapa do arquivo retido = modo da correção
   };
 
   /** Garante gates verdes (1 correção dirigida se falhar); retorna os que sobraram. */

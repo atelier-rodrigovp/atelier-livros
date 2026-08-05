@@ -1,7 +1,7 @@
 // Testes do ciclo por capítulo (pipeline.ts) com DiscoPersistencia + ProvedorMock.
 // As respostas dos papéis são roteirizadas na ordem: arquiteto_cena, contextualizador,
 // escritor, revisor_literario, auditor_factual.
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -284,6 +284,26 @@ describe("escreverCapitulo — correção de gate", () => {
     const estado = await disco.lerEstado("proj-1");
     expect(estado?.doc.capitulos["3"]?.status).toBe("aprovado");
     expect(estado?.doc.capitulos["3"]?.text_hash).toBe(hashText(PROSA_OK));
+  });
+
+  it("A2: a versão pré-correção sobrevive em capitulos-em-revisao (convenção da V1) — a 1ª saída do escritor é recuperável", async () => {
+    provedor.enfileirar("arquiteto_cena", JSON.stringify(ficha()));
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_TRUNCADA);
+    provedor.enfileirar("escritor", PROSA_OK);
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecer()));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    await escreverCapitulo(deps, 3);
+
+    // Identificável por capítulo e etapa: capitulo-03.pre-<etapa>-<seq>.md
+    const dirRevisao = path.join(dir, "manuscrito", "capitulos-em-revisao");
+    expect(existsSync(dirRevisao)).toBe(true);
+    const retidos = readdirSync(dirRevisao).filter((f) => /^capitulo-03\.pre-[a-z]+-\d+\.md$/.test(f));
+    expect(retidos.length).toBeGreaterThanOrEqual(1);
+    // A PRIMEIRA saída do escritor (antes de qualquer correção) está lá, intacta
+    const conteudos = retidos.map((f) => readFileSync(path.join(dirRevisao, f), "utf8"));
+    expect(conteudos).toContain(PROSA_TRUNCADA);
   });
 });
 
