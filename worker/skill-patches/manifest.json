@@ -1,6 +1,6 @@
 {
-  "manifestVersion": "1.0.8",
-  "generatedAt": "2026-07-18T00:00:00.000Z",
+  "manifestVersion": "1.0.9",
+  "generatedAt": "2026-08-05T11:26:08.006Z",
   "compatibility": "Atelier worker 0.1.x",
   "requiredTests": [
     "python tools/test_gate_spec.py",
@@ -22,7 +22,7 @@
     },
     {
       "path": "hoover-mcfadden/references/voz-e-oficio.md",
-      "sha256": "da31faa3b3be10abf51ae98c0b2cc38f75e81b93be2f7fda100f414c3c346ebb"
+      "sha256": "88f6cc2e85c525dc26cc97561a3f7b0088065d677f3cd637c7f7381927c4a1cb"
     },
     {
       "path": "livro-do-zero-ao-epub/assets/livro_runner.py",
