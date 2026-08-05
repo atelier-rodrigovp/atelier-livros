@@ -2,7 +2,13 @@
 // Determinísticos, bloqueantes, válidos para QUALQUER skill — nunca medem gosto.
 // Sinais editoriais ficam em sinais.ts e só bloqueiam via disposição do revisor.
 
-import { detectarRepeticaoCrossCapitulo, entradasLedgerDoCapitulo } from "../maneirismo.js";
+import {
+  contarManeirismos,
+  detectarRepeticaoCrossCapitulo,
+  entradasLedgerDoCapitulo,
+  LIMIAR_NGRAMA_CAP,
+  ngramasSobrerepresentados,
+} from "../maneirismo.js";
 import { detectarRepeticaoLiteral } from "./repeticao.js";
 import type { ResultadoGate, SceneSpec, SkillContract } from "./tipos.js";
 
@@ -66,6 +72,31 @@ export function gateRepeticaoQuaseLiteral(
     passou,
     evidencia: passou ? undefined : evidencias.join(" · "),
   };
+}
+
+/**
+ * AUTO-REPETIÇÃO (classe 1) acima do limiar derivado do acervo — A3 do plano
+ * escala-retenção (2026-08-05). Determinístico e sem gosto: bloqueia só quando
+ * o MESMO molde/n-grama repete num capítulo MAIS do que qualquer um dos 539
+ * capítulos de controle do acervo jamais repetiu (Molde.limiarCap /
+ * LIMIAR_NGRAMA_CAP) — zero marcação no controle por construção. A taxa
+ * absoluta (classe 2) NÃO bloqueia: segue sinal do revisor e é avaliada na
+ * escala do livro (sinais.ts).
+ */
+export function gateAutoRepeticao(texto: string): ResultadoGate {
+  const hits: string[] = [];
+  for (const p of contarManeirismos(texto, undefined, { maxExemplos: 3 }).padroes) {
+    if (p.n > p.limiarCap) {
+      hits.push(`molde ${p.nome}: ${p.n}× no capítulo (limiar do acervo: ${p.limiarCap}); ex.: ${p.exemplos.join(" · ")}`);
+    }
+  }
+  for (const h of ngramasSobrerepresentados(texto)) {
+    if (h.n > LIMIAR_NGRAMA_CAP) {
+      hits.push(`n-grama "${h.gram}": ${h.n}× no capítulo (limiar do acervo: ${LIMIAR_NGRAMA_CAP})`);
+    }
+  }
+  const passou = hits.length === 0;
+  return { gate: "auto_repeticao", passou, evidencia: passou ? undefined : hits.slice(0, 3).join(" · ") };
 }
 
 /**
@@ -170,6 +201,7 @@ export function rodarGatesCapitulo(entrada: {
   if (!artefato.passou) return resultados;
   const texto = entrada.texto as string;
   resultados.push(gateTruncamento(texto));
+  resultados.push(gateAutoRepeticao(texto));
   resultados.push(gatePovImpossivel(texto, entrada.contrato));
   if (entrada.anteriores?.length) resultados.push(gateRepeticaoQuaseLiteral(texto, entrada.anteriores));
   if (entrada.ficha) resultados.push(gateConhecimentoProibido(texto, entrada.ficha));

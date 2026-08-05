@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   gateArtefatoPresente,
+  gateAutoRepeticao,
   gateConhecimentoProibido,
   gatePovImpossivel,
   gateRepeticaoQuaseLiteral,
   gateTruncamento,
+  rodarGatesCapitulo,
   validarSaidaJson,
 } from "./gates.js";
 import { medirSinais } from "./sinais.js";
@@ -135,6 +137,57 @@ describe("gates universais", () => {
     const ruim = validarSaidaJson("não é json", (o) => o);
     expect(ruim.ok).toBe(false);
     if (!ruim.ok) expect(ruim.gate.gate).toBe("fora_do_schema");
+  });
+});
+
+describe("A3 — auto-repetição (classe 1) BLOQUEIA acima do limiar derivado do acervo", () => {
+  const NEUTRAS = [
+    "Ela guardou a chave na gaveta e fechou o escritório antes das seis.",
+    "O ônibus passou cheio e ela decidiu ir a pé pela rua do mercado.",
+    "A vizinha regava as plantas da varanda quando ela cruzou o portão.",
+    "No fim do corredor, a lâmpada piscou duas vezes e se firmou.",
+  ];
+  function capComAntiteses(n: number): string {
+    const nomes = ["medo", "pressa", "frieza", "cuidado", "descanso", "rotina", "cansaço", "raiva", "pena", "culpa", "sono", "fome", "frio"];
+    const blocos = ["## Capítulo 4", ""];
+    for (let i = 0; i < n; i++) {
+      blocos.push(NEUTRAS[i % NEUTRAS.length]);
+      blocos.push(`Não era ${nomes[i]}. Era outra coisa por dentro.`);
+    }
+    blocos.push("Ela apagou a luz e desceu a escada devagar.");
+    return blocos.join("\n\n");
+  }
+
+  it("13× o mesmo molde num capítulo BLOQUEIA (não só sinaliza), com evidência citável", () => {
+    const r = gateAutoRepeticao(capComAntiteses(13));
+    expect(r.gate).toBe("auto_repeticao");
+    expect(r.passou).toBe(false);
+    expect(r.evidencia).toContain("não era X. Era Y.");
+    expect(r.evidencia).toContain("13");
+  });
+
+  it("logo abaixo do limiar (7×, o teto do acervo aprovado) PASSA", () => {
+    expect(gateAutoRepeticao(capComAntiteses(7)).passou).toBe(true);
+  });
+
+  it("o gate roda nos gates universais do capítulo", () => {
+    const falhos = rodarGatesCapitulo({ texto: capComAntiteses(13), contrato: base }).filter((g) => !g.passou);
+    expect(falhos.map((g) => g.gate)).toContain("auto_repeticao");
+  });
+
+  it("n-grama repetido além do máximo do acervo (13) bloqueia; no teto passa", () => {
+    const frase = "Ela anotou o recado na borda vermelha do caderno.";
+    const varia = (i: number) => `${NEUTRAS[i % NEUTRAS.length]}`;
+    const monta = (vezes: number) => {
+      const blocos = ["## Capítulo 4", ""];
+      for (let i = 0; i < vezes; i++) {
+        blocos.push(varia(i));
+        blocos.push(frase);
+      }
+      return blocos.join("\n\n");
+    };
+    expect(gateAutoRepeticao(monta(14)).passou).toBe(false);
+    expect(gateAutoRepeticao(monta(13)).passou).toBe(true);
   });
 });
 
