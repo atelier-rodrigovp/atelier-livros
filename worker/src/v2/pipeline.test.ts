@@ -498,6 +498,36 @@ describe("escreverCapitulo — docs factuais no pacote", () => {
   });
 });
 
+describe("escreverCapitulo — ofício da skill no pacote", () => {
+  it("o escritor E o revisor literário recebem o MESMO ofício verbatim; papéis de fatos não", async () => {
+    deps.oficio = {
+      skillId: "teste",
+      texto: "A frase-sanfona é defeito mesmo atravessando o ponto final. Diga uma vez, a melhor.",
+      hash: "h-oficio",
+    };
+    provedor.enfileirar("arquiteto_cena", JSON.stringify(ficha()));
+    provedor.enfileirar("contextualizador", CTX_OK);
+    provedor.enfileirar("escritor", PROSA_OK);
+    provedor.enfileirar("revisor_literario", JSON.stringify(parecer()));
+    provedor.enfileirar("auditor_factual", AUDITOR_LIMPO);
+
+    const r = await escreverCapitulo(deps, 3);
+    expect(r.status).toBe("aprovado");
+
+    const prompt = (papel: string) => provedor.chamadas.find((c) => c.papel === papel)?.prompt ?? "";
+    // escritor e revisor julgam pelo MESMO documento — a divergência entre o que
+    // se escreve e o que se cobra é o que este mecanismo existe para matar.
+    expect(prompt("escritor")).toContain("OFÍCIO DA SKILL (teste)");
+    expect(prompt("escritor")).toContain("A frase-sanfona é defeito mesmo atravessando o ponto final.");
+    expect(prompt("revisor_literario")).toContain("OFÍCIO DA SKILL (teste)");
+    expect(prompt("revisor_literario")).toContain("A frase-sanfona é defeito mesmo atravessando o ponto final.");
+    // papéis de fatos/planejamento não carregam o ofício (custo e foco)
+    expect(prompt("arquiteto_cena")).not.toContain("OFÍCIO DA SKILL");
+    expect(prompt("contextualizador")).not.toContain("OFÍCIO DA SKILL");
+    expect(prompt("auditor_factual")).not.toContain("OFÍCIO DA SKILL");
+  });
+});
+
 describe("escreverCapitulo — reescrita dirigida (meta-nota)", () => {
   it("usa fichaExistente + textoBase; pula arquiteto e escrita inicial; 1ª chamada do escritor é a correção em modo reescrita", async () => {
     provedor.enfileirar("contextualizador", CTX_OK);

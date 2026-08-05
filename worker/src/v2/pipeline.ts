@@ -68,6 +68,10 @@ export interface DepsPipeline {
   mapa: MapaModelos;
   contrato: ContratoCompilado;
   perfil: { texto: string; skillId: string; hash: string; validado: boolean };
+  /** Ofício da skill (SKILL.md + references, verbatim) — entra no pacote do
+   *  escritor E do revisor literário (o MESMO texto para os dois; documentos
+   *  diferentes reintroduziriam a divergência escritor×revisor). */
+  oficio?: { skillId: string; texto: string; hash: string };
   dirManuscrito: string; // onde capitulo-NN.md é escrito (pelo PIPELINE, não pelo modelo)
   projectId: string;
   editionId?: string | null;
@@ -583,6 +587,7 @@ export async function escreverCapitulo(
   // 3. ESCRITA (escritor) — o PIPELINE grava o arquivo, nunca o modelo
   // -------------------------------------------------------------------------
   const compEsc = compilar("escritor", alvoCap, {
+    oficio: deps.oficio,
     ficha,
     fatos: [...secMapa, ...secEstruturaCap, ...fatos, ...secCorrecao],
     trechosAnteriores: opts?.trechosAnteriores,
@@ -746,6 +751,7 @@ export async function escreverCapitulo(
     const secaoTexto: SecaoContexto = { titulo: "TEXTO A AVALIAR", texto, fonte: "manuscrito" };
 
     const compRev = compilar("revisor_literario", alvoCap, {
+      oficio: deps.oficio,
       ficha,
       fatos: [...secoesJulgamento, ...secLedger, ...docsFactuais, ...fatos, secaoTexto],
       repeticoesRecentes: repeticoesParaJulgamento,

@@ -9,7 +9,7 @@ import { hashText } from "../quality-state.js";
 import type { Job } from "../jobs.js"; // import type: não executa jobs.ts
 import { Gravador } from "./gravador.js";
 import { criarPersistencia, type PersistenciaV2 } from "./persistencia.js";
-import { carregarContrato, MAPA_SKILL_V1_V2 } from "./contrato.js";
+import { carregarContrato, lerOficioSkill, MAPA_SKILL_V1_V2 } from "./contrato.js";
 import { escreverCapitulo, type DepsPipeline } from "./pipeline.js";
 import { mapaModelosDoAmbiente } from "./config.js";
 import { ProvedorClaudeCli, type ProvedorModelo } from "./provedor.js";
@@ -419,6 +419,9 @@ async function prepararProjetoV2(job: Job, operacao: OperacaoV2 = "escrita"): Pr
   const skillV1 = (proj as { skill_escrita?: string }).skill_escrita ?? "";
   const skillId = MAPA_SKILL_V1_V2[skillV1] ?? skillV1;
   const contrato = carregarContrato(skillId); // skill desconhecida/contrato inválido = falha clara AQUI, antes do escritor
+  // Ofício da skill (SKILL.md + references verbatim): ausente = erro de
+  // configuração AQUI, antes do escritor — mesma política do contrato.
+  const oficio = lerOficioSkill(contrato.contrato.id);
   const release = exigirReleaseAtual(contrato.contrato.id, projectId, await lerAutorizacaoProjeto(projectId), operacao);
 
   const dirProjeto = projDir(projectId);
@@ -521,6 +524,7 @@ async function prepararProjetoV2(job: Job, operacao: OperacaoV2 = "escrita"): Pr
     mapa: mapaModelosDoAmbiente(),
     contrato,
     perfil: { texto: perfilTexto, skillId: contrato.contrato.id, hash: hashJsonCanonico(perfilTexto), validado: true },
+    oficio: { skillId: oficio.skillId, texto: oficio.texto, hash: oficio.hash },
     dirManuscrito: path.join(dirProjeto, "manuscrito"),
     projectId,
     editionId,
