@@ -53,3 +53,29 @@ __pycache__/
 # O template vazio fica versionado; o arquivo respondido, nao.
 calibracao-humana/*.local.csv
 calibracao-humana/rotulos-pendentes.csv
+
+# Area temporaria da auditoria: pacotes .tgz do repo inteiro (com o .git dentro)
+# e copias de checks/meta. Nao e fonte — os scripts e o historico ficam.
+.auditorias/tmp/
+
+# Logs do worker com sufixo (worker.log.1 da rotacao, .v1-legado, .log.err):
+# a regra "*.log" acima nao pega nada com sufixo depois do .log
+worker.log.*
+*.log.err
+
+# Copias .bak de scripts do autostart. A versao anterior ja vive no git —
+# manter uma segunda copia versionada e historico duplicado.
+*.v1.bak.*
+
+# Lancador gerado pelo instalar-autostart.ps1 (recriado a cada instalacao,
+# com o caminho absoluto DESTA maquina dentro)
+worker/autostart/worker-hidden.vbs
+
+# Sentinela do disjuntor do wrapper. E estado DESTA maquina: commitado, faria
+# o autostart se recusar a subir em qualquer checkout que o recebesse.
+worker/worker.STOPPED
+
+# Prints e capturas de tela soltos na raiz
+/*.jpeg
+/*.jpg
+/*.png
